@@ -1,0 +1,24 @@
+// Differ's changes to Zed's default settings (assets/settings/default.json).
+// Differ deep-merges this file over Zed's defaults at startup, so user
+// settings still take precedence.
+{
+  // Never send usage data or crash reports to Zed.
+  "telemetry": {
+    "diagnostics": false,
+    "metrics": false
+  },
+  // Differ doesn't use Zed's hosted AI, agent panel, or edit predictions.
+  "disable_ai": true,
+  // Differ doesn't use Zed's updater, which would download Zed releases.
+  "auto_update": false,
+  // Differ makes no requests to zed.dev, so it doesn't use Zed's extension
+  // registry (and doesn't start Zed's extension host). These keep the registry
+  // off if the extension host is ever initialized. This file merges into Zed's
+  // defaults, so `{}` would keep Zed's auto-installs; each one is turned off by
+  // name instead.
+  "auto_install_extensions": {
+    "html": false
+  },
+  "suggest_extensions": false,
+  "window_title_format": "Differ"
+}
