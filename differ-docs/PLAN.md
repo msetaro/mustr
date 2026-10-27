@@ -419,6 +419,7 @@ Sizes assume **one experienced developer working full-time**.
 
 ### Later
 One line each, roughly in priority order:
+- **A Differ extension registry:** build extensions from the open-source `zed-industries/extensions` repo (each under its own license) and publish them on GitHub Releases, since Zed's own registry is off (§18).
 - **The review trust level:** sandboxed language servers with safe per-language presets, so PR checkouts get IntelliSense without full trust (Appendix A).
 - **Review assistants:** inline "is this right?" asks, PR chat, and proposed comments. T3 already has `pullRequests.reviewGuide`, `generateReviewGuide`, and an orchestrator MCP, so check what they cover before building anything.
 - **Restyling Zed's shared UI** (menus, pickers, hover popover, icons) through configurable theme options proposed upstream, or small tracked patches if upstream declines.
@@ -472,12 +473,15 @@ One line each, roughly in priority order:
 1. **Name:** Differ.
 2. **License:** GPL-3.0-or-later.
 3. **Base:** a soft fork of Zed as the UI, and an unmodified T3 Code server as the backend (§2).
+4. **Zed channel:** stable releases. On 2026-10-27, `main` was recreated on Zed v1.25.3; `script/differ-sync-zed` follows each new stable tag (`differ-docs/SYNC.md`).
+5. **Agent instructions:** `CLAUDE.md` and `AGENTS.md` point to `differ-docs/AGENTS.md`, which keeps Zed's Rust and GPUI rules and drops the parts written for Zed's own repository.
+6. **Zed's extension registry is off.** Zed's terms (§2.4) forbid accessing non-public APIs of Zed's service, so Differ makes no requests to zed.dev at all. v0.1 relies on Zed's built-in languages. A Differ registry built from the open-source extensions repo is Later.
+7. **App identity:** app ID `dev.differ.Differ`, URL scheme `differ://`, and a placeholder icon until a real one exists.
+8. **M0 started** on 2026-10-27, solo.
 
 **Open**
-1. **Team and timeline:** solo or a small team, and when M0 starts.
-2. **Which Zed channel to track:** stable is recommended. Preview warns of breaks earlier but churns more.
-3. **When T3 Code is installed,** whether Differ pairs with it (shared threads; the recommended default) or always runs its own pinned runtime (predictable versions).
-4. **Zed's git commit and push UI:** hidden by default (recommended, since Differ is review-first) or visible.
+1. **When T3 Code is installed,** whether Differ pairs with it (shared threads; the recommended default) or always runs its own pinned runtime (predictable versions).
+2. **Zed's git commit and push UI:** hidden by default (recommended, since Differ is review-first) or visible.
 
 ---
 
