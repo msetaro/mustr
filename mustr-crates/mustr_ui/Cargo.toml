@@ -1,0 +1,28 @@
+[package]
+name = "mustr_ui"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+license = "GPL-3.0-or-later"
+description = "mustr's look: the mustr theme family, design tokens, and (later) shared components"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/mustr_ui.rs"
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+gpui.workspace = true
+log.workspace = true
+theme.workspace = true
+theme_settings.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+serde_json.workspace = true
+settings = { workspace = true, features = ["test-support"] }
+theme = { workspace = true, features = ["test-support"] }
+theme_settings = { workspace = true, features = ["test-support"] }

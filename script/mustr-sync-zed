@@ -1,0 +1,430 @@
+#!/usr/bin/env bash
+# mustr-sync-zed: merge a Zed stable release tag into a sync branch.
+#
+# Draft of script/mustr-sync-zed for msetaro/differ. Runbook: SYNC.md.
+#
+# Why this is not a plain `git merge`: Zed's stable tags (vX.Y.Z) sit on release
+# branches (v1.25.x, ...) made of cherry-picks and version bumps, so merging one
+# tag after another conflicts inside Zed's crates (crates/zed/Cargo.toml version,
+# Cargo.lock, cherry-picked hunks) even though mustr never edits them. Since
+# mustr's rule is "zero edits to Zed's files", the correct result is known in
+# advance: every Zed-owned path equals the tag, mustr's own paths and touch
+# points stay mustr's. The script merges (two parents, so history and
+# contributors' branches stay valid), then writes exactly that tree and checks it.
+#
+# Compatible with bash 3.2 (macOS /bin/bash). Needs git >= 2.38.
+set -euo pipefail
+
+# ---------------------------------------------------------------- config ----
+UPSTREAM_REMOTE=upstream
+UPSTREAM_URL_RE='github\.com[:/]zed-industries/zed(\.git)?/?$'
+UPSTREAM_GH_REPO=zed-industries/zed
+TAG_NS=refs/upstream-tags            # Zed tags live here, never in refs/tags (so `git push --tags` can't leak them)
+STABLE_RE='^v[0-9]+\.[0-9]+\.[0-9]+$' # stable: v1.25.3 ; preview: v1.26.2-pre ; nightly: moving tag "nightly"
+PIN_FILE=mustr-docs/ZED_VERSION
+# Paths only mustr writes. Upstream must never contain them.
+MUSTR_OWNED=(mustr-crates mustr-docs assets/themes/mustr 'script/mustr-*' '.github/workflows/mustr-*' THIRD_PARTY_NOTICES.md)
+# Touch points where mustr's version wins outright.
+OURS_TOUCH_POINTS=(README.md .github/FUNDING.yml CLAUDE.md AGENTS.md)
+# Touch points rebuilt from Zed's version: Cargo.toml gets mustr's diff re-applied,
+# Cargo.lock gets mustr's crates added by cargo.
+PATCH_TOUCH_POINT=Cargo.toml
+LOCK_TOUCH_POINT=Cargo.lock
+
+# ------------------------------------------------------------------ args ----
+TAG="" BASE=main REPO="" DRY_RUN=0 REBASELINE=0 NO_BUILD=0
+usage() {
+  cat <<'EOF'
+Usage: mustr-sync-zed [options]
+  --tag vX.Y.Z    Merge this stable tag (default: latest published Zed stable release)
+  --base BRANCH   Branch to sync (default: main)
+  --repo PATH     mustr checkout (default: the git toplevel of $PWD)
+  --dry-run       Find the tag and predict conflicts with `git merge-tree`.
+                  Only fetches refs; no branch, index or worktree changes.
+  --rebaseline    Allow the first sync from untagged Zed main (or any version
+                  downgrade): Zed-owned files become exactly the tag.
+  --no-build      Skip cargo build/test
+  -h, --help
+Exit codes: 0 merged / already up to date / dry run
+            1 usage or preflight error (nothing changed)
+            2 stop and ask the human (nothing changed, or see message)
+            3 build or tests failed (merge commit is on the sync branch)
+            4 invariant violated: Zed-owned files differ from the tag
+EOF
+}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tag) TAG="${2:?}"; shift 2 ;;
+    --base) BASE="${2:?}"; shift 2 ;;
+    --repo) REPO="${2:?}"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --rebaseline) REBASELINE=1; shift ;;
+    --no-build) NO_BUILD=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
+  esac
+done
+
+# --------------------------------------------------------------- helpers ----
+log() { printf '[mustr-sync-zed] %s\n' "$*" >&2; }
+SUMMARY=""
+note() { SUMMARY="${SUMMARY}$1: $2"$'\n'; }
+STATE=init ORIG_REF="" CREATED_BRANCH=0 SYNC_BRANCH=""
+die() {
+  local code="$1"; shift
+  log "STOP ($code): $*"
+  note result "stopped (exit $code)"; note reason "$*"
+  exit "$code"
+}
+on_exit() {
+  local rc=$?
+  if [ "$rc" -ne 0 ] && [ "$STATE" = merging ]; then
+    log "cleaning up: aborting the merge and restoring $ORIG_REF"
+    git merge --abort >/dev/null 2>&1 || git reset -q --merge >/dev/null 2>&1 || true
+    git switch -q "$ORIG_REF" >/dev/null 2>&1 || git checkout -q "$ORIG_REF" >/dev/null 2>&1 || true
+    if [ "$CREATED_BRANCH" = 1 ]; then git branch -q -D "$SYNC_BRANCH" >/dev/null 2>&1 || true; fi
+  fi
+  printf '\n==== mustr-sync-zed summary ====\n%s=================================\n' "$SUMMARY"
+  exit "$rc"
+}
+trap on_exit EXIT
+
+ps_top()  { local p; for p in "$@"; do printf ':(top)%s\n' "$p"; done; }
+ps_excl() { local p; for p in "$@"; do printf ':(top,exclude)%s\n' "$p"; done; }
+# Read lines into a named array (bash 3.2 has no mapfile).
+read_lines() { local __n="$1" __l; eval "$__n=()"; while IFS= read -r __l; do [ -n "$__l" ] && eval "$__n+=(\"\$__l\")"; done; }
+# Sort X.Y.Z versions ascending (portable; no `sort -V`).
+vsort() { sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | sed 's/^/v/'; }
+ver_lt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | vsort | head -1)" = "$1" ]; }
+in_list() { local x="$1" y; shift; for y in "$@"; do [ "$x" = "$y" ] && return 0; done; return 1; }
+is_touch_point() { in_list "$1" "${OURS_TOUCH_POINTS[@]}" "$PATCH_TOUCH_POINT" "$LOCK_TOUCH_POINT"; }
+is_mustr_owned() {
+  local p="$1" o
+  for o in "${MUSTR_OWNED[@]}"; do
+    # shellcheck disable=SC2254
+    case "$p" in $o|$o/*) return 0 ;; esac
+  done
+  return 1
+}
+
+# Pathspec for "every Zed-owned path" (everything except mustr's paths and touch points).
+read_lines ZED_PS < <(printf ':/\n'; ps_excl "${MUSTR_OWNED[@]}" "${OURS_TOUCH_POINTS[@]}" "$PATCH_TOUCH_POINT" "$LOCK_TOUCH_POINT")
+# Same, but including the two rebuilt touch points (these are restored from the tag first).
+read_lines RESTORE_PS < <(printf ':/\n'; ps_excl "${MUSTR_OWNED[@]}" "${OURS_TOUCH_POINTS[@]}")
+read_lines OWNED_PS < <(ps_top "${MUSTR_OWNED[@]}")
+
+# ------------------------------------------------------------- preflight ----
+if [ -n "$REPO" ]; then cd "$REPO"; fi
+cd "$(git rev-parse --show-toplevel 2>/dev/null)" || die 1 "not inside a git repository"
+note repo "$(pwd)"
+GIT_DIR_ABS="$(cd "$(git rev-parse --git-dir)" && pwd)"
+read -r GMAJ GMIN <<EOF
+$(git version | sed -E 's/^git version ([0-9]+)\.([0-9]+).*/\1 \2/')
+EOF
+if [ "$GMAJ" -lt 2 ] || { [ "$GMAJ" -eq 2 ] && [ "$GMIN" -lt 38 ]; }; then die 1 "git >= 2.38 required (merge-tree --write-tree)"; fi
+[ ! -e "$GIT_DIR_ABS/MERGE_HEAD" ] || die 1 "a merge is already in progress; finish or abort it first"
+if [ "$DRY_RUN" = 0 ] && [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+  die 1 "working tree is not clean (commit, stash or remove untracked files first)"
+fi
+url="$(git remote get-url "$UPSTREAM_REMOTE" 2>/dev/null)" || die 1 "no '$UPSTREAM_REMOTE' remote. Fix: git remote add upstream https://github.com/zed-industries/zed.git && git remote set-url --push upstream no-pushing-to-zed"
+printf '%s' "$url" | grep -Eq "$UPSTREAM_URL_RE" || die 1 "'$UPSTREAM_REMOTE' points at $url, not zed-industries/zed"
+case "$(git remote get-url --push "$UPSTREAM_REMOTE")" in
+  *zed-industries*) die 1 "pushing to '$UPSTREAM_REMOTE' is not disabled. Fix: git remote set-url --push upstream no-pushing-to-zed" ;;
+esac
+git rev-parse -q --verify "refs/heads/$BASE" >/dev/null || die 1 "base branch '$BASE' does not exist"
+ORIG_REF="$(git symbolic-ref -q --short HEAD || git rev-parse HEAD)"
+
+# ------------------------------------------------------- 1. resolve tag ----
+log "listing Zed tags on $UPSTREAM_REMOTE"
+read_lines STABLE < <(git ls-remote --tags --refs "$UPSTREAM_REMOTE" 'v*' \
+  | awk '{sub("^refs/tags/", "", $2); print $2}' | grep -E "$STABLE_RE" | vsort)
+[ "${#STABLE[@]}" -gt 0 ] || die 1 "no stable tags found on $UPSTREAM_REMOTE"
+NEWEST_TAG="${STABLE[${#STABLE[@]}-1]}"
+GH_LATEST=""
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  GH_LATEST="$(gh api "repos/$UPSTREAM_GH_REPO/releases/latest" --jq .tag_name 2>/dev/null || true)"
+fi
+if [ -z "$TAG" ]; then
+  if [ -n "$GH_LATEST" ] && printf '%s' "$GH_LATEST" | grep -Eq "$STABLE_RE"; then
+    TAG="$GH_LATEST"
+    [ "$GH_LATEST" = "$NEWEST_TAG" ] || log "note: newest stable tag $NEWEST_TAG has no published release yet; using $GH_LATEST"
+  else
+    TAG="$NEWEST_TAG"
+    log "note: gh unavailable; using newest stable tag without checking that its release is published"
+  fi
+fi
+printf '%s' "$TAG" | grep -Eq "$STABLE_RE" || die 1 "'$TAG' is not a stable tag (expected vX.Y.Z; -pre tags are previews)"
+in_list "$TAG" "${STABLE[@]}" || die 1 "tag $TAG not found on $UPSTREAM_REMOTE"
+TAG_REF="$TAG_NS/$TAG"
+SYNC_BRANCH="sync/zed-$TAG"
+
+fetch_tag() { # $1 = tag
+  git rev-parse -q --verify "$TAG_NS/$1^{commit}" >/dev/null && return 0
+  log "fetching Zed $1 -> $TAG_NS/$1"
+  git fetch -q --no-tags "$UPSTREAM_REMOTE" "+refs/tags/$1:$TAG_NS/$1"
+}
+fetch_tag "$TAG"
+TAG_SHA="$(git rev-parse "$TAG_REF^{commit}")"
+note tag "$TAG ($(git rev-parse --short "$TAG_SHA"))${GH_LATEST:+, GitHub latest release: $GH_LATEST}"
+
+# --------------------------------------------------- 2. find current base ----
+PIN=""
+if git cat-file -e "$BASE:$PIN_FILE" 2>/dev/null; then PIN="$(git show "$BASE:$PIN_FILE" | tr -d '[:space:]')"; fi
+BOOTSTRAP=0
+if [ -n "$PIN" ]; then
+  fetch_tag "$PIN"
+  OLD_BASE="$(git rev-parse "$TAG_NS/$PIN^{commit}")"
+  git merge-base --is-ancestor "$OLD_BASE" "$BASE" || die 4 "$PIN_FILE says $PIN, but $PIN is not merged into $BASE"
+  OLD_DESC="$PIN"
+  if [ "$PIN" = "$TAG" ]; then
+    note result "up to date ($BASE is already on $TAG)"; exit 0
+  fi
+  if ver_lt "$TAG" "$PIN" && [ "$REBASELINE" = 0 ]; then
+    die 2 "$TAG is older than the current base $PIN (pass --rebaseline to downgrade on purpose)"
+  fi
+else
+  # No pin yet: mustr's base is a Zed main commit (the state right after forking).
+  git fetch -q --no-tags "$UPSTREAM_REMOTE" "+refs/heads/main:refs/remotes/$UPSTREAM_REMOTE/main"
+  OLD_BASE="$(git merge-base "$BASE" "refs/remotes/$UPSTREAM_REMOTE/main" 2>/dev/null)" \
+    || die 1 "cannot find where $BASE forked from Zed main (no $PIN_FILE either)"
+  BOOTSTRAP=1
+  OLD_DESC="Zed main @ $(git rev-parse --short "$OLD_BASE") (no $PIN_FILE)"
+  if git merge-base --is-ancestor "$TAG_SHA" "$BASE"; then
+    die 2 "$TAG is already an ancestor of $BASE but $PIN_FILE is missing; write the pin by hand"
+  fi
+fi
+note previous_base "$OLD_DESC"
+OLD_ZED_VER="$(git show "$BASE:crates/zed/Cargo.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)"
+NEW_ZED_VER="$(git show "$TAG_REF:crates/zed/Cargo.toml" | sed -n 's/^version = "\(.*\)"/\1/p' | head -1)"
+note zed_version "$OLD_ZED_VER -> $NEW_ZED_VER"
+
+# Invariant on the base: mustr must not have edited Zed-owned files, or the
+# deterministic resolution below would silently drop those edits.
+read_lines DRIFT < <(git diff --name-only "$OLD_BASE" "$BASE" -- "${ZED_PS[@]}")
+if [ "${#DRIFT[@]}" -gt 0 ]; then
+  printf '  %s\n' "${DRIFT[@]}" >&2
+  die 4 "$BASE edits ${#DRIFT[@]} Zed-owned file(s) (listed above). Move the change into mustr-crates/, or ask the human to make it a touch point"
+fi
+# Upstream must never ship files in mustr's paths.
+read_lines CLASH < <(git ls-tree -r --name-only "$TAG_REF" -- "${OWNED_PS[@]}")
+if [ "${#CLASH[@]}" -gt 0 ]; then
+  printf '  %s\n' "${CLASH[@]}" >&2
+  die 2 "Zed $TAG contains files under mustr-owned paths (listed above); rename mustr's paths, ask the human"
+fi
+NEEDS_REBASELINE=0
+[ "$BOOTSTRAP" = 1 ] && [ "$REBASELINE" = 0 ] && NEEDS_REBASELINE=1
+SYNC_DONE=0 # a previous run (already approved) left a complete sync branch
+if git rev-parse -q --verify "refs/heads/$SYNC_BRANCH" >/dev/null \
+   && git merge-base --is-ancestor "$TAG_SHA" "$SYNC_BRANCH" && git merge-base --is-ancestor "$BASE" "$SYNC_BRANCH"; then
+  SYNC_DONE=1
+fi
+if [ "$NEEDS_REBASELINE" = 1 ] && [ "$DRY_RUN" = 0 ] && [ "$SYNC_DONE" = 0 ]; then
+  die 2 "first sync: $BASE is based on untagged Zed main ($OLD_ZED_VER), not a stable tag. Re-run with --rebaseline to move Zed-owned files to $TAG ($NEW_ZED_VER), or rebaseline by hand (SYNC.md, 'First sync'). Ask the human first"
+fi
+
+classify() { # reads paths on stdin; sets C_TOUCH C_ZED C_OWNED
+  C_TOUCH=() C_ZED=() C_OWNED=()
+  local p
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    if is_mustr_owned "$p"; then C_OWNED+=("$p")
+    elif is_touch_point "$p"; then C_TOUCH+=("$p")
+    else C_ZED+=("$p"); fi
+  done
+}
+report_conflicts() {
+  note natural_conflicts "$(( ${#C_TOUCH[@]} + ${#C_ZED[@]} + ${#C_OWNED[@]} )) (touch points: ${#C_TOUCH[@]}, Zed-owned auto-resolved to $TAG: ${#C_ZED[@]}, mustr-owned: ${#C_OWNED[@]})"
+  local p
+  for p in ${C_TOUCH[@]+"${C_TOUCH[@]}"}; do note "  touch point" "$p"; done
+  for p in ${C_ZED[@]+"${C_ZED[@]}"}; do note "  zed-owned" "$p"; done
+  for p in ${C_OWNED[@]+"${C_OWNED[@]}"}; do note "  MUSTR-OWNED" "$p"; done
+}
+
+# ------------------------------------------------------------ dry run ----
+if [ "$DRY_RUN" = 1 ]; then
+  set +e; MT="$(git merge-tree --write-tree --name-only --no-messages "$BASE" "$TAG_REF")"; rc=$?; set -e
+  [ "$rc" -le 1 ] || die 1 "git merge-tree failed ($rc)"
+  classify < <(printf '%s\n' "$MT" | tail -n +2)
+  report_conflicts
+  note branch "would create $SYNC_BRANCH from $BASE"
+  [ "$NEEDS_REBASELINE" = 0 ] || note needs_rebaseline "yes: base is untagged Zed main; a real run needs --rebaseline (ask the human)"
+  note result "dry run (no branch, index or worktree changes)"
+  exit 0
+fi
+
+# ------------------------------------------------- 3. branch and merge ----
+ALREADY=0
+if git rev-parse -q --verify "refs/heads/$SYNC_BRANCH" >/dev/null; then
+  git merge-base --is-ancestor "$TAG_SHA" "$SYNC_BRANCH" \
+    || die 2 "branch $SYNC_BRANCH exists but does not contain $TAG. If it is stale: git branch -D $SYNC_BRANCH"
+  git merge-base --is-ancestor "$BASE" "$SYNC_BRANCH" \
+    || die 2 "branch $SYNC_BRANCH was made from an older $BASE ($BASE moved since). If nobody pushed work to it: git branch -D $SYNC_BRANCH, then re-run"
+  log "$SYNC_BRANCH already contains $TAG; re-running checks and build"
+  git switch -q "$SYNC_BRANCH"; ALREADY=1
+  note merge "already done on $SYNC_BRANCH"
+else
+  git switch -q -c "$SYNC_BRANCH" "$BASE"; CREATED_BRANCH=1
+  STATE=merging
+  log "merging $TAG into $SYNC_BRANCH"
+  set +e; git merge --no-ff --no-commit "$TAG_REF" >"$GIT_DIR_ABS/mustr-sync-merge.log" 2>&1; set -e
+  [ -e "$GIT_DIR_ABS/MERGE_HEAD" ] || { cat "$GIT_DIR_ABS/mustr-sync-merge.log" >&2; die 1 "git merge failed to start"; }
+  classify < <(git diff --name-only --diff-filter=U)
+  report_conflicts
+  [ "${#C_OWNED[@]}" -eq 0 ] || die 2 "conflicts in mustr-owned paths; upstream should never touch them"
+
+  # 3a. Zed-owned paths (plus Cargo.toml/Cargo.lock) := the tag. Removes files the tag doesn't have.
+  git restore --source="$TAG_REF" --staged --worktree -- "${RESTORE_PS[@]}"
+  # 3b. Touch points where mustr wins.
+  for p in "${OURS_TOUCH_POINTS[@]}"; do
+    if git cat-file -e "HEAD:$p" 2>/dev/null; then
+      git restore --source=HEAD --staged --worktree -- ":(top,literal)$p"
+    elif [ -n "$(git ls-files --stage -- ":(top,literal)$p")" ]; then
+      git rm -q -f -- ":(top,literal)$p"   # mustr deleted it; keep it deleted
+    fi
+  done
+  # 3c. Cargo.toml := Zed's + mustr's diff (e.g. the "mustr-crates/*" members line).
+  PATCH="$GIT_DIR_ABS/mustr-sync-cargo-toml.patch"
+  git diff "$OLD_BASE" "$BASE" -- "$PATCH_TOUCH_POINT" >"$PATCH"
+  if [ -s "$PATCH" ]; then
+    if ! git apply --index "$PATCH" 2>/dev/null && ! git apply --index -C1 "$PATCH" 2>/dev/null; then
+      # Fallback for the expected change (one pure-addition hunk holding the
+      # "mustr-crates/*" members entry, maybe with comment lines): insert the
+      # added lines right after `members = [`. Placement differs; meaning doesn't.
+      if [ "$(grep -c '^@@' "$PATCH")" = 1 ] && [ "$(grep -c '^-\([^-]\|$\)' "$PATCH")" = 0 ] \
+         && grep -q '^+ *"mustr-crates/' "$PATCH" \
+         && [ -z "$(grep '^+' "$PATCH" | grep -v '^+++' | grep -vE '^\+ *("mustr-crates/[^"]*",?)? *(#.*)?$')" ]; then
+        grep '^+' "$PATCH" | grep -v '^+++' | sed 's/^+//' >"$GIT_DIR_ABS/mustr-sync-members-block"
+        awk -v f="$GIT_DIR_ABS/mustr-sync-members-block" '{print} !done && /^members = \[/ {while ((getline l < f) > 0) print l; done=1}' Cargo.toml >Cargo.toml.mustr-tmp
+        mv Cargo.toml.mustr-tmp Cargo.toml; git add Cargo.toml
+        log "note: re-added mustr's members block after 'members = [' (patch context no longer matched)"
+      else
+        cp "$PATCH" "$GIT_DIR_ABS/mustr-sync-cargo-toml.rejected.patch"
+        die 2 "could not re-apply mustr's Cargo.toml changes onto Zed's (saved: .git/mustr-sync-cargo-toml.rejected.patch)"
+      fi
+    fi
+  fi
+  # 3d. Pin.
+  mkdir -p "$(dirname "$PIN_FILE")"; printf '%s\n' "$TAG" >"$PIN_FILE"; git add -- "$PIN_FILE"
+fi
+
+# ------------------------------------------------------ 4. invariants ----
+if [ "$ALREADY" = 0 ]; then
+  read_lines BAD < <(git diff --cached --name-only "$TAG_REF" -- "${ZED_PS[@]}")
+  if [ "${#BAD[@]}" -gt 0 ]; then printf '  %s\n' "${BAD[@]}" >&2; die 4 "after resolution these Zed-owned files still mustr from $TAG"; fi
+  # Cargo.toml: only mustr's own +/- lines may mustr from the tag.
+  want="$(git diff "$OLD_BASE" "$BASE" -- Cargo.toml | grep -E '^[+-][^+-]' | sort || true)"
+  have="$(git diff --cached "$TAG_REF" -- Cargo.toml | grep -E '^[+-][^+-]' | sort || true)"
+  [ "$want" = "$have" ] || die 4 "Cargo.toml differs from $TAG by more than mustr's own lines"
+  read_lines BAD < <(git diff --cached --name-only HEAD -- "${OWNED_PS[@]}" | grep -vx "$PIN_FILE" || true)
+  [ "${#BAD[@]}" -eq 0 ] || die 4 "mustr-owned files changed during the merge: ${BAD[*]}"
+  note invariant "OK (Zed-owned files == $TAG; mustr paths and touch points kept)"
+else
+  read_lines BAD < <(git diff --name-only "$TAG_REF" HEAD -- "${ZED_PS[@]}")
+  [ "${#BAD[@]}" -eq 0 ] || die 4 "$SYNC_BRANCH: Zed-owned files differ from $TAG: ${BAD[*]}"
+  note invariant "OK on existing $SYNC_BRANCH"
+fi
+
+# ---------------------------------------------- 5. Cargo.lock refresh ----
+read_lines MUSTR_CRATES < <(for m in mustr-crates/*/Cargo.toml; do [ -f "$m" ] && sed -n 's/^name = "\(.*\)"/\1/p' "$m" | head -1; done)
+HAVE_CARGO=0; command -v cargo >/dev/null 2>&1 && HAVE_CARGO=1
+LOCK_NOTE="Zed's Cargo.lock as-is (no mustr crates yet)"
+if [ "${#MUSTR_CRATES[@]}" -gt 0 ]; then
+  if [ "$HAVE_CARGO" = 1 ]; then
+    log "refreshing Cargo.lock for mustr's crates (cargo metadata)"
+    cargo metadata --format-version 1 >/dev/null
+    LOCK_NOTE="Zed's Cargo.lock + mustr's crates (cargo metadata)"
+  else
+    LOCK_NOTE="ACTION: Zed's Cargo.lock lacks mustr's crates; re-run with cargo installed"
+  fi
+fi
+note cargo_lock "$LOCK_NOTE"
+
+# --------------------------------------------------------- 6. commit ----
+UPSTREAM_COMMITS="$(git rev-list --count "$OLD_BASE..$TAG_REF")"
+if [ "$ALREADY" = 0 ]; then
+  MSG="$GIT_DIR_ABS/mustr-sync-commit-msg"
+  {
+    printf 'Merge Zed %s into mustr\n\n' "$TAG"
+    printf 'Zed-owned files now match %s exactly. mustr-owned paths and the\n' "$TAG"
+    printf 'touch points (README.md, .github/FUNDING.yml, Cargo.toml members line,\n'
+    printf 'Cargo.lock) are kept. Made by script/mustr-sync-zed.\n\n'
+    printf 'Previous base: %s\nZed version: %s -> %s\nUpstream commits: %s\n' "$OLD_DESC" "$OLD_ZED_VER" "$NEW_ZED_VER" "$UPSTREAM_COMMITS"
+    if [ "${#C_ZED[@]}" -gt 0 ] || [ "${#C_TOUCH[@]}" -gt 0 ]; then
+      printf '\nConflicts resolved by the script:\n'
+      for p in ${C_TOUCH[@]+"${C_TOUCH[@]}"} ${C_ZED[@]+"${C_ZED[@]}"}; do printf '  %s\n' "$p"; done
+    fi
+  } >"$MSG"
+  [ "${#MUSTR_CRATES[@]}" -eq 0 ] || git add -- Cargo.lock
+  git commit -q -F "$MSG"
+  STATE=committed
+  note merge "committed $(git rev-parse --short HEAD) on $SYNC_BRANCH"
+elif [ -n "$(git status --porcelain -- Cargo.lock)" ]; then
+  git add -- Cargo.lock && git commit -q -m "Update Cargo.lock for mustr's crates after Zed $TAG"
+  note merge "follow-up commit: Cargo.lock"
+fi
+note branch "$SYNC_BRANCH (HEAD $(git rev-parse --short HEAD))"
+note upstream_commits "$UPSTREAM_COMMITS since $OLD_DESC"
+
+# --------------------------------------- 7. what changed for mustr ----
+read_lines NEW_WF < <(git diff --name-only --diff-filter=A "$OLD_BASE" "$TAG_REF" -- .github/workflows | grep -v '/mustr-' || true)
+if [ "${#NEW_WF[@]}" -gt 0 ]; then
+  note new_upstream_workflows "${#NEW_WF[@]} - after merging the PR run: gh workflow disable <file> -R msetaro/differ"
+  for p in "${NEW_WF[@]}"; do note "  workflow" "$p"; done
+else
+  note new_upstream_workflows "none"
+fi
+# Zed crates mustr depends on directly, with upstream change size.
+read_lines DEPS < <(for m in mustr-crates/*/Cargo.toml; do [ -f "$m" ] && sed -nE 's/^([a-z0-9_-]+)( *= *\{ *workspace *= *true|\.workspace *= *true).*/\1/p' "$m"; done | sort -u)
+for d in ${DEPS[@]+"${DEPS[@]}"}; do
+  [ -d "crates/$d" ] || continue
+  s="$(git diff --shortstat "$OLD_BASE" "$TAG_REF" -- "crates/$d")"
+  [ -n "$s" ] && note "  changed zed crate" "$d:$s"
+done
+
+# Code mustr copied out of Zed (crates/zed has no [lib]). Each copy carries a
+# header like `// Copied from crates/zed/src/zed.rs@v1.25.3 fn build_window_options`
+# (REBRAND.md §4). Upstream changes to those files must be ported by hand.
+read_lines COPIED < <(grep -rhoE 'Copied from crates/[^@[:space:]]+@' mustr-crates 2>/dev/null | sed -E 's/^Copied from //; s/@$//' | sort -u || true)
+COPIED_DIFF="$GIT_DIR_ABS/mustr-sync/zed-$TAG-copied.diff"; mkdir -p "$GIT_DIR_ABS/mustr-sync"; : >"$COPIED_DIFF"
+NCOPIED=0
+for f in ${COPIED[@]+"${COPIED[@]}"}; do
+  s="$(git diff --shortstat "$OLD_BASE" "$TAG_REF" -- "$f")"
+  if [ -n "$s" ]; then
+    NCOPIED=$((NCOPIED + 1)); note "  copied file changed upstream" "$f:$s"
+    git diff "$OLD_BASE" "$TAG_REF" -- "$f" >>"$COPIED_DIFF"
+  fi
+done
+if [ "${#COPIED[@]}" -gt 0 ]; then
+  note copied_code "${#COPIED[@]} upstream file(s) copied into mustr-crates, $NCOPIED changed (port relevant hunks; diff: $COPIED_DIFF)"
+fi
+
+# ----------------------------------------------------- 8. build + test ----
+if [ "$NO_BUILD" = 1 ]; then
+  note build "skipped (--no-build)"
+elif [ "${#MUSTR_CRATES[@]}" -eq 0 ]; then
+  note build "skipped (no crates in mustr-crates/ yet; placeholder)"
+elif [ "$HAVE_CARGO" = 0 ]; then
+  note build "FAILED: cargo not found (install rustup; rust-toolchain.toml pins the version)"; exit 3
+else
+  PKGS=""; for c in "${MUSTR_CRATES[@]}"; do PKGS="$PKGS -p $c"; done
+  BUILD_CMD="${MUSTR_BUILD_CMD:-cargo build -p mustr}"
+  TEST_CMD="${MUSTR_TEST_CMD:-cargo test$PKGS}"
+  log "build: $BUILD_CMD"
+  if sh -c "$BUILD_CMD"; then note build "ok ($BUILD_CMD)"; else note build "FAILED ($BUILD_CMD)"; exit 3; fi
+  log "test: $TEST_CMD"
+  if sh -c "$TEST_CMD"; then note tests "ok ($TEST_CMD)"; else note tests "FAILED ($TEST_CMD)"; exit 3; fi
+  if [ -x script/mustr-smoke-test ]; then
+    if script/mustr-smoke-test; then note smoke_test ok; else note smoke_test FAILED; exit 3; fi
+  else
+    note smoke_test "skipped (script/mustr-smoke-test not written yet; placeholder)"
+  fi
+fi
+
+# ------------------------------------------------------------ 9. next ----
+mkdir -p "$GIT_DIR_ABS/mustr-sync"
+PR_BODY="$GIT_DIR_ABS/mustr-sync/zed-$TAG.md"
+{ printf 'Sync Zed %s (from %s).\n\n```\n%s```\n' "$TAG" "$OLD_DESC" "$SUMMARY"; } >"$PR_BODY"
+note result "merged"
+note pr_body "$PR_BODY"
+note next "git push -u origin $SYNC_BRANCH && gh pr create -R msetaro/differ --base $BASE --head $SYNC_BRANCH --title 'Sync Zed $TAG' --body-file '$PR_BODY'"
+exit 0

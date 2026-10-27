@@ -1,1 +1,1 @@
-differ-docs/AGENTS.md
+mustr-docs/AGENTS.md

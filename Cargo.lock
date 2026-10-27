@@ -4978,82 +4978,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56254986775e3233ffa9c4d7d3faaf6d36a2c09d30b20687e9f88bc8bafc16c8"
 
 [[package]]
-name = "differ"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "askpass",
- "assets",
- "clap",
- "client",
- "command_palette",
- "db",
- "diagnostics",
- "dirs",
- "editor",
- "feature_flags",
- "file_finder",
- "fs",
- "futures 0.3.34",
- "git",
- "git_hosting_providers",
- "git_ui",
- "go_to_line",
- "gpui",
- "gpui_platform",
- "gpui_tokio",
- "inspector_ui",
- "language",
- "languages",
- "log",
- "lsp_locations",
- "menu",
- "migrator",
- "node_runtime",
- "parking_lot",
- "paths",
- "project",
- "rayon",
- "release_channel",
- "reqwest_client",
- "search",
- "semver",
- "serde_json",
- "session",
- "settings",
- "shellexpand",
- "terminal_view",
- "theme",
- "theme_selector",
- "theme_settings",
- "ui",
- "ui_prompt",
- "util",
- "uuid",
- "vim",
- "vim_mode_setting",
- "watch",
- "which_key",
- "workspace",
- "zed_actions",
- "zlog",
- "zlog_settings",
-]
-
-[[package]]
-name = "differ_ui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "gpui",
- "log",
- "serde_json",
- "settings",
- "theme",
- "theme_settings",
-]
-
-[[package]]
 name = "diffy"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11154,6 +11078,82 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
+
+[[package]]
+name = "mustr"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "askpass",
+ "assets",
+ "clap",
+ "client",
+ "command_palette",
+ "db",
+ "diagnostics",
+ "dirs",
+ "editor",
+ "feature_flags",
+ "file_finder",
+ "fs",
+ "futures 0.3.34",
+ "git",
+ "git_hosting_providers",
+ "git_ui",
+ "go_to_line",
+ "gpui",
+ "gpui_platform",
+ "gpui_tokio",
+ "inspector_ui",
+ "language",
+ "languages",
+ "log",
+ "lsp_locations",
+ "menu",
+ "migrator",
+ "node_runtime",
+ "parking_lot",
+ "paths",
+ "project",
+ "rayon",
+ "release_channel",
+ "reqwest_client",
+ "search",
+ "semver",
+ "serde_json",
+ "session",
+ "settings",
+ "shellexpand",
+ "terminal_view",
+ "theme",
+ "theme_selector",
+ "theme_settings",
+ "ui",
+ "ui_prompt",
+ "util",
+ "uuid",
+ "vim",
+ "vim_mode_setting",
+ "watch",
+ "which_key",
+ "workspace",
+ "zed_actions",
+ "zlog",
+ "zlog_settings",
+]
+
+[[package]]
+name = "mustr_ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gpui",
+ "log",
+ "serde_json",
+ "settings",
+ "theme",
+ "theme_settings",
+]
 
 [[package]]
 name = "naga"

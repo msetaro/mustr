@@ -269,10 +269,10 @@ members = [
     "tooling/xtask",
 
     #
-    # Differ (the only line Differ adds to this file; see differ-docs/SYNC.md)
+    # mustr (the only line mustr adds to this file; see mustr-docs/SYNC.md)
     #
 
-    "differ-crates/*",
+    "mustr-crates/*",
 ]
 default-members = ["crates/zed"]
 
