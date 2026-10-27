@@ -6,11 +6,16 @@
 //! thin, mechanical layer that is cheap to update when T3 releases.
 
 mod auth;
+mod pull_requests;
 mod rpc;
 
 pub use auth::{
     AccessToken, ClientMetadata, EnvironmentDescriptor, ORCHESTRATION_PROTOCOL_HEADER,
     ORCHESTRATION_PROTOCOL_VERSION, Scope, check_protocol_compatibility,
     exchange_pairing_credential, fetch_descriptor, websocket_ticket, websocket_url,
+};
+pub use pull_requests::{
+    ChangeType, ChangedFile, PullRequestFile, PullRequestRef, changed_files,
+    load_pull_request_files, pull_request_patch,
 };
 pub use rpc::{RpcConnection, RpcError};

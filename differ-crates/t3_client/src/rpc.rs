@@ -30,6 +30,17 @@ pub enum RpcError {
 }
 
 impl RpcError {
+    /// A human-readable explanation from a typed error, when the server gave one.
+    pub fn error_detail(&self) -> Option<String> {
+        match self {
+            RpcError::Failed { error, .. } => ["detail", "message"]
+                .iter()
+                .find_map(|key| error.get(*key).and_then(Value::as_str))
+                .map(str::to_string),
+            _ => None,
+        }
+    }
+
     /// The `_tag` of a typed error, e.g. `OrchestrationGetFullThreadDiffError`.
     pub fn error_tag(&self) -> Option<&str> {
         match self {

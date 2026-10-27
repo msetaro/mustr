@@ -72,6 +72,46 @@ fn live_server_round_trip() -> Result<()> {
             started.elapsed()
         );
 
+        if let Some(entry) = pull_requests["entries"]
+            .as_array()
+            .and_then(|entries| entries.first())
+        {
+            let pull_request: t3_client::PullRequestRef = serde_json::from_value(json!({
+                "projectId": entry["projectId"],
+                "host": entry["host"],
+                "repository": entry["repository"],
+                "number": entry["number"],
+            }))?;
+            let started = Instant::now();
+            let files = t3_client::load_pull_request_files(
+                &http,
+                &base_url,
+                &token,
+                &connection,
+                &pull_request,
+            )
+            .await?;
+            let with_text = files
+                .iter()
+                .filter(|file| file.old_text.is_some() || file.new_text.is_some())
+                .count();
+            println!(
+                "{}#{}: {} files, {with_text} with text, in {:?}",
+                pull_request.repository,
+                pull_request.number,
+                files.len(),
+                started.elapsed()
+            );
+            for file in files.iter().filter(|file| file.unavailable.is_some()) {
+                println!(
+                    "  unavailable: {} ({})",
+                    file.file.new_path,
+                    file.unavailable.as_deref().unwrap_or_default()
+                );
+            }
+            assert!(with_text > 0, "expected at least one text file");
+        }
+
         let started = Instant::now();
         let mut shell = connection.subscribe(
             "orchestration.subscribeShell",
