@@ -1,0 +1,386 @@
+#!/usr/bin/env bash
+# differ-sync-t3: move Differ's pinned T3 Code version to a T3 release tag.
+#
+# Draft of script/differ-sync-t3 for msetaro/differ. Runbook: SYNC.md.
+# Steps: resolve tag -> fetch that tag's packages/contracts -> check the
+# orchestration protocol version -> regenerate t3_client types (regen.sh) ->
+# pin version, protocol and runtime checksums -> commit on sync/t3-<tag> ->
+# build, unit tests, contract tests against the pinned runtime.
+#
+# Compatible with bash 3.2 (macOS /bin/bash). Needs git >= 2.27, curl.
+set -euo pipefail
+
+# ---------------------------------------------------------------- config ----
+T3_REPO_URL=https://github.com/pingdotgg/t3code.git
+T3_GH_REPO=pingdotgg/t3code
+STABLE_RE='^v[0-9]+\.[0-9]+\.[0-9]+$'                    # v0.1.3
+NIGHTLY_RE='^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]{8}\.[0-9]+$' # v0.1.4-nightly.20261027.3783
+PREVIEW_RE='^v[0-9]+\.[0-9]+\.[0-9]+-preview\.'          # "maintainer test build, do not install"
+CRATE_DIR=differ-crates/t3_client
+# key=value pin (format chosen by t3_client on branch m0/t3-client):
+#   t3_server_version=0.1.3
+#   orchestration_protocol=2        # == ORCHESTRATION_PROTOCOL_VERSION; Differ must match exactly
+#   contracts_commit=<T3 commit of the tag>
+VERSION_FILE=$CRATE_DIR/T3_VERSION
+SUMS_FILE=$CRATE_DIR/T3_RUNTIME.sha256             # sha256sum format, runtime archives only
+REGEN="${DIFFER_T3_REGEN:-$CRATE_DIR/codegen/regen.sh}"   # placeholder: built at m0/t3-codegen/
+GEN_OUT="${DIFFER_T3_GEN_OUT:-$CRATE_DIR/src/generated}"
+EXPECTED_PLATFORMS="darwin-arm64 linux-arm64 linux-x64 win32-arm64 win32-x64"
+
+# ------------------------------------------------------------------ args ----
+TAG="" LATEST=0 BASE=main REPO="" DRY_RUN=0 NO_BUILD=0 NO_RUNTIME=0 FORCE=0 ALLOW_PRE=0 ACCEPT_PROTO=0
+usage() {
+  cat <<'EOF'
+Usage: differ-sync-t3 (vX.Y.Z | --latest) [options]
+  vX.Y.Z | X.Y.Z             T3 Code release tag to pin
+  --latest                   Newest published stable T3 release
+  --accept-protocol-change   Continue when ORCHESTRATION_PROTOCOL_VERSION changes (human approved)
+  --allow-prerelease         Accept a -nightly tag (experiments only; never merge to main)
+  --force                    Allow a downgrade, or redo a sync that is already pinned
+  --base BRANCH              Branch to sync (default: main)
+  --repo PATH                Differ checkout (default: the git toplevel of $PWD)
+  --dry-run                  Resolve, fetch contracts, check protocol and checksums; change nothing
+  --no-build                 Skip cargo build and tests
+  --no-runtime               Skip downloading the runtime for contract tests
+Env: DIFFER_T3_REGEN (codegen script), DIFFER_T3_GEN_OUT, DIFFER_CONTRACT_TEST_CMD
+Exit codes: 0 synced / already pinned / dry run
+            1 usage or preflight error (nothing changed)
+            2 stop and ask the human (protocol change, preview tag, downgrade,
+              checksum mismatch, missing platform, license change)
+            3 build or tests failed (sync commit is on the sync branch)
+            4 codegen failed (nothing committed)
+EOF
+}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --latest) LATEST=1; shift ;;
+    --accept-protocol-change) ACCEPT_PROTO=1; shift ;;
+    --allow-prerelease) ALLOW_PRE=1; shift ;;
+    --force) FORCE=1; shift ;;
+    --base) BASE="${2:?}"; shift 2 ;;
+    --repo) REPO="${2:?}"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    --no-build) NO_BUILD=1; shift ;;
+    --no-runtime) NO_RUNTIME=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
+    *) [ -z "$TAG" ] || { echo "only one tag" >&2; exit 1; }; TAG="$1"; shift ;;
+  esac
+done
+if [ -n "$TAG" ] && [ "$LATEST" = 1 ]; then echo "give a tag or --latest, not both" >&2; exit 1; fi
+if [ -z "$TAG" ] && [ "$LATEST" = 0 ]; then usage >&2; exit 1; fi
+case "$TAG" in ''|v*) ;; *) TAG="v$TAG" ;; esac
+
+# --------------------------------------------------------------- helpers ----
+log() { printf '[differ-sync-t3] %s\n' "$*" >&2; }
+SUMMARY=""
+note() { SUMMARY="${SUMMARY}$1: $2"$'\n'; }
+STATE=init ORIG_REF="" CREATED_BRANCH=0 SYNC_BRANCH=""
+die() { local code="$1"; shift; log "STOP ($code): $*"; note result "stopped (exit $code)"; note reason "$*"; exit "$code"; }
+on_exit() {
+  local rc=$?
+  if [ "$rc" -ne 0 ] && [ "$STATE" = editing ]; then
+    log "cleaning up: discarding uncommitted sync changes and restoring $ORIG_REF"
+    git reset -q --hard HEAD >/dev/null 2>&1 || true
+    git clean -q -fd -- "$CRATE_DIR" >/dev/null 2>&1 || true
+    git switch -q "$ORIG_REF" >/dev/null 2>&1 || true
+    if [ "$CREATED_BRANCH" = 1 ]; then git branch -q -D "$SYNC_BRANCH" >/dev/null 2>&1 || true; fi
+  fi
+  printf '\n==== differ-sync-t3 summary ====\n%s================================\n' "$SUMMARY"
+  exit "$rc"
+}
+trap on_exit EXIT
+vsort() { sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | sed 's/^/v/'; }
+core() { printf '%s' "$1" | sed -E 's/^v//; s/-.*$//'; }   # v0.1.4-nightly.x -> 0.1.4
+ver_lt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | vsort | head -1)" = "$1" ]; }
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
+have_gh() { command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; }
+release_json() { # $1 = tag; GitHub release JSON (gh if logged in, else anonymous API)
+  if have_gh; then gh api "repos/$T3_GH_REPO/releases/tags/$1"
+  else curl -fsSL "https://api.github.com/repos/$T3_GH_REPO/releases/tags/$1"; fi
+}
+# Run a command without T3's own env vars (T3CODE_HOME, T3_SERVICE_LAUNCHER_CONTEXT, ...).
+# Agents often run inside a T3 session; leaking these makes a spawned runtime act
+# like the user's T3 service (same home, 0.0.0.0, service mode).
+scrubbed() {
+  # shellcheck disable=SC2046
+  env $(env | sed -nE 's/^((T3CODE|T3)_[A-Za-z0-9_]*)=.*/-u \1/p') "$@"
+}
+pin_get() { # $1 = rev:path or file, $2 = key
+  case "$1" in *:*) git show "$1" 2>/dev/null ;; *) cat "$1" 2>/dev/null ;; esac \
+    | sed -nE "s/^$2=([^[:space:]#]*).*/\\1/p" | head -1
+}
+proto_of() { # $1 = path to environment.ts
+  sed -nE 's/^export const ORCHESTRATION_PROTOCOL_VERSION = ([0-9]+);.*/\1/p' "$1" | head -1
+}
+
+# ------------------------------------------------------------- preflight ----
+command -v curl >/dev/null 2>&1 || die 1 "curl not found"
+command -v jq >/dev/null 2>&1 || die 1 "jq not found"
+if [ -n "$REPO" ]; then cd "$REPO"; fi
+cd "$(git rev-parse --show-toplevel 2>/dev/null)" || die 1 "not inside a git repository"
+note repo "$(pwd)"
+GIT_DIR_ABS="$(cd "$(git rev-parse --git-dir)" && pwd)"
+WORK="$GIT_DIR_ABS/differ-sync"; mkdir -p "$WORK"
+if [ "$DRY_RUN" = 0 ] && [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+  die 1 "working tree is not clean (commit, stash or remove untracked files first)"
+fi
+git rev-parse -q --verify "refs/heads/$BASE" >/dev/null || die 1 "base branch '$BASE' does not exist"
+ORIG_REF="$(git symbolic-ref -q --short HEAD || git rev-parse HEAD)"
+
+# ------------------------------------------------------- 1. resolve tag ----
+log "listing T3 Code tags"
+TAGS="$(git ls-remote --tags --refs "$T3_REPO_URL" 'v*' | awk '{sub("^refs/tags/", "", $2); print $2}')"
+[ -n "$TAGS" ] || die 1 "could not list tags of $T3_REPO_URL"
+NEWEST_STABLE="$(printf '%s\n' "$TAGS" | grep -E "$STABLE_RE" | vsort | tail -1)"
+if [ "$LATEST" = 1 ]; then
+  TAG=""
+  if have_gh; then TAG="$(gh api "repos/$T3_GH_REPO/releases/latest" --jq .tag_name 2>/dev/null || true)"; fi
+  [ -n "$TAG" ] || TAG="$NEWEST_STABLE"
+fi
+printf '%s\n' "$TAGS" | grep -qxF "$TAG" || die 1 "tag $TAG does not exist in $T3_GH_REPO"
+if printf '%s' "$TAG" | grep -Eq "$PREVIEW_RE"; then
+  die 2 "$TAG is a preview tag (T3 labels these 'maintainer test build, do not install')"
+elif printf '%s' "$TAG" | grep -Eq "$NIGHTLY_RE"; then
+  [ "$ALLOW_PRE" = 1 ] || die 2 "$TAG is a nightly; pass --allow-prerelease for an experiment branch (never merge it)"
+  note channel "NIGHTLY (experiment only)"
+elif printf '%s' "$TAG" | grep -Eq "$STABLE_RE"; then
+  note channel stable
+else
+  die 2 "$TAG matches no known T3 tag scheme (vX.Y.Z, vX.Y.Z-nightly.YYYYMMDD.N); the scheme may have changed"
+fi
+VER="${TAG#v}"
+SYNC_BRANCH="sync/t3-$TAG"
+REL="$(release_json "$TAG" 2>/dev/null)" || die 2 "no GitHub release for $TAG (tag pushed, release not published yet?)"
+[ "$(printf '%s' "$REL" | jq -r .draft)" = false ] || die 2 "release $TAG is a draft"
+note tag "$TAG (newest stable: $NEWEST_STABLE; published $(printf '%s' "$REL" | jq -r .published_at))"
+
+# --------------------------------------------------- 2. current pin ----
+OLD_VER="$(pin_get "$BASE:$VERSION_FILE" t3_server_version || true)"
+OLD_PROTO="$(pin_get "$BASE:$VERSION_FILE" orchestration_protocol || true)"
+note previous_pin "${OLD_VER:-none}"
+if [ -n "$OLD_VER" ] && [ "$OLD_VER" = "$VER" ] && [ "$FORCE" = 0 ]; then
+  note result "up to date ($BASE already pins T3 $VER)"; exit 0
+fi
+if [ -n "$OLD_VER" ] && ver_lt "v$(core "$VER")" "v$(core "$OLD_VER")" && [ "$FORCE" = 0 ]; then
+  die 2 "$TAG is older than the pinned $OLD_VER (pass --force to downgrade on purpose)"
+fi
+
+# --------------------------------------- 3. fetch that tag's contracts ----
+T3_SRC="$WORK/t3-src-$TAG"
+if [ ! -d "$T3_SRC/.git" ]; then
+  log "fetching $TAG packages/contracts (sparse, blobless)"
+  rm -rf "$T3_SRC"
+  git -c advice.detachedHead=false clone -q --depth 1 --branch "$TAG" --filter=blob:none --sparse "$T3_REPO_URL" "$T3_SRC"
+  git -C "$T3_SRC" sparse-checkout set packages/contracts   # cone mode also keeps root files (LICENSE, package.json, pnpm-workspace.yaml)
+fi
+T3_COMMIT="$(git -C "$T3_SRC" rev-parse HEAD)"
+note t3_commit "$T3_COMMIT"
+CONTRACTS="$T3_SRC/packages/contracts"
+[ -f "$CONTRACTS/src/environment.ts" ] || die 2 "packages/contracts/src/environment.ts missing in $TAG; T3's layout changed"
+PKG_VER="$(jq -r .version "$CONTRACTS/package.json")"
+[ "$PKG_VER" = "$VER" ] || log "note: packages/contracts/package.json says $PKG_VER, tag says $VER"
+EFFECT_VER="$(sed -nE 's/^  effect: *"?([^"]+)"?$/\1/p' "$T3_SRC/pnpm-workspace.yaml" | head -1)"
+note effect_version "${EFFECT_VER:-unknown} (from pnpm-workspace.yaml catalog; codegen must use exactly this)"
+
+# Previous tag's contracts, for the diff and the protocol/license comparison.
+OLD_TAG=""
+if [ -n "$OLD_VER" ]; then
+  OLD_TAG="v$OLD_VER"
+  git -C "$T3_SRC" fetch -q --depth 1 --filter=blob:none origin "+refs/tags/$OLD_TAG:refs/tags/$OLD_TAG" || OLD_TAG=""
+fi
+
+# ------------------------------------------------ 4. protocol version ----
+NEW_PROTO="$(proto_of "$CONTRACTS/src/environment.ts")"
+[ -n "$NEW_PROTO" ] || die 2 "cannot read ORCHESTRATION_PROTOCOL_VERSION from environment.ts in $TAG; the constant moved or changed form"
+if [ -z "$OLD_PROTO" ] && [ -n "$OLD_TAG" ]; then
+  OLD_PROTO="$(git -C "$T3_SRC" show "$OLD_TAG:packages/contracts/src/environment.ts" | sed -nE 's/^export const ORCHESTRATION_PROTOCOL_VERSION = ([0-9]+);.*/\1/p' | head -1)"
+fi
+note protocol "${OLD_PROTO:-none} -> $NEW_PROTO (header x-t3-orchestration-protocol; server requires an exact match)"
+PROTO_CHANGED=0
+if [ -n "$OLD_PROTO" ] && [ "$OLD_PROTO" != "$NEW_PROTO" ]; then
+  PROTO_CHANGED=1
+  [ "$ACCEPT_PROTO" = 1 ] || [ "$DRY_RUN" = 1 ] || die 2 "ORCHESTRATION_PROTOCOL_VERSION changes $OLD_PROTO -> $NEW_PROTO. Differ will no longer talk to T3 servers on protocol $OLD_PROTO. Ask the human; re-run with --accept-protocol-change once approved"
+fi
+
+if [ -n "$OLD_TAG" ]; then
+  CPS="packages/contracts/src :(exclude)*.test.ts"   # wire contracts only, not T3's own tests
+  # shellcheck disable=SC2086
+  STAT="$(git -C "$T3_SRC" diff --shortstat "$OLD_TAG" "$TAG" -- $CPS)"
+  note contracts_diff "$OLD_TAG..$TAG:${STAT:- no changes}"
+  git -C "$T3_SRC" diff --stat=100 "$OLD_TAG" "$TAG" -- $CPS >"$WORK/t3-contracts-$TAG.diffstat" || true
+  git -C "$T3_SRC" diff "$OLD_TAG" "$TAG" -- $CPS >"$WORK/t3-contracts-$TAG.diff" || true
+  note contracts_diff_file "$WORK/t3-contracts-$TAG.diff"
+  if ! git -C "$T3_SRC" diff --quiet "$OLD_TAG" "$TAG" -- LICENSE; then
+    die 2 "T3's LICENSE changed between $OLD_TAG and $TAG; the human must review THIRD_PARTY_NOTICES.md"
+  fi
+fi
+grep -q "MIT License" "$T3_SRC/LICENSE" || die 2 "T3's LICENSE in $TAG is not the MIT text Differ expects"
+
+# ------------------------------------------- 5. runtime checksums ----
+SUMS_TMP="$WORK/t3-$TAG.SHA256SUMS"
+curl -fsSL -o "$SUMS_TMP" "https://github.com/$T3_GH_REPO/releases/download/$TAG/SHA256SUMS" \
+  || die 2 "release $TAG has no SHA256SUMS asset"
+grep -E "  t3-$VER-[a-z0-9]+-[a-z0-9]+\.(tar\.gz|zip)\$" "$SUMS_TMP" | LC_ALL=C sort -k2 >"$SUMS_TMP.runtime"
+MISSING=""
+for p in $EXPECTED_PLATFORMS; do grep -Eq "  t3-$VER-$p\.(tar\.gz|zip)\$" "$SUMS_TMP.runtime" || MISSING="$MISSING $p"; done
+[ -z "$MISSING" ] || die 2 "release $TAG has no runtime archive for:$MISSING"
+# Cross-check against the digests GitHub computed at upload.
+printf '%s' "$REL" | jq -r '.assets[] | select(.name|test("^t3-")) | "\((.digest // "")|sub("^sha256:";""))  \(.name)"' \
+  | LC_ALL=C sort -k2 >"$SUMS_TMP.github"
+if grep -q '^  ' "$SUMS_TMP.github"; then
+  log "note: GitHub reports no asset digests for $TAG; trusting SHA256SUMS alone"
+elif ! diff -q "$SUMS_TMP.runtime" "$SUMS_TMP.github" >/dev/null; then
+  diff "$SUMS_TMP.runtime" "$SUMS_TMP.github" >&2 || true
+  die 2 "SHA256SUMS disagrees with GitHub's asset digests for $TAG. Do not pin; tell the human"
+fi
+note runtime_checksums "$(wc -l <"$SUMS_TMP.runtime" | tr -d ' ') archives, SHA256SUMS == GitHub digests"
+
+if [ "$DRY_RUN" = 1 ]; then
+  [ "$PROTO_CHANGED" = 0 ] || note protocol_change "YES: a real run stops here unless --accept-protocol-change (ask the human)"
+  note branch "would create $SYNC_BRANCH from $BASE"
+  note result "dry run (no branch, index or worktree changes)"
+  exit 0
+fi
+
+# ------------------------------------------------- 6. branch ----
+ALREADY=0
+if git rev-parse -q --verify "refs/heads/$SYNC_BRANCH" >/dev/null; then
+  BR_VER="$(pin_get "$SYNC_BRANCH:$VERSION_FILE" t3_server_version || true)"
+  [ "$BR_VER" = "$VER" ] || die 2 "branch $SYNC_BRANCH exists but does not pin $VER. If it is stale: git branch -D $SYNC_BRANCH"
+  git merge-base --is-ancestor "$BASE" "$SYNC_BRANCH" \
+    || die 2 "branch $SYNC_BRANCH was made from an older $BASE. If nobody pushed work to it: git branch -D $SYNC_BRANCH, then re-run"
+  git switch -q "$SYNC_BRANCH"; ALREADY=1
+  note commit "already done on $SYNC_BRANCH; re-running build and tests"
+else
+  git switch -q -c "$SYNC_BRANCH" "$BASE"; CREATED_BRANCH=1
+fi
+
+# --------------------------------------------- 7. codegen + pins ----
+HAVE_CRATE=0; [ -f "$CRATE_DIR/Cargo.toml" ] && HAVE_CRATE=1
+if [ "$ALREADY" = 0 ]; then
+  STATE=editing
+  if [ "$HAVE_CRATE" = 0 ]; then
+    note codegen "skipped ($CRATE_DIR/Cargo.toml not created yet; placeholder)"
+  elif [ ! -e "$REGEN" ]; then
+    note codegen "skipped ($REGEN not written yet; placeholder). Types stay hand-written"
+  elif [ ! -x "$REGEN" ]; then
+    die 4 "codegen script $REGEN is not executable"
+  else
+    log "codegen: $REGEN $T3_SRC $GEN_OUT"
+    # Placeholder interface: regen.sh <t3-checkout> <out-dir>. It reads
+    # packages/contracts/src and the Effect version from the checkout.
+    DIFFER_T3_VERSION="$VER" DIFFER_T3_COMMIT="$T3_COMMIT" DIFFER_T3_EFFECT_VERSION="$EFFECT_VER" \
+      scrubbed "$REGEN" "$T3_SRC" "$GEN_OUT" >"$WORK/t3-regen-$TAG.log" 2>&1 \
+      || { tail -30 "$WORK/t3-regen-$TAG.log" >&2; die 4 "codegen failed (log: $WORK/t3-regen-$TAG.log)"; }
+    git add -A -- "$GEN_OUT"
+    GSTAT="$(git diff --cached --shortstat -- "$GEN_OUT")"
+    note generated_types "${GSTAT:-unchanged}"
+    git diff --cached --stat=100 -- "$GEN_OUT" >"$WORK/t3-generated-$TAG.diffstat" || true
+  fi
+  mkdir -p "$CRATE_DIR"
+  { printf 't3_server_version=%s\n' "$VER"
+    printf 'orchestration_protocol=%s\n' "$NEW_PROTO"
+    printf 'contracts_commit=%s\n' "$T3_COMMIT"
+  } >"$VERSION_FILE"
+  cp "$SUMS_TMP.runtime" "$SUMS_FILE"
+  git add -- "$VERSION_FILE" "$SUMS_FILE"
+  {
+    printf 'Sync T3 Code to %s\n\n' "$TAG"
+    printf 'T3 commit: %s\nPrevious pin: %s\nOrchestration protocol: %s -> %s\n' "$T3_COMMIT" "${OLD_VER:-none}" "${OLD_PROTO:-none}" "$NEW_PROTO"
+    [ -z "${STAT:-}" ] || printf 'packages/contracts/src (excluding tests):%s\n' "$STAT"
+    [ -z "${GSTAT:-}" ] || printf 'Generated types:%s\n' "$GSTAT"
+    printf '\nRuntime checksums (from the release SHA256SUMS, checked against\nGitHub asset digests):\n'
+    sed 's/^/  /' "$SUMS_FILE"
+    printf '\nMade by script/differ-sync-t3.\n'
+  } >"$WORK/t3-commit-msg"
+  git commit -q -F "$WORK/t3-commit-msg"
+  STATE=committed
+  note commit "$(git rev-parse --short HEAD) on $SYNC_BRANCH"
+fi
+note branch "$SYNC_BRANCH (HEAD $(git rev-parse --short HEAD))"
+
+# Differ's declared protocol constant (generated or hand-written, e.g.
+# t3_client/src/auth.rs `pub const ORCHESTRATION_PROTOCOL_VERSION: u32 = 2;`)
+# must equal T3's.
+PROTO_ACTION=0
+if [ -d "$CRATE_DIR/src" ]; then
+  DECL="$(grep -rhoE 'ORCHESTRATION_PROTOCOL_VERSION: *[a-z0-9]+ *= *[0-9]+' "$CRATE_DIR/src" | grep -oE '[0-9]+$' | sort -u | tr '\n' ' ' || true)"
+  if [ -z "$DECL" ]; then
+    note protocol_const "not found in $CRATE_DIR/src (expected 'ORCHESTRATION_PROTOCOL_VERSION: u32 = N')"
+  elif [ "$DECL" = "$NEW_PROTO " ]; then
+    note protocol_const "ok ($NEW_PROTO)"
+  elif [ "$PROTO_CHANGED" = 1 ]; then
+    note protocol_const "ACTION: set ORCHESTRATION_PROTOCOL_VERSION to $NEW_PROTO in $CRATE_DIR/src (now: $DECL), commit, re-run"
+    PROTO_ACTION=1
+  else
+    die 2 "t3_client declares protocol $DECL but T3 $TAG uses $NEW_PROTO, and the pin did not change; investigate"
+  fi
+fi
+
+# ------------------------------------- 8. runtime for contract tests ----
+RUNTIME_BIN=""
+if [ "$NO_RUNTIME" = 0 ]; then
+  case "$(uname -s)" in Linux) OS=linux ;; Darwin) OS=darwin ;; MINGW*|MSYS*|CYGWIN*) OS=win32 ;; *) OS=unknown ;; esac
+  case "$(uname -m)" in x86_64|amd64) ARCH=x64 ;; aarch64|arm64) ARCH=arm64 ;; *) ARCH=unknown ;; esac
+  ASSET="$(grep -E "  t3-$VER-$OS-$ARCH\.(tar\.gz|zip)\$" "$SUMS_FILE" | awk '{print $2}' || true)"
+  if [ -z "$ASSET" ]; then
+    note runtime "no archive for $OS-$ARCH (T3 ships: $EXPECTED_PLATFORMS); contract tests skipped"
+  else
+    CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/differ-dev/t3-runtime/$VER"
+    mkdir -p "$CACHE"
+    WANT="$(grep -F "  $ASSET" "$SUMS_FILE" | awk '{print $1}')"
+    if [ ! -f "$CACHE/$ASSET" ] || [ "$(sha256 "$CACHE/$ASSET")" != "$WANT" ]; then
+      log "downloading $ASSET"
+      curl -fL --progress-bar -o "$CACHE/$ASSET.part" "https://github.com/$T3_GH_REPO/releases/download/$TAG/$ASSET"
+      mv "$CACHE/$ASSET.part" "$CACHE/$ASSET"
+    fi
+    GOT="$(sha256 "$CACHE/$ASSET")"
+    [ "$GOT" = "$WANT" ] || { rm -f "$CACHE/$ASSET"; die 2 "checksum mismatch for $ASSET (got $GOT, pinned $WANT)"; }
+    XDIR="$CACHE/$OS-$ARCH-${WANT:0:12}"   # keyed by checksum, so a changed archive is never mixed with an old extraction
+    if [ ! -d "$XDIR" ]; then
+      rm -rf "$XDIR.tmp"; mkdir -p "$XDIR.tmp"
+      case "$ASSET" in *.zip) unzip -q "$CACHE/$ASSET" -d "$XDIR.tmp" ;; *) tar -xzf "$CACHE/$ASSET" -C "$XDIR.tmp" ;; esac
+      mv "$XDIR.tmp" "$XDIR"
+    fi
+    RUNTIME_BIN="$(find "$XDIR" -maxdepth 3 -type f \( -name t3 -o -name t3.exe \) | head -1)"
+    [ -n "$RUNTIME_BIN" ] || die 2 "no t3 executable inside $ASSET; the archive layout changed"
+    note runtime "$RUNTIME_BIN (sha256 verified)"
+  fi
+else
+  note runtime "skipped (--no-runtime)"
+fi
+
+# ---------------------------------------------- 9. build + tests ----
+if [ "$NO_BUILD" = 1 ]; then
+  note build "skipped (--no-build)"
+elif [ "$HAVE_CRATE" = 0 ]; then
+  note build "skipped (no $CRATE_DIR crate yet; placeholder)"
+elif ! command -v cargo >/dev/null 2>&1; then
+  note build "FAILED: cargo not found (install rustup; rust-toolchain.toml pins the version)"; exit 3
+else
+  PKGS="-p t3_client"; [ -f differ-crates/differ/Cargo.toml ] && PKGS="$PKGS -p differ"
+  log "build: cargo build $PKGS"
+  if cargo build $PKGS; then note build "ok (cargo build $PKGS)"
+  else note build "FAILED: fix call sites the compiler lists (SYNC.md, 'When generated types change')"; exit 3; fi
+  if cargo test -p t3_client; then note unit_tests ok; else note unit_tests FAILED; exit 3; fi
+  CT_CMD="${DIFFER_CONTRACT_TEST_CMD:-cargo test -p t3_client --features contract-tests}"  # placeholder
+  if [ -z "$RUNTIME_BIN" ]; then
+    note contract_tests "skipped (no runtime)"
+  elif DIFFER_T3_RUNTIME_BIN="$RUNTIME_BIN" DIFFER_T3_VERSION="$VER" scrubbed sh -c "$CT_CMD"; then
+    note contract_tests "ok ($CT_CMD)"
+  else
+    note contract_tests "FAILED ($CT_CMD)"; exit 3
+  fi
+fi
+
+# ------------------------------------------------------------ 10. next ----
+[ "$PROTO_ACTION" = 0 ] || { note result "synced, but the protocol constant needs updating (see protocol_const)"; exit 3; }
+PR_BODY="$WORK/t3-$TAG.md"
+{ printf 'Sync T3 Code to %s (from %s).\n\n```\n%s```\n' "$TAG" "${OLD_VER:-none}" "$SUMMARY"
+  [ ! -s "$WORK/t3-contracts-$TAG.diffstat" ] || { printf '\nContracts diffstat:\n```\n'; cat "$WORK/t3-contracts-$TAG.diffstat"; printf '```\n'; }
+} >"$PR_BODY"
+note result synced
+note pr_body "$PR_BODY"
+note next "git push -u origin $SYNC_BRANCH && gh pr create -R msetaro/differ --base $BASE --head $SYNC_BRANCH --title 'Sync T3 Code $TAG' --body-file '$PR_BODY'"
+exit 0
