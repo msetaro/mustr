@@ -17724,6 +17724,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "t3_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-tungstenite",
+ "futures 0.3.34",
+ "http_client",
+ "log",
+ "parking_lot",
+ "reqwest_client",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "smol",
+ "thiserror 2.0.17",
+ "url",
+]
+
+[[package]]
 name = "tab_switcher"
 version = "0.1.0"
 dependencies = [
