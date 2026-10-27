@@ -1,1 +1,1 @@
-.rules
+differ-docs/AGENTS.md
