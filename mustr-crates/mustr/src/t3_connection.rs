@@ -1,10 +1,9 @@
 //! mustr's connection to a T3 Code server: checking the server, pairing with it, keeping the
 //! bearer token, and holding the RPC socket open.
 //!
-//! mustr asks for exactly [`SCOPES`]: reading orchestration (pull requests, threads), operating
-//! agent threads (sending them messages, such as a review), and writing to pull requests
-//! (comments, reviews, viewed marks). A stored token that lacks one of them is replaced by
-//! pairing again.
+//! mustr asks for exactly [`SCOPES`]: reading orchestration (pull requests, threads), driving
+//! agents (messages, approvals, new threads), and writing to pull requests (comments, reviews,
+//! viewed marks). A stored token that lacks one of them is replaced by pairing again.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use futures::{AsyncReadExt as _, FutureExt as _, future::BoxFuture};
@@ -457,6 +456,49 @@ impl T3Session {
             })
     }
 
+    /// Why agents can't be driven with this session, if they can't.
+    pub fn operate_blocked_reason(&self) -> Option<String> {
+        self.missing_scopes()
+            .contains(&Scope::OrchestrationOperate)
+            .then(|| {
+                format!(
+                    "mustr's pairing with T3 can't drive agents (it lacks {}). Pair again from \
+                     the home view: {}",
+                    Scope::OrchestrationOperate.as_str(),
+                    pairing_command()
+                )
+            })
+    }
+
+    pub fn rpc(&self) -> &RpcConnection {
+        &self.rpc
+    }
+
+    /// Calls one of T3's HTTP endpoints with this session's token.
+    pub async fn call_endpoint<E>(
+        &self,
+        params: &E::Params,
+        query: &E::Query,
+        body: &E::Request,
+    ) -> Result<E::Response>
+    where
+        E: t3_client::HttpEndpoint,
+        E::Params: Serialize,
+        E::Query: Serialize,
+        E::Request: Serialize,
+        E::Response: serde::de::DeserializeOwned,
+    {
+        t3_client::call_endpoint_with::<E>(
+            self.http.as_ref(),
+            &self.server_url,
+            Some(&self.token),
+            params,
+            query,
+            body,
+        )
+        .await
+    }
+
     pub async fn open_pull_requests(&self) -> Result<PullRequestList> {
         let list = self
             .rpc
@@ -697,6 +739,7 @@ pub struct T3Connection {
     connect_task: Option<Task<()>>,
     driver_task: Option<Task<()>>,
     current_rpc: CurrentRpc,
+    current_session: CurrentSession,
 }
 
 /// The RPC connection of whichever session is current, for work that outlives a reconnect (such
@@ -711,6 +754,21 @@ impl CurrentRpc {
 
     fn set(&self, rpc: Option<RpcConnection>) {
         *self.0.lock() = rpc;
+    }
+}
+
+/// Whichever session is current, for background work that outlives a reconnect (such as the
+/// agent threads' backend). Empty while disconnected.
+#[derive(Clone, Default)]
+pub struct CurrentSession(Arc<parking_lot::Mutex<Option<Arc<T3Session>>>>);
+
+impl CurrentSession {
+    pub fn get(&self) -> Option<Arc<T3Session>> {
+        self.0.lock().clone()
+    }
+
+    fn set(&self, session: Option<Arc<T3Session>>) {
+        *self.0.lock() = session;
     }
 }
 
@@ -745,6 +803,7 @@ impl T3Connection {
             connect_task: None,
             driver_task: None,
             current_rpc: CurrentRpc::default(),
+            current_session: CurrentSession::default(),
         }
     }
 
@@ -764,6 +823,10 @@ impl T3Connection {
         self.current_rpc.clone()
     }
 
+    pub fn current_session(&self) -> CurrentSession {
+        self.current_session.clone()
+    }
+
     pub fn session(&self) -> Option<Arc<T3Session>> {
         self.session.clone()
     }
@@ -780,6 +843,7 @@ impl T3Connection {
         self.generation += 1;
         let generation = self.generation;
         self.current_rpc.set(None);
+        self.current_session.set(None);
         if let Some(session) = self.session.take() {
             session.rpc.close();
         }
@@ -819,6 +883,7 @@ impl T3Connection {
                                 .map(Into::into),
                         };
                         this.current_rpc.set(Some(session.rpc.clone()));
+                        this.current_session.set(Some(session.clone()));
                         this.session = Some(session);
                         status
                     }
@@ -856,6 +921,7 @@ impl T3Connection {
                 log::warn!("T3 connection ended: {reason}");
                 this.session = None;
                 this.current_rpc.set(None);
+                this.current_session.set(None);
                 this.status =
                     ConnectionStatus::Failed(format!("Disconnected from T3: {reason}").into());
                 cx.notify();
@@ -1315,7 +1381,7 @@ mod tests {
     }
 
     #[test]
-    fn stored_tokens_without_the_write_scope_are_replaced() {
+    fn stored_tokens_without_the_write_scopes_are_replaced() {
         let check = |accepted: bool, scopes: Option<&[&str]>| SessionCheck {
             accepted,
             scopes: scopes.map(|scopes| scopes.iter().map(|scope| scope.to_string()).collect()),
@@ -1329,6 +1395,12 @@ mod tests {
         assert_eq!(
             stored_token_use(&check(true, None), "orchestration:read"),
             (StoredTokenUse::PairAgain, "orchestration:read".to_string())
+        );
+        // A token from M1, which couldn't drive agents yet.
+        let review_only = "orchestration:read source-control:write";
+        assert_eq!(
+            stored_token_use(&check(true, None), review_only),
+            (StoredTokenUse::PairAgain, review_only.to_string())
         );
         // T3's account of the session wins over what was stored.
         assert_eq!(

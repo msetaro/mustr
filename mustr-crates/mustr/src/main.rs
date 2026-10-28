@@ -19,6 +19,7 @@ mod status_bar;
 mod t3_connection;
 #[cfg(test)]
 mod test_rpc;
+mod thread_backend;
 mod themes;
 mod title_bar;
 mod window;
@@ -201,6 +202,10 @@ fn main() {
         init_ui(&app_state, cx);
         cx.set_global(home_options);
         t3_connection::init(t3_server_url, cx);
+        let session = t3_connection::T3Connection::global(cx)
+            .read(cx)
+            .current_session();
+        thread_backend::init(session, cx);
         cx.activate(true);
         window::open_home_window(app_state, cx);
     });
@@ -381,5 +386,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     app_settings::observe_app_settings(cx);
     title_bar::init(cx);
     status_bar::init(cx);
+    thread_chat::init(cx);
     window::init(cx);
 }

@@ -11137,6 +11137,7 @@ dependencies = [
  "theme",
  "theme_selector",
  "theme_settings",
+ "thread_chat",
  "time",
  "ui",
  "ui_prompt",

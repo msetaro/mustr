@@ -65,6 +65,7 @@ terminal_view.workspace = true
 theme.workspace = true
 theme_selector.workspace = true
 theme_settings.workspace = true
+thread_chat = { path = "../thread_chat" }
 time.workspace = true
 ui.workspace = true
 ui_prompt.workspace = true
