@@ -18,7 +18,10 @@ mod timeline;
 #[cfg(test)]
 mod tests;
 
-pub use backend::{GlobalThreadBackend, ReadOnlyBackend, ThreadBackend, backend, set_backend};
+pub use backend::{
+    Access, AttachmentUpload, GlobalThreadBackend, ReadOnlyBackend, ThreadBackend,
+    ThreadBackendExt, backend, set_backend,
+};
 pub use composer::{SendMessage, SteerMessage, StopThread};
 pub use new_thread::{AgentChoice, NewThreadForm, agent_choices, runtime_mode_for};
 pub use sidebar::{ShellStatus, ThreadEntry, ThreadList, ThreadsSidebar};

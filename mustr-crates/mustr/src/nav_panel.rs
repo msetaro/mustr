@@ -350,6 +350,7 @@ mod tests {
     use anyhow::{Result, anyhow};
     use futures::{FutureExt as _, future::BoxFuture, stream::BoxStream};
     use gpui::{TestAppContext, VisualTestContext};
+    use serde_json::Value;
     use settings::SettingsStore;
     use std::sync::Arc;
     use t3_client::t3_api::{
@@ -364,7 +365,7 @@ mod tests {
             OrchestrationV2ThreadLaunchResult, ServerProvider,
         },
     };
-    use thread_chat::ThreadBackend;
+    use thread_chat::{Access, AttachmentUpload, ThreadBackend};
     use workspace::MultiWorkspace;
 
     /// A T3 that isn't there: every read fails, and nothing can be written.
@@ -422,6 +423,23 @@ mod tests {
             &self,
             _: OrchestrationV2ThreadLaunchInput,
         ) -> BoxFuture<'static, Result<OrchestrationV2ThreadLaunchResult>> {
+            unreachable()
+        }
+
+        fn call_raw(&self, _: &str, _: Value, _: Access) -> BoxFuture<'static, Result<Value>> {
+            unreachable()
+        }
+
+        fn subscribe_raw(
+            &self,
+            _: &str,
+            _: Value,
+            _: Access,
+        ) -> Result<BoxStream<'static, Result<Value>>> {
+            Err(anyhow!("not connected"))
+        }
+
+        fn upload(&self, _: AttachmentUpload) -> BoxFuture<'static, Result<()>> {
             unreachable()
         }
     }
