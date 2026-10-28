@@ -9,12 +9,17 @@
 //!   [`t3_api::rpc`], e.g. `connection.call::<rpc::PullRequestsList>(input)`.
 //! - HTTP: [`call_endpoint`] / [`call_endpoint_with`] with an endpoint from
 //!   [`t3_api::http`].
+//! - Attachments and assets, whose URLs T3 signs: [`upload_attachment`] and [`fetch_asset`].
 
+mod attachments;
 mod auth;
 mod endpoints;
 mod pull_requests;
 mod rpc;
 
+pub use attachments::{
+    Asset, UploadProgress, fetch_asset, signed_url, upload_attachment, upload_request,
+};
 pub use auth::{
     AccessToken, ClientMetadata, EnvironmentDescriptor, ORCHESTRATION_PROTOCOL_HEADER,
     ORCHESTRATION_PROTOCOL_VERSION, Scope, check_protocol_compatibility,

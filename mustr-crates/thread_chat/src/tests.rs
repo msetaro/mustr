@@ -714,6 +714,12 @@ struct FakeBackend {
     /// The items each `subscribe_raw` stream yields.
     raw_stream_items: Mutex<Vec<Value>>,
     uploads: Mutex<Vec<Upload>>,
+    /// How many of the next uploads fail.
+    failing_uploads: Mutex<usize>,
+    /// Command types `dispatch` refuses.
+    refused_commands: Mutex<Vec<String>>,
+    /// The relative URLs `fetch_asset` was asked for.
+    fetched_assets: Mutex<Vec<String>>,
 }
 
 impl FakeBackend {
@@ -830,7 +836,11 @@ impl ThreadBackend for FakeBackend {
         &self,
         command: OrchestrationV2Command,
     ) -> BoxFuture<'static, Result<OrchestrationV2DispatchCommandResult>> {
+        let kind = command.tag().unwrap_or_default().to_string();
         self.commands.lock().push(command);
+        if self.refused_commands.lock().contains(&kind) {
+            return ready(Err(anyhow!("T3 refused {kind}")));
+        }
         ready(Ok(OrchestrationV2DispatchCommandResult { sequence: 100 }))
     }
 
@@ -899,7 +909,17 @@ impl ThreadBackend for FakeBackend {
             mime_type: upload.mime_type,
             bytes: upload.bytes,
         });
+        let mut failing = self.failing_uploads.lock();
+        if *failing > 0 {
+            *failing -= 1;
+            return ready(Err(anyhow!("T3 refused the attachment (400 Bad Request)")));
+        }
         ready(Ok(()))
+    }
+
+    fn fetch_asset(&self, relative_url: &str) -> BoxFuture<'static, Result<Vec<u8>>> {
+        self.fetched_assets.lock().push(relative_url.to_string());
+        ready(Ok(composer_and_timeline::png(4, 3)))
     }
 }
 
@@ -1507,3 +1527,6 @@ fn cross_package_actions_build_by_name(cx: &mut TestAppContext) {
         );
     });
 }
+
+// The composer's images, plans, and Resume, and the timeline's images.
+mod composer_and_timeline;

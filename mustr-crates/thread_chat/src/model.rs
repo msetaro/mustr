@@ -8,18 +8,20 @@
 use serde::Serialize;
 use t3_api::{
     tagged::{
+        ChatAttachment, OrchestrationV2PlanArtifact,
         OrchestrationV2RuntimeRequestResponseCapability, OrchestrationV2ThreadStreamItem,
         OrchestrationV2TurnItem,
     },
     types::{
         OrchestrationV2AppThread, OrchestrationV2ConversationMessage, OrchestrationV2DomainEvent,
-        OrchestrationV2ProviderThread, OrchestrationV2ProviderTurn, OrchestrationV2Run,
-        OrchestrationV2RunStatus, OrchestrationV2RuntimeRequest, OrchestrationV2RuntimeRequestKind,
+        OrchestrationV2PlanArtifactProposedPlanStatus, OrchestrationV2ProviderThread,
+        OrchestrationV2ProviderTurn, OrchestrationV2Run, OrchestrationV2RunStatus,
+        OrchestrationV2RuntimeRequest, OrchestrationV2RuntimeRequestKind,
         OrchestrationV2RuntimeRequestKindString, OrchestrationV2RuntimeRequestStatus,
         OrchestrationV2ThreadProjection,
         OrchestrationV2ThreadProjectionVisibleTurnItemsItemVisibility,
         OrchestrationV2TurnItemStatus, OrchestrationV2UserMessageInputIntent,
-        ProviderApprovalDecision,
+        ProviderApprovalDecision, ProviderInteractionMode,
     },
 };
 
@@ -95,6 +97,8 @@ pub enum ItemKind {
         text: String,
         /// Sent while a run was active, to run after it.
         queued: bool,
+        /// The images sent with it.
+        images: Vec<MessageImage>,
     },
     AssistantMessage {
         text: String,
@@ -105,6 +109,8 @@ pub enum ItemKind {
     },
     /// A proposed plan, in Markdown.
     Plan {
+        /// The plan's id, which a message that implements it names (`sourcePlanRef`).
+        plan_id: String,
         title: Option<String>,
         markdown: String,
     },
@@ -122,6 +128,9 @@ pub enum ItemKind {
         /// T3 leaves a command's output out of projections and events; it's fetched with
         /// `orchestration.getTurnItem` when the call is expanded.
         output_omitted: bool,
+        /// How many images the output holds, such as a browser tool's screenshots. They load
+        /// by index (`tool-output-image`).
+        images: usize,
     },
     FileChange {
         path: String,
@@ -145,13 +154,37 @@ pub enum ItemKind {
         title: Option<String>,
         questions: Vec<Question>,
     },
+    /// The agent asked for a secret, such as a token, which it waits for
+    /// (`chat/SecretRequestCard.tsx` in T3).
+    SecretRequest {
+        title: Option<String>,
+        /// What the secret is, such as "GitHub token".
+        label: String,
+        reason: String,
+        placeholder: Option<String>,
+        /// `pending`, `saved`, `declined`, or `cancelled`.
+        status: String,
+    },
     Error {
         message: String,
+        /// What kind of failure it was, such as `usage_limit`.
+        class: String,
+        /// The execution node that failed; a run's own failure is on its root node.
+        node_id: Option<String>,
     },
     /// A one-line marker: a notice, a checkpoint, a compaction, an interrupt.
     Notice {
         text: String,
     },
+}
+
+/// An image attached to a user message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessageImage {
+    /// T3's attachment id, which `assets.createUrl` loads it by.
+    pub attachment_id: String,
+    pub name: String,
+    pub mime_type: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -240,6 +273,7 @@ impl TimelineItem {
                 ItemKind::UserMessage {
                     text: item.text.clone(),
                     queued: item.input_intent == OrchestrationV2UserMessageInputIntent::QueuedTurn,
+                    images: message_images(&item.attachments),
                 }
             ),
             OrchestrationV2TurnItem::AssistantMessage(item) => item!(
@@ -258,6 +292,7 @@ impl TimelineItem {
             OrchestrationV2TurnItem::ProposedPlan(item) => item!(
                 item,
                 ItemKind::Plan {
+                    plan_id: item.plan_id.clone(),
                     title: non_empty(item.title.as_ref()),
                     markdown: item.markdown.clone(),
                 }
@@ -331,6 +366,7 @@ impl TimelineItem {
                         .filter(|command| command.contains('\n') || command.chars().count() > 100),
                     output: non_empty(item.output.as_ref()),
                     output_omitted: item.output_omitted.unwrap_or(false),
+                    images: 0,
                 }
             ),
             OrchestrationV2TurnItem::FileSearch(item) => item!(
@@ -352,6 +388,7 @@ impl TimelineItem {
                         )
                     }),
                     output_omitted: false,
+                    images: 0,
                 }
             ),
             OrchestrationV2TurnItem::WebSearch(item) => item!(
@@ -368,6 +405,7 @@ impl TimelineItem {
                     input: None,
                     output: None,
                     output_omitted: false,
+                    images: 0,
                 }
             ),
             OrchestrationV2TurnItem::DynamicTool(item) => item!(
@@ -378,8 +416,18 @@ impl TimelineItem {
                         .or_else(|| non_empty(item.tool_name.as_ref()))
                         .unwrap_or_else(|| "Tool call".to_string()),
                     input: json_text(&item.input),
-                    output: item.output.as_ref().and_then(json_text),
+                    output: item
+                        .output
+                        .as_ref()
+                        .and_then(|output| json_text(&without_image_data(output))),
                     output_omitted: item.output_omitted.unwrap_or(false),
+                    // T3 serves a tool's images only from its full output, so none are counted
+                    // while it's left out (`dynamicToolOutputImageResources` in T3).
+                    images: if item.output_omitted == Some(true) {
+                        0
+                    } else {
+                        item.output.as_ref().map_or(0, tool_output_images)
+                    },
                 }
             ),
             OrchestrationV2TurnItem::Subagent(item) => item!(
@@ -392,6 +440,7 @@ impl TimelineItem {
                     output: non_empty(item.result.as_ref())
                         .or_else(|| non_empty(item.progress.as_ref())),
                     output_omitted: false,
+                    images: 0,
                 }
             ),
             OrchestrationV2TurnItem::ApprovalRequest(item) => item!(
@@ -416,6 +465,8 @@ impl TimelineItem {
                 item,
                 ItemKind::Error {
                     message: item.failure.message.clone(),
+                    class: wire_string(&item.failure.class),
+                    node_id: item.node_id.clone(),
                 }
             ),
             OrchestrationV2TurnItem::SystemNotice(item) => {
@@ -457,10 +508,13 @@ impl TimelineItem {
             ),
             OrchestrationV2TurnItem::SecretRequest(item) => item!(
                 item,
-                notice(
-                    non_empty(item.title.as_ref())
-                        .unwrap_or_else(|| "The agent asked for a secret".into())
-                )
+                ItemKind::SecretRequest {
+                    title: non_empty(item.title.as_ref()),
+                    label: item.label.clone(),
+                    reason: item.reason.clone(),
+                    placeholder: non_empty(item.placeholder.as_ref()),
+                    status: wire_string(&item.secret_status),
+                }
             ),
             OrchestrationV2TurnItem::Unrecognized(_) => return None,
         })
@@ -487,6 +541,101 @@ pub fn display_command(input: &str) -> String {
         Some(quoted.unwrap_or(script).to_string())
     });
     unwrapped.unwrap_or_else(|| input.to_string())
+}
+
+fn message_images(attachments: &[ChatAttachment]) -> Vec<MessageImage> {
+    attachments
+        .iter()
+        .filter_map(|attachment| match attachment {
+            ChatAttachment::Image(image) => Some(MessageImage {
+                attachment_id: image.id.clone(),
+                name: image.name.clone(),
+                mime_type: image.mime_type.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The most images T3 serves from one tool's output (`MAX_TOOL_OUTPUT_IMAGES`).
+pub const MAX_TOOL_OUTPUT_IMAGES: usize = 8;
+
+/// The blocks of a tool's output: a list, `{ content: [...] }`, or one block
+/// (`outputBlocks` in T3's `packages/shared/src/toolOutput.ts`).
+fn output_blocks(output: &serde_json::Value) -> Vec<&serde_json::Value> {
+    match output {
+        serde_json::Value::Array(blocks) => blocks.iter().collect(),
+        serde_json::Value::Object(object) => match object.get("content") {
+            Some(serde_json::Value::Array(blocks)) => blocks.iter().collect(),
+            _ => vec![output],
+        },
+        other => vec![other],
+    }
+}
+
+/// Whether a block is an image T3 serves: `{ type: "image", mimeType, data }` or
+/// `{ type: "image", source: { type: "base64", media_type, data } }`, of a raster type agents
+/// take (`readToolOutputImage` in T3).
+fn is_tool_output_image(block: &serde_json::Value) -> bool {
+    if block.get("type").and_then(|kind| kind.as_str()) != Some("image") {
+        return false;
+    }
+    let mime_type = match block.get("source") {
+        Some(source) if source.is_object() => {
+            if source.get("type").and_then(|kind| kind.as_str()) != Some("base64") {
+                return false;
+            }
+            source.get("media_type")
+        }
+        _ => block.get("mimeType"),
+    };
+    mime_type
+        .and_then(|mime| mime.as_str())
+        .is_some_and(|mime| {
+            matches!(
+                mime.to_ascii_lowercase().as_str(),
+                "image/gif" | "image/jpeg" | "image/png" | "image/webp"
+            )
+        })
+}
+
+/// How many images a tool's output holds, up to the most T3 serves.
+fn tool_output_images(output: &serde_json::Value) -> usize {
+    output_blocks(output)
+        .into_iter()
+        .filter(|block| is_tool_output_image(block))
+        .take(MAX_TOOL_OUTPUT_IMAGES)
+        .count()
+}
+
+/// The output with its images' base64 data left out, to show as text.
+fn without_image_data(output: &serde_json::Value) -> serde_json::Value {
+    fn strip(value: &serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Array(values) => {
+                serde_json::Value::Array(values.iter().map(strip).collect())
+            }
+            serde_json::Value::Object(object) => {
+                if object.get("type").and_then(|kind| kind.as_str()) == Some("image") {
+                    let mut object = object.clone();
+                    object.remove("data");
+                    if let Some(serde_json::Value::Object(source)) = object.get_mut("source") {
+                        source.remove("data");
+                    }
+                    serde_json::Value::Object(object)
+                } else {
+                    serde_json::Value::Object(
+                        object
+                            .iter()
+                            .map(|(key, value)| (key.clone(), strip(value)))
+                            .collect(),
+                    )
+                }
+            }
+            other => other.clone(),
+        }
+    }
+    strip(output)
 }
 
 fn json_text(value: &serde_json::Value) -> Option<String> {
@@ -533,6 +682,35 @@ pub struct ContextUsage {
 pub struct QueuedMessage {
     pub run_id: String,
     pub text: String,
+}
+
+/// A plan the agent proposed, as T3 tracks it: it's `active` until it's implemented or a
+/// newer plan supersedes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProposedPlan {
+    pub id: String,
+    pub run_id: Option<String>,
+    pub status: OrchestrationV2PlanArtifactProposedPlanStatus,
+}
+
+/// The plan the composer offers to implement or refine: the latest proposed plan of the latest
+/// run, once that run settles.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActionablePlan {
+    pub plan_id: String,
+    /// The timeline item that shows it.
+    pub item_id: String,
+    pub title: Option<String>,
+    pub markdown: String,
+}
+
+/// What Resume does in an empty composer (`chat/useComposerResume.ts` in T3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resumable {
+    /// The interrupted or usage-limited run to continue, if there is one.
+    pub continue_run_id: Option<String>,
+    /// Whether queued messages are held, waiting for `queue.resume`.
+    pub held_queue: bool,
 }
 
 /// What changed when an event was applied.
@@ -589,6 +767,7 @@ pub struct ThreadState {
     messages: Vec<OrchestrationV2ConversationMessage>,
     provider_turns: Vec<OrchestrationV2ProviderTurn>,
     provider_threads: Vec<OrchestrationV2ProviderThread>,
+    plans: Vec<ProposedPlan>,
 }
 
 impl ThreadState {
@@ -607,6 +786,7 @@ impl ThreadState {
             messages: projection.messages,
             provider_turns: projection.provider_turns,
             provider_threads: projection.provider_threads,
+            plans: projection.plans.iter().filter_map(proposed_plan).collect(),
         }
     }
 
@@ -701,6 +881,15 @@ impl ThreadState {
             OrchestrationV2DomainEvent::Variant16 { payload, .. } => {
                 match TimelineItem::from_turn_item(&payload) {
                     Some(item) => self.upsert_item(item),
+                    None => Applied::default(),
+                }
+            }
+            OrchestrationV2DomainEvent::Variant17 { payload, .. } => {
+                match proposed_plan(&payload) {
+                    Some(plan) => {
+                        upsert(&mut self.plans, plan, |plan| &plan.id);
+                        changed
+                    }
                     None => Applied::default(),
                 }
             }
@@ -935,8 +1124,9 @@ impl ThreadState {
             .map(str::to_string)
     }
 
-    /// Replaces an item's omitted command output with the one T3 sent for it.
-    pub fn set_output(&mut self, item_id: &str, output: Option<String>) -> Applied {
+    /// Replaces an item's omitted output with the one T3 sent for it, with the number of images
+    /// it holds.
+    pub fn set_output(&mut self, item_id: &str, output: Option<String>, images: usize) -> Applied {
         let revision = self.next_revision;
         let Some(index) = self.items.iter().position(|item| item.id == item_id) else {
             return Applied::default();
@@ -944,6 +1134,7 @@ impl ThreadState {
         let ItemKind::Tool {
             output: existing,
             output_omitted,
+            images: existing_images,
             ..
         } = &mut self.items[index].kind
         else {
@@ -951,9 +1142,139 @@ impl ThreadState {
         };
         *existing = output;
         *output_omitted = false;
+        *existing_images = images;
         self.next_revision += 1;
         self.revisions[index] = revision;
         Applied { changed: true }
+    }
+
+    /// The latest run that started, ignoring queued runs and ones cancelled before they started
+    /// (`latestExecutedRun` in T3's `packages/shared/src/orchestrationV2ThreadError.ts`). A run
+    /// that hasn't finished counts as the latest, since held queues can run out of order.
+    pub fn latest_executed_run(&self) -> Option<&OrchestrationV2Run> {
+        let end = |run: &OrchestrationV2Run| run.completed_at.clone();
+        self.runs
+            .iter()
+            .filter(|run| run.status != OrchestrationV2RunStatus::Queued)
+            .filter(|run| {
+                !(run.status == OrchestrationV2RunStatus::Cancelled && run.started_at.is_none())
+            })
+            .max_by(|left, right| {
+                // Unfinished runs (no end) sort last; ties go to the higher ordinal.
+                match (end(left), end(right)) {
+                    (None, None) => left.ordinal.cmp(&right.ordinal),
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (Some(left_end), Some(right_end)) => left_end
+                        .cmp(&right_end)
+                        .then(left.ordinal.cmp(&right.ordinal)),
+                }
+            })
+    }
+
+    /// The failure of a failed run's own (root) node, the newest if there are several
+    /// (`latestRootProviderFailure` in T3).
+    fn root_failure_class(&self, run: &OrchestrationV2Run) -> Option<&str> {
+        self.items
+            .iter()
+            .filter(|item| {
+                item.status == ItemStatus::Failed && item.run_id.as_deref() == Some(&run.id)
+            })
+            .filter_map(|item| match &item.kind {
+                ItemKind::Error { class, node_id, .. }
+                    if node_id.as_deref() == run.root_node_id.as_deref() =>
+                {
+                    Some((item.ordinal, class.as_str()))
+                }
+                _ => None,
+            })
+            .max_by_key(|(ordinal, _)| *ordinal)
+            .map(|(_, class)| class)
+    }
+
+    /// What Resume would do, if anything: continue the latest run when it was interrupted or
+    /// stopped at a usage limit, and restart a held queue (`ChatView.tsx` in T3).
+    pub fn resumable(&self) -> Option<Resumable> {
+        let held_queue = self.runs.iter().any(|run| {
+            run.status == OrchestrationV2RunStatus::Queued && run.queue_held == Some(true)
+        });
+        let continue_run_id = self.latest_executed_run().and_then(|run| match run.status {
+            OrchestrationV2RunStatus::Interrupted => Some(run.id.clone()),
+            OrchestrationV2RunStatus::Failed
+                if self.root_failure_class(run) == Some("usage_limit") =>
+            {
+                Some(run.id.clone())
+            }
+            _ => None,
+        });
+        (held_queue || continue_run_id.is_some()).then_some(Resumable {
+            continue_run_id,
+            held_queue,
+        })
+    }
+
+    /// The plan to offer Implement and Refine for, as T3's composer does
+    /// (`shouldShowPlanFollowUpPrompt` in T3's `ChatView.logic.ts`): the thread is in plan mode,
+    /// its latest run has settled, no question is waiting, and that run's latest plan is still
+    /// active.
+    pub fn actionable_plan(&self) -> Option<ActionablePlan> {
+        if self.thread.interaction_mode != ProviderInteractionMode::Plan || self.is_running() {
+            return None;
+        }
+        if self
+            .pending_requests()
+            .iter()
+            .any(|request| request.is_question)
+        {
+            return None;
+        }
+        let latest_run_id = self
+            .runs
+            .iter()
+            .filter(|run| run.status != OrchestrationV2RunStatus::Queued)
+            .max_by_key(|run| run.ordinal)
+            .map(|run| run.id.clone());
+        // The plans' turn items, in timeline order.
+        let plan_items = self
+            .items
+            .iter()
+            .filter_map(|item| match &item.kind {
+                ItemKind::Plan {
+                    plan_id,
+                    title,
+                    markdown,
+                } => Some((item, plan_id, title, markdown)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let in_latest_run = self
+            .plans
+            .iter()
+            .filter(|plan| latest_run_id.is_some() && plan.run_id == latest_run_id)
+            .collect::<Vec<_>>();
+        let candidates = if in_latest_run.is_empty() {
+            self.plans.iter().collect()
+        } else {
+            in_latest_run
+        };
+        let plan = candidates.into_iter().max_by_key(|plan| {
+            plan_items
+                .iter()
+                .find(|(_, plan_id, _, _)| **plan_id == plan.id)
+                .map(|(item, ..)| item.ordinal)
+        })?;
+        if plan.status != OrchestrationV2PlanArtifactProposedPlanStatus::Active {
+            return None;
+        }
+        let (item, _, title, markdown) = plan_items
+            .into_iter()
+            .find(|(_, plan_id, _, _)| **plan_id == plan.id)?;
+        Some(ActionablePlan {
+            plan_id: plan.id.clone(),
+            item_id: item.id.clone(),
+            title: title.clone(),
+            markdown: markdown.clone(),
+        })
     }
 }
 
@@ -973,6 +1294,17 @@ impl TimelineItem {
             }
             _ => None,
         }
+    }
+}
+
+fn proposed_plan(artifact: &OrchestrationV2PlanArtifact) -> Option<ProposedPlan> {
+    match artifact {
+        OrchestrationV2PlanArtifact::ProposedPlan(plan) => Some(ProposedPlan {
+            id: plan.id.clone(),
+            run_id: plan.run_id.clone(),
+            status: plan.status.clone(),
+        }),
+        _ => None,
     }
 }
 
@@ -1007,4 +1339,35 @@ fn timeline_items(projection: &OrchestrationV2ThreadProjection) -> Vec<TimelineI
             Some(item)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn tool_output_images_are_counted_as_t3_counts_them() {
+        let png = json!({ "type": "image", "mimeType": "image/png", "data": "AAAA" });
+        let claude = json!({
+            "type": "image",
+            "source": { "type": "base64", "media_type": "image/jpeg", "data": "AAAA" }
+        });
+        let linked = json!({ "type": "image", "source": { "type": "url", "url": "https://x" } });
+        assert_eq!(tool_output_images(&json!([png, claude, linked])), 2);
+        assert_eq!(tool_output_images(&json!({ "content": [png] })), 1);
+        assert_eq!(tool_output_images(&png), 1);
+        assert_eq!(tool_output_images(&json!("text output")), 0);
+        assert_eq!(
+            tool_output_images(&json!(vec![png.clone(); 12])),
+            MAX_TOOL_OUTPUT_IMAGES
+        );
+        assert_eq!(
+            without_image_data(&json!({ "content": [png, claude] })),
+            json!({ "content": [
+                { "type": "image", "mimeType": "image/png" },
+                { "type": "image", "source": { "type": "base64", "media_type": "image/jpeg" } }
+            ] })
+        );
+    }
 }

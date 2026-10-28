@@ -18355,12 +18355,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "collections",
+ "db",
  "editor",
  "futures 0.3.34",
  "gpui",
+ "image",
  "language",
  "log",
  "markdown",
+ "menu",
  "mustr_ui",
  "parking_lot",
  "pretty_assertions",
@@ -18375,6 +18378,7 @@ dependencies = [
  "ui",
  "uuid",
  "workspace",
+ "zed_actions",
 ]
 
 [[package]]
