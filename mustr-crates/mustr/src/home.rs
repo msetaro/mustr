@@ -20,7 +20,6 @@ use workspace::{
 };
 
 const RECENT_THREADS: usize = 20;
-const PAIRING_COMMAND: &str = "t3 auth pairing create --scope orchestration:read --label mustr";
 const CONTENT_MAX_WIDTH: f32 = 880.;
 
 /// Startup options that change what the home view does on its own.
@@ -301,7 +300,13 @@ impl HomeView {
                     Some(error.clone()),
                 ),
             };
-        let needs_pairing = matches!(connection.status(), ConnectionStatus::NeedsPairing(_));
+        // Connected, but paired without the scopes writes need: pairing again fixes it.
+        let read_only = connection
+            .session()
+            .filter(|_| connection.status().is_connected())
+            .and_then(|session| session.write_blocked_reason());
+        let needs_pairing = matches!(connection.status(), ConnectionStatus::NeedsPairing(_))
+            || read_only.is_some();
         let can_retry = !matches!(connection.status(), ConnectionStatus::Connecting(_))
             && connection.server_url().is_some();
         let retry_label = if connection.status().is_connected() {
@@ -334,6 +339,13 @@ impl HomeView {
                         .color(Color::Muted),
                 )
             })
+            .when_some(read_only, |this, read_only| {
+                this.child(
+                    Label::new(read_only)
+                        .size(LabelSize::Small)
+                        .color(Color::Warning),
+                )
+            })
             .when(needs_pairing, |this| this.child(self.render_pairing(cx)))
     }
 
@@ -356,7 +368,7 @@ impl HomeView {
                     .rounded(tokens::CORNER_RADIUS / 2.)
                     .bg(colors.editor_background)
                     .child(
-                        Label::new(PAIRING_COMMAND)
+                        Label::new(t3_connection::pairing_command())
                             .size(LabelSize::Small)
                             .buffer_font(cx),
                     ),

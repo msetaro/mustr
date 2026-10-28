@@ -1,7 +1,9 @@
 //! mustr's connection to a T3 Code server: checking the server, pairing with it, keeping the
 //! bearer token, and holding the RPC socket open.
 //!
-//! M0 is read-only on purpose: mustr only ever asks for `orchestration:read`.
+//! mustr asks for exactly [`SCOPES`]: reading orchestration (pull requests, threads) and writing
+//! to pull requests (comments, reviews, viewed marks). A stored token that lacks one of them is
+//! replaced by pairing again.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use futures::{AsyncReadExt as _, FutureExt as _, future::BoxFuture};
@@ -34,13 +36,34 @@ const SERVER_URL_ENV: &str = "MUSTR_T3_SERVER";
 /// only: the file is protected by file permissions alone.
 pub const CREDENTIALS_FILE_ENV: &str = "MUSTR_CREDENTIALS_FILE";
 
-const SCOPES: [Scope; 1] = [Scope::OrchestrationRead];
+/// The scopes mustr asks T3 for. Not `orchestration:operate` until mustr drives agents, and
+/// never `access:*` or `relay:*`.
+pub const SCOPES: [Scope; 2] = [Scope::OrchestrationRead, Scope::SourceControlWrite];
 const PAIRING_LABEL: &str = "mustr";
 const PAIRING_TTL: &str = "5m";
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(30);
 /// Tokens this close to expiring are replaced rather than used.
 const TOKEN_EXPIRY_MARGIN_SECS: u64 = 60;
 const OPEN_PULL_REQUESTS_LIMIT: u32 = 50;
+
+/// The command that mints a pairing credential with [`SCOPES`] on the T3 machine.
+pub fn pairing_command() -> String {
+    let scopes = SCOPES
+        .iter()
+        .map(|scope| format!("--scope {}", scope.as_str()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("t3 auth pairing create {scopes} --label {PAIRING_LABEL}")
+}
+
+/// The scopes of [`SCOPES`] that `granted` (T3's scope names) doesn't include.
+pub fn missing_scopes<'a>(granted: impl IntoIterator<Item = &'a str>) -> Vec<Scope> {
+    let granted = granted.into_iter().collect::<Vec<_>>();
+    SCOPES
+        .into_iter()
+        .filter(|scope| !granted.contains(&scope.as_str()))
+        .collect()
+}
 
 /// Picks the T3 server: the `--t3-server` flag, then `MUSTR_T3_SERVER`, then `"t3": {"url"}`
 /// in mustr's settings file, then T3's default local address.
@@ -156,8 +179,10 @@ async fn mint_pairing_credential(
     if let Some(t3_home) = t3_home {
         command.arg("--base-dir").arg(t3_home);
     }
+    for scope in SCOPES {
+        command.args(["--scope", scope.as_str()]);
+    }
     command
-        .args(["--scope", Scope::OrchestrationRead.as_str()])
         .args(["--ttl", PAIRING_TTL, "--label", PAIRING_LABEL, "--json"])
         .stdin(util::command::Stdio::null());
     // A mustr started from a T3 terminal inherits the T3 service's variables, which would make
@@ -408,6 +433,26 @@ pub struct T3Session {
 }
 
 impl T3Session {
+    /// The scopes mustr needs that this session wasn't granted, for example when it was paired
+    /// with a read-only credential.
+    pub fn missing_scopes(&self) -> Vec<Scope> {
+        missing_scopes(self.token.scope.split_whitespace())
+    }
+
+    /// Why pull requests can't be written to with this session, if they can't.
+    pub fn write_blocked_reason(&self) -> Option<String> {
+        self.missing_scopes()
+            .contains(&Scope::SourceControlWrite)
+            .then(|| {
+                format!(
+                    "mustr's pairing with T3 can't write to pull requests (it lacks {}). Pair \
+                     again from the home view: {}",
+                    Scope::SourceControlWrite.as_str(),
+                    pairing_command()
+                )
+            })
+    }
+
     pub async fn open_pull_requests(&self) -> Result<PullRequestList> {
         let list = self
             .rpc
@@ -482,12 +527,21 @@ impl T3Session {
     }
 }
 
-/// `true` if T3 still accepts the token. `/api/auth/session` answers 200 either way.
-async fn token_is_accepted(
+/// What `/api/auth/session` says about a token.
+#[derive(Debug, PartialEq, Eq)]
+struct SessionCheck {
+    accepted: bool,
+    /// The scopes T3 granted the session, when it says.
+    scopes: Option<Vec<String>>,
+}
+
+/// Whether T3 still accepts the token, and with which scopes. `/api/auth/session` answers 200
+/// either way.
+async fn check_session(
     http: &dyn HttpClient,
     server_url: &Url,
     token: &AccessToken,
-) -> Result<bool> {
+) -> Result<SessionCheck> {
     let url = server_url.join("/api/auth/session")?;
     let request = Request::builder()
         .method(Method::GET)
@@ -502,18 +556,63 @@ async fn token_is_accepted(
     let mut body = Vec::new();
     response.body_mut().read_to_end(&mut body).await?;
     if response.status().as_u16() == 401 || response.status().as_u16() == 403 {
-        return Ok(false);
+        return Ok(SessionCheck {
+            accepted: false,
+            scopes: None,
+        });
     }
     if !response.status().is_success() {
         bail!("{url} returned {}", response.status());
     }
+    parse_session_check(&body).with_context(|| format!("unexpected response from {url}"))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum StoredTokenUse {
+    Use,
+    /// T3 accepts it, but it lacks some of [`SCOPES`]: pair again, and keep it in case that
+    /// fails.
+    PairAgain,
+    /// T3 no longer accepts it.
+    Discard,
+}
+
+/// What to do with a stored token, and the scopes it has. T3's account of the session wins over
+/// the scopes stored with the token.
+fn stored_token_use(session: &SessionCheck, stored_scope: &str) -> (StoredTokenUse, String) {
+    let scope = session
+        .scopes
+        .as_ref()
+        .map_or_else(|| stored_scope.to_string(), |scopes| scopes.join(" "));
+    let stored_use = if !session.accepted {
+        StoredTokenUse::Discard
+    } else if missing_scopes(scope.split_whitespace()).is_empty() {
+        StoredTokenUse::Use
+    } else {
+        StoredTokenUse::PairAgain
+    };
+    (stored_use, scope)
+}
+
+/// T3's `AuthSessionState`. Only the fields mustr reads, so it works across T3 versions.
+///
+/// T3 lists the session's full grant in `permissions`, and in `scopes` only the scopes older
+/// clients know (`authScopeResponse` in T3's `contracts/src/auth.ts`), so `source-control:write`
+/// shows up in `permissions` alone. Servers from before the split send only `scopes`.
+fn parse_session_check(body: &[u8]) -> Result<SessionCheck> {
     #[derive(Deserialize)]
     struct SessionState {
         authenticated: bool,
+        #[serde(default)]
+        scopes: Option<Vec<String>>,
+        #[serde(default)]
+        permissions: Option<Vec<String>>,
     }
-    let state: SessionState =
-        serde_json::from_slice(&body).with_context(|| format!("unexpected response from {url}"))?;
-    Ok(state.authenticated)
+    let state: SessionState = serde_json::from_slice(body)?;
+    Ok(SessionCheck {
+        accepted: state.authenticated,
+        scopes: state.permissions.or(state.scopes),
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -729,25 +828,38 @@ async fn establish(
     t3_client::check_protocol_compatibility(&descriptor)?;
 
     let mut token = None;
+    // A token T3 still accepts but that lacks some of `SCOPES`, used if pairing again fails, so
+    // mustr stays connected (without the missing scopes) instead of losing the connection.
+    let mut fallback_token = None;
     if pasted_credential.is_none() {
         match store.read(&server_url, cx).await {
             Ok(Some(stored)) if stored.is_usable_for(&descriptor.environment_id, unix_now()) => {
                 set_step("Signing in", cx);
-                let candidate = stored.to_access_token(unix_now());
-                let accepted = cx
+                let mut candidate = stored.to_access_token(unix_now());
+                let session = cx
                     .background_spawn({
                         let http = http.clone();
                         let server_url = server_url.clone();
                         let candidate = candidate.clone();
-                        async move { token_is_accepted(http.as_ref(), &server_url, &candidate).await }
+                        async move { check_session(http.as_ref(), &server_url, &candidate).await }
                     })
                     .await
                     .context("checking mustr's stored T3 token")?;
-                if accepted {
-                    token = Some(candidate);
-                } else {
-                    log::info!("T3 no longer accepts mustr's stored token; pairing again");
-                    store.delete(&server_url, cx).await.log_err();
+                let (stored_use, granted_scope) = stored_token_use(&session, &stored.scope);
+                candidate.scope = granted_scope;
+                match stored_use {
+                    StoredTokenUse::Use => token = Some(candidate),
+                    StoredTokenUse::PairAgain => {
+                        log::info!(
+                            "mustr's stored T3 token lacks {}; pairing again",
+                            scope_list(&missing_scopes(candidate.scope.split_whitespace()))
+                        );
+                        fallback_token = Some(candidate);
+                    }
+                    StoredTokenUse::Discard => {
+                        log::info!("T3 no longer accepts mustr's stored token; pairing again");
+                        store.delete(&server_url, cx).await.log_err();
+                    }
                 }
             }
             Ok(Some(_)) => {
@@ -764,67 +876,46 @@ async fn establish(
     let token = match token {
         Some(token) => token,
         None => {
-            let is_pasted = pasted_credential.is_some();
-            let credential = match pasted_credential {
-                Some(credential) => credential,
-                None => {
-                    set_step("Pairing with the local T3 Code", cx);
-                    let server_version = descriptor.server_version.clone();
-                    let executor = cx.background_executor().clone();
-                    let minted = cx
-                        .background_spawn(async move {
-                            let home = t3_home();
-                            let path_env = std::env::var_os("PATH");
-                            let cli = find_t3_cli(
-                                home.as_deref(),
-                                path_env.as_deref(),
-                                server_version.as_deref(),
-                            )
-                            .context("No T3 Code CLI found on this computer")?;
-                            log::info!("Pairing with T3 through {}", cli.display());
-                            mint_pairing_credential(&cli, home.as_deref(), &executor).await
-                        })
-                        .await;
-                    match minted {
-                        Ok(credential) => credential,
-                        Err(error) => {
-                            log::warn!("automatic pairing failed: {error:#}");
-                            return Ok(ConnectOutcome::NeedsPairing(format!("{error:#}")));
-                        }
+            let paired = pair(
+                &server_url,
+                &http,
+                &descriptor,
+                pasted_credential,
+                &set_step,
+                cx,
+            )
+            .await;
+            let access_token = match (paired, fallback_token) {
+                (Ok(access_token), _) => {
+                    let stored =
+                        StoredToken::new(&descriptor.environment_id, &access_token, unix_now());
+                    if let Err(error) = store.write(&server_url, &stored, cx).await {
+                        log::error!(
+                            "couldn't save the T3 token, so mustr will pair again next launch: \
+                             {error:#}"
+                        );
                     }
+                    access_token
                 }
-            };
-            set_step("Pairing with T3", cx);
-            let exchanged = cx
-                .background_spawn({
-                    let http = http.clone();
-                    let server_url = server_url.clone();
-                    async move {
-                        t3_client::exchange_pairing_credential(
-                            http.as_ref(),
-                            &server_url,
-                            &credential,
-                            &SCOPES,
-                            &ClientMetadata::default(),
-                        )
-                        .await
-                    }
-                })
-                .await;
-            let access_token = match exchanged {
-                Ok(access_token) => access_token,
-                // A typo in a pasted credential shouldn't lose the paste field.
-                Err(error) if is_pasted => {
-                    return Ok(ConnectOutcome::NeedsPairing(format!(
-                        "T3 didn't accept that pairing credential: {error:#}"
-                    )));
+                (Err(failure), Some(fallback)) => {
+                    log::warn!(
+                        "couldn't pair again ({}); staying connected without {}",
+                        failure.message(),
+                        scope_list(&missing_scopes(fallback.scope.split_whitespace()))
+                    );
+                    fallback
                 }
-                Err(error) => return Err(error.context("T3 didn't accept mustr's pairing")),
+                (Err(PairingFailure::NeedsPairing(reason)), None) => {
+                    return Ok(ConnectOutcome::NeedsPairing(reason));
+                }
+                (Err(PairingFailure::Failed(error)), None) => return Err(error),
             };
-            let stored = StoredToken::new(&descriptor.environment_id, &access_token, unix_now());
-            if let Err(error) = store.write(&server_url, &stored, cx).await {
-                log::error!(
-                    "couldn't save the T3 token, so mustr will pair again next launch: {error:#}"
+            let missing = missing_scopes(access_token.scope.split_whitespace());
+            if !missing.is_empty() {
+                log::warn!(
+                    "T3 granted mustr only {:?}, without {}",
+                    access_token.scope,
+                    scope_list(&missing)
                 );
             }
             access_token
@@ -863,6 +954,98 @@ async fn establish(
         }),
         driver,
     })
+}
+
+enum PairingFailure {
+    /// Automatic pairing isn't possible, or T3 refused a pasted credential: the user can paste
+    /// one.
+    NeedsPairing(String),
+    Failed(anyhow::Error),
+}
+
+impl PairingFailure {
+    fn message(&self) -> String {
+        match self {
+            PairingFailure::NeedsPairing(reason) => reason.clone(),
+            PairingFailure::Failed(error) => format!("{error:#}"),
+        }
+    }
+}
+
+/// Gets a new token for [`SCOPES`], from a pasted credential or one minted with the local CLI.
+async fn pair(
+    server_url: &Url,
+    http: &Arc<dyn HttpClient>,
+    descriptor: &EnvironmentDescriptor,
+    pasted_credential: Option<String>,
+    set_step: &impl Fn(&'static str, &mut AsyncApp),
+    cx: &mut AsyncApp,
+) -> Result<AccessToken, PairingFailure> {
+    let is_pasted = pasted_credential.is_some();
+    let credential = match pasted_credential {
+        Some(credential) => credential,
+        None => {
+            set_step("Pairing with the local T3 Code", cx);
+            let server_version = descriptor.server_version.clone();
+            let executor = cx.background_executor().clone();
+            let minted = cx
+                .background_spawn(async move {
+                    let home = t3_home();
+                    let path_env = std::env::var_os("PATH");
+                    let cli = find_t3_cli(
+                        home.as_deref(),
+                        path_env.as_deref(),
+                        server_version.as_deref(),
+                    )
+                    .context("No T3 Code CLI found on this computer")?;
+                    log::info!("Pairing with T3 through {}", cli.display());
+                    mint_pairing_credential(&cli, home.as_deref(), &executor).await
+                })
+                .await;
+            match minted {
+                Ok(credential) => credential,
+                Err(error) => {
+                    log::warn!("automatic pairing failed: {error:#}");
+                    return Err(PairingFailure::NeedsPairing(format!("{error:#}")));
+                }
+            }
+        }
+    };
+    set_step("Pairing with T3", cx);
+    let exchanged = cx
+        .background_spawn({
+            let http = http.clone();
+            let server_url = server_url.clone();
+            async move {
+                t3_client::exchange_pairing_credential(
+                    http.as_ref(),
+                    &server_url,
+                    &credential,
+                    &SCOPES,
+                    &ClientMetadata::default(),
+                )
+                .await
+            }
+        })
+        .await;
+    match exchanged {
+        Ok(access_token) => Ok(access_token),
+        // A typo in a pasted credential shouldn't lose the paste field.
+        Err(error) if is_pasted => Err(PairingFailure::NeedsPairing(format!(
+            "T3 didn't accept that pairing credential: {error:#}"
+        ))),
+        Err(error) => Err(PairingFailure::Failed(
+            error.context("T3 didn't accept mustr's pairing"),
+        )),
+    }
+}
+
+fn scope_list(scopes: &[Scope]) -> String {
+    scopes
+        .iter()
+        .map(|scope| scope.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
@@ -1021,6 +1204,74 @@ mod tests {
         assert_eq!(restored.access_token, "secret");
         assert_eq!(restored.expires_in, 2_600.0);
         assert_eq!(restored.scope, "orchestration:read");
+    }
+
+    #[test]
+    fn mustr_asks_for_reading_and_pull_request_writes_only() {
+        assert_eq!(
+            SCOPES.map(Scope::as_str),
+            ["orchestration:read", "source-control:write"]
+        );
+        assert_eq!(
+            pairing_command(),
+            "t3 auth pairing create --scope orchestration:read --scope source-control:write \
+             --label mustr"
+        );
+        assert_eq!(
+            missing_scopes("orchestration:read".split_whitespace()),
+            [Scope::SourceControlWrite]
+        );
+        assert!(missing_scopes(["source-control:write", "orchestration:read"]).is_empty());
+    }
+
+    #[test]
+    fn stored_tokens_without_the_write_scope_are_replaced() {
+        let check = |accepted: bool, scopes: Option<&[&str]>| SessionCheck {
+            accepted,
+            scopes: scopes.map(|scopes| scopes.iter().map(|scope| scope.to_string()).collect()),
+        };
+        let both = "orchestration:read source-control:write";
+        assert_eq!(
+            stored_token_use(&check(true, None), both),
+            (StoredTokenUse::Use, both.to_string())
+        );
+        // A token from M0, paired read-only.
+        assert_eq!(
+            stored_token_use(&check(true, None), "orchestration:read"),
+            (StoredTokenUse::PairAgain, "orchestration:read".to_string())
+        );
+        // T3's account of the session wins over what was stored.
+        assert_eq!(
+            stored_token_use(&check(true, Some(&["orchestration:read"])), both),
+            (StoredTokenUse::PairAgain, "orchestration:read".to_string())
+        );
+        assert_eq!(
+            stored_token_use(&check(false, None), both).0,
+            StoredTokenUse::Discard
+        );
+
+        // What T3 0.1.1 answers for mustr's session: the write scope is only in `permissions`.
+        let session = parse_session_check(
+            br#"{"authenticated":true,"auth":{},"scopes":["orchestration:read"],"permissions":["orchestration:read","source-control:write"],"sessionMethod":"bearer-access-token"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            session,
+            check(true, Some(&["orchestration:read", "source-control:write"]))
+        );
+        assert_eq!(stored_token_use(&session, both).0, StoredTokenUse::Use);
+        // A server from before `permissions`.
+        assert_eq!(
+            parse_session_check(
+                br#"{"authenticated":true,"auth":{},"scopes":["orchestration:read"]}"#
+            )
+            .unwrap(),
+            check(true, Some(&["orchestration:read"]))
+        );
+        assert_eq!(
+            parse_session_check(br#"{"authenticated":false,"auth":{}}"#).unwrap(),
+            check(false, None)
+        );
     }
 
     #[test]
