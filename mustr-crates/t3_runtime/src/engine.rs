@@ -42,6 +42,7 @@ pub const EXIT_CODE_STATE_DIR_OWNED: i32 = 78;
 pub const STOP_GRACE: Duration = Duration::from_secs(5);
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const READY_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_LOG_BYTES: u64 = 20 * 1024 * 1024;
 
 /// The secret the engine derives its accepted bootstrap tokens from. Never logged.
@@ -402,17 +403,17 @@ impl EngineProcess {
 }
 
 /// Polls the engine's descriptor (`/.well-known/t3/environment`) until it answers, the engine
-/// exits, or `timeout` passes.
+/// exits (`has_exited` returns its status), or `timeout` passes.
 pub async fn wait_until_ready(
     http: &dyn HttpClient,
     url: &Url,
-    process: &mut EngineProcess,
+    mut has_exited: impl FnMut() -> Option<ExitStatus>,
     timeout: Duration,
     sleep: &Sleep,
 ) -> Result<EnvironmentDescriptor> {
     let started = Instant::now();
     loop {
-        if let Some(status) = process.try_exit() {
+        if let Some(status) = has_exited() {
             bail!(
                 "the agents engine stopped while starting ({})",
                 describe_exit(&status)
@@ -432,6 +433,15 @@ pub async fn wait_until_ready(
             );
         }
         sleep(READY_POLL_INTERVAL).await;
+    }
+}
+
+/// Whether a T3 server answers its descriptor within a few seconds: the health check for a
+/// running engine.
+pub async fn answers(http: &dyn HttpClient, url: &Url, sleep: &Sleep) -> bool {
+    futures::select! {
+        descriptor = t3_client::fetch_descriptor(http, url).fuse() => descriptor.is_ok(),
+        _ = sleep(HEALTH_CHECK_TIMEOUT).fuse() => false,
     }
 }
 

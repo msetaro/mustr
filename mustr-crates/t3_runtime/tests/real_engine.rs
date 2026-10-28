@@ -61,7 +61,7 @@ fn downloads_starts_and_connects_to_the_real_engine() -> Result<()> {
             let descriptor = engine::wait_until_ready(
                 http.as_ref(),
                 &url,
-                &mut process,
+                || process.try_exit(),
                 Duration::from_secs(120),
                 &sleep,
             )
@@ -105,16 +105,23 @@ fn downloads_starts_and_connects_to_the_real_engine() -> Result<()> {
                         .iter()
                         .map(|provider| {
                             format!(
-                                "{} ({}, auth {})",
+                                "{} ({}, {}, installed {}, auth {}: {})",
                                 provider["driver"].as_str().unwrap_or("?"),
                                 provider["status"].as_str().unwrap_or("?"),
-                                provider["auth"]["status"].as_str().unwrap_or("?")
+                                if provider["enabled"].as_bool() == Some(true) {
+                                    "enabled"
+                                } else {
+                                    "disabled"
+                                },
+                                provider["installed"],
+                                provider["auth"]["status"].as_str().unwrap_or("?"),
+                                provider["message"].as_str().unwrap_or("")
                             )
                         })
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            println!("providers: {}", providers.join(", "));
+            println!("providers:\n  {}", providers.join("\n  "));
             connection.close();
             drop(driver);
 
