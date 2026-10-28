@@ -176,8 +176,26 @@ pub fn open_home_window(app_state: Arc<AppState>, cx: &mut App) {
     .detach();
 }
 
+// The window icon X11 shows. Wayland finds the icon through the desktop file
+// for the app ID, and macOS through the app bundle. Copied from
+// crates/zed/src/zed.rs, without the build step that resizes Zed's icon.
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+static APP_ICON: std::sync::LazyLock<Option<Arc<image::RgbaImage>>> =
+    std::sync::LazyLock::new(|| {
+        const BYTES: &[u8] =
+            include_bytes!("../resources/linux/hicolor/256x256/apps/dev.mustr.mustr.png");
+        util::maybe!({
+            let image = image::ImageReader::new(std::io::Cursor::new(BYTES))
+                .with_guessed_format()?
+                .decode()?
+                .into();
+            anyhow::Ok(Arc::new(image))
+        })
+        .log_err()
+    });
+
 // Copied from crates/zed/src/zed.rs (`build_window_options`), with mustr's app
-// ID. mustr has no app icon yet.
+// ID and icon.
 pub fn build_window_options(display_uuid: Option<Uuid>, cx: &mut App) -> WindowOptions {
     let display = display_uuid.and_then(|uuid| {
         cx.displays()
@@ -209,6 +227,8 @@ pub fn build_window_options(display_uuid: Option<Uuid>, cx: &mut App) -> WindowO
         display_id: display.map(|display| display.id()),
         window_background: theme::ActiveTheme::theme(cx).window_background_appearance(),
         app_id: Some(APP_ID.to_owned()),
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        icon: APP_ICON.as_ref().cloned(),
         window_decorations: Some(window_decorations),
         window_min_size: Some(gpui::Size {
             width: px(360.0),

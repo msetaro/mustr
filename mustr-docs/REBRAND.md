@@ -50,7 +50,7 @@ the user controls. URL scheme `mustr://`. Directory name `mustr`/`mustr`. CLI `m
 
 | # | Item | Where | Class | mustr action |
 |---|---|---|---|---|
-| 10 | App icons (PNG, ICNS, ICO) | `crates/zed/resources/app-icon{,-dev,-nightly,-preview}{,@2x}.png`, `resources/Document.icns`, `resources/windows/app-icon*.ico`. Referenced by: Cargo bundle `icon=` (`zed/Cargo.toml:287,296,305,314`), `zed/build.rs:220-259` (X11 icon → `OUT_DIR/app_icon.png`, included at `zed/src/zed.rs:382`), the About dialog (`zed.rs:1532-1539`), `windows_resources.rs:41` (`ICON_DIR`), `script/bundle-linux:214-217`, `script/bundle-mac:135-141`, the flatpak manifest (`resources/flatpak/manifest-template.json:40`), `zed.iss` `SetupIconFile` | B | Put mustr's artwork in `mustr-crates/mustr/resources/`, with mustr's own `build.rs` (copy `prepare_app_icon_x11`) and bundle scripts. **Needs artwork from the user.** |
+| 10 | App icons (PNG, ICNS, ICO) | `crates/zed/resources/app-icon{,-dev,-nightly,-preview}{,@2x}.png`, `resources/Document.icns`, `resources/windows/app-icon*.ico`. Referenced by: Cargo bundle `icon=` (`zed/Cargo.toml:287,296,305,314`), `zed/build.rs:220-259` (X11 icon → `OUT_DIR/app_icon.png`, included at `zed/src/zed.rs:382`), the About dialog (`zed.rs:1532-1539`), `windows_resources.rs:41` (`ICON_DIR`), `script/bundle-linux:214-217`, `script/bundle-mac:135-141`, the flatpak manifest (`resources/flatpak/manifest-template.json:40`), `zed.iss` `SetupIconFile` | B | Done: `script/mustr-icons` generates the artwork into `mustr-crates/mustr/resources/` (`app-icon{,@2x}.png` and `mustr.icns` for macOS, `linux/hicolor/*/apps/dev.mustr.mustr.{png,svg}`, `windows/app-icon.ico`). The X11 window icon is set in `mustr/src/window.rs`. The bundle scripts still need to reference these files. |
 | 11 | In-app Zed logos and icons | `assets/images/zed_logo.svg`, `zed_x_copilot.svg`, `assets/icons/zed_*.svg`, `ai_zed.svg` (`icons/src/icons.rs:300-309` `IconName::Zed*`), embedded by `assets/src/assets.rs:10-24` | A | GPUI takes any `AssetSource` (`gpui/src/app.rs:233` `with_assets`). mustr passes an overlay source: mustr's files first, then Zed's `Assets`. Most of these icons belong to agent and AI UI that mustr hides. |
 
 ### 2.3 URL scheme
@@ -176,7 +176,7 @@ upstream removes a fallback, and nothing is ever carried as a local diff.
 
 **Deferred:** a separate CLI (P4), Flatpak/Snap/FreeBSD and the install script, the Windows Explorer menu, SSH/WSL remoting, and MCP OAuth identity.
 
-**Needs the user:** confirm the identifiers (name, app ID, URL scheme), provide icon artwork, provide an Apple Developer ID certificate and notarization API key, provide a Windows code-signing identity, and decide on the extension registry (row 29).
+**Needs the user:** confirm the identifiers (name, app ID, URL scheme), provide an Apple Developer ID certificate and notarization API key, provide a Windows code-signing identity, and decide on the extension registry (row 29).
 
 ---
 
