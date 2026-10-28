@@ -164,6 +164,11 @@ fn load_default_keymap(cx: &mut App) {
     // user's (so they can be rebound).
     let mut mustr_bindings = review::key_bindings();
     mustr_bindings.extend(thread_chat::key_bindings());
+    // Work packages add their bindings here, each package under its own label
+    // (`mustr-docs/PARITY.md` §3).
+    // WP4, ship the work:
+    // WP5, scheduled tasks:
+    // WP6, terminals and worktrees:
     for key_binding in &mut mustr_bindings {
         key_binding.set_meta(KeybindSource::Default.meta());
     }

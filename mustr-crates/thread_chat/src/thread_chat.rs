@@ -21,6 +21,12 @@ mod sidebar;
 mod thread_view;
 mod timeline;
 
+// Work packages add their `mod` and `pub use` lines here, each package under its own label, so
+// their branches merge without conflicts (`mustr-docs/PARITY.md` §3).
+// WP1, thread settings and new threads:
+// WP2, composer and timeline:
+// WP3, thread list and projects:
+
 #[cfg(test)]
 mod tests;
 
@@ -48,6 +54,12 @@ use workspace::Workspace;
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| thread_view::register(workspace))
         .detach();
+    // Work packages call their `init` here, each package under its own label
+    // (`mustr-docs/PARITY.md` §3).
+    // WP1, thread settings and new threads:
+    // WP2, composer and timeline:
+    // WP3, thread list and projects:
+    // WP5, subagents and workflows:
 }
 
 /// mustr's key bindings for threads. The app binds them after Zed's, so users can rebind them:
@@ -62,6 +74,11 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-enter", SendMessage, composer),
         KeyBinding::new("enter", SendMessage, composer),
         KeyBinding::new("secondary-shift-enter", SteerMessage, composer),
+        // Work packages add their bindings here, each package under its own label
+        // (`mustr-docs/PARITY.md` §3).
+        // WP1, thread settings and new threads:
+        // WP2, composer and timeline:
+        // WP3, thread list and projects:
     ]
 }
 

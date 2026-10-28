@@ -25,6 +25,12 @@ mod title_bar;
 mod window;
 mod worktree_git;
 
+// Work packages add their `mod` lines here, each package under its own label, so their branches
+// merge without conflicts (`mustr-docs/PARITY.md` §3).
+// WP4, ship the work:
+// WP5, scheduled tasks:
+// WP6, terminals and worktrees:
+
 use anyhow::{Context as _, Result};
 use assets::Assets;
 use clap::Parser;
@@ -401,4 +407,9 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     status_bar::init(cx);
     thread_chat::init(cx);
     window::init(cx);
+    // Work packages call their `init` here, each package under its own label
+    // (`mustr-docs/PARITY.md` §3).
+    // WP4, ship the work:
+    // WP5, scheduled tasks:
+    // WP6, terminals and worktrees:
 }
