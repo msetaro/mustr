@@ -34,6 +34,8 @@ mod zed_services;
 // WP5, scheduled tasks:
 mod schedules;
 // WP6, terminals and worktrees:
+mod terminal_panel;
+mod worktrees;
 // WP7, macOS:
 #[cfg(target_os = "macos")]
 mod macos;
@@ -448,6 +450,8 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     // WP5, scheduled tasks:
     schedules::init(cx);
     // WP6, terminals and worktrees:
+    worktrees::init(cx);
+    terminal_panel::init(cx);
     // WP7, macOS:
     #[cfg(target_os = "macos")]
     macos::init(cx);

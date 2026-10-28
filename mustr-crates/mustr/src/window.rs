@@ -85,6 +85,7 @@ pub fn init(cx: &mut App) {
         // Work packages add their dock panels here, created synchronously like the nav panel,
         // each package under its own label (`mustr-docs/PARITY.md` §3).
         // WP6, terminals and worktrees:
+        crate::terminal_panel::add_panel(workspace, &workspace_handle, window, cx);
         workspace.finish_dock_restoration(cx);
         // The window's first item may already be open.
         let active_item = workspace.active_item(cx);
