@@ -7,8 +7,10 @@ use crate::{
     backend::ThreadBackend,
     commands::{self, LaunchIds},
     composer::{COMPOSER_MAX_LINES, COMPOSER_MIN_LINES},
+    family_bar::ThreadFamilyBar,
     model::{Row, ThreadState},
     new_thread::{NewThreadForm, NewThreadFormEvent},
+    settings_bar::ThreadSettingsBar,
     timeline::truncate,
 };
 use collections::{HashMap, HashSet};
@@ -71,6 +73,10 @@ pub struct ThreadView {
     pub(crate) expanded: HashSet<String>,
     pub(crate) loading_outputs: HashSet<String>,
     pub(crate) composer: Entity<Editor>,
+    /// In the composer's bottom row.
+    pub(crate) settings_bar: Entity<ThreadSettingsBar>,
+    /// Under the header.
+    family_bar: Entity<ThreadFamilyBar>,
     pub(crate) sending: bool,
     /// Requests being answered, by id.
     pub(crate) responding: HashSet<String>,
@@ -156,6 +162,9 @@ impl ThreadView {
         });
         let list_state = ListState::new(0, ListAlignment::Top, px(2048.));
         list_state.set_follow_mode(FollowMode::Tail);
+        let this_view = cx.weak_entity();
+        let settings_bar = cx.new(|cx| ThreadSettingsBar::new(this_view.clone(), window, cx));
+        let family_bar = cx.new(|cx| ThreadFamilyBar::new(this_view, window, cx));
         let mut this = Self {
             focus_handle: cx.focus_handle(),
             backend: backend.clone(),
@@ -172,6 +181,8 @@ impl ThreadView {
             expanded: HashSet::default(),
             loading_outputs: HashSet::default(),
             composer,
+            settings_bar,
+            family_bar,
             sending: false,
             responding: HashSet::default(),
             answers: HashMap::default(),
@@ -459,6 +470,7 @@ impl Render for ThreadView {
             .bg(palette.background.hsla())
             .when(self.new_thread.is_none(), |this| {
                 this.child(self.render_header(cx))
+                    .child(self.family_bar.clone())
             })
             .child(
                 div()

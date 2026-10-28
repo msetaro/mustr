@@ -6,6 +6,7 @@ use crate::{
     backend::{Access, AttachmentUpload, ReadOnlyBackend, ThreadBackend, ThreadBackendExt as _},
     composer::{SendMessage, SteerMessage},
     model::{ItemKind, ItemStatus, Row, ThreadActivity, ThreadState},
+    shell::{Shell, ThreadShells},
     sidebar::{ShellStatus, ThreadList},
     thread_view::ThreadView,
 };
@@ -616,6 +617,69 @@ fn the_thread_list_follows_the_shell() {
     assert!(list.apply(removed));
     assert_eq!(list.threads.len(), 1);
     assert_eq!(list.sequence, 9);
+}
+
+// The app's shell.
+
+fn shell_update(sequence: i64, location: &str, thread: Value) -> OrchestrationV2ShellStreamItem {
+    serde_json::from_value(json!({
+        "kind": "thread.updated", "sequence": sequence, "location": location, "thread": thread
+    }))
+    .unwrap()
+}
+
+fn shell_removal(sequence: i64, thread_id: &str) -> OrchestrationV2ShellStreamItem {
+    serde_json::from_value(json!({
+        "kind": "thread.removed", "sequence": sequence, "location": "active", "threadId": thread_id
+    }))
+    .unwrap()
+}
+
+#[test]
+fn the_shell_keeps_t3s_records_of_active_threads() {
+    let snapshot: OrchestrationV2ShellSnapshot = serde_json::from_value(shell_json()).unwrap();
+    let mut shell = Shell::from_snapshot(&snapshot);
+    assert_eq!(shell.sequence, 7);
+    assert_eq!(shell.projects["project-1"].title, "api");
+
+    // A subagent names its parent in its lineage.
+    let mut child = shell_thread("child", "Write the tests", "running", NOW);
+    child["lineage"] = json!({
+        "rootThreadId": THREAD, "parentThreadId": THREAD, "relationshipToParent": "subagent"
+    });
+    assert!(shell.apply(shell_update(8, "active", child)));
+    assert_eq!(
+        shell.threads["child"].lineage.parent_thread_id.as_deref(),
+        Some(THREAD)
+    );
+
+    // Events the shell already has change nothing.
+    assert!(!shell.apply(shell_removal(8, THREAD)));
+    assert!(shell.threads.contains_key(THREAD));
+
+    // Archived threads leave it, as do removed ones.
+    let archived = shell_thread("old", "Old thread", "completed", NOW);
+    assert!(shell.apply(shell_update(9, "archive", archived)));
+    assert!(shell.apply(shell_removal(10, "child")));
+    assert_eq!(shell.threads.keys().collect::<Vec<_>>(), [THREAD]);
+    assert_eq!(shell.sequence, 10);
+}
+
+#[gpui::test]
+async fn the_app_follows_the_shell_once(cx: &mut TestAppContext) {
+    let backend = Arc::new(FakeBackend::default());
+    cx.update(|cx| crate::set_backend(backend, cx));
+    let shells = cx.update(ThreadShells::global);
+    cx.run_until_parked();
+    shells.read_with(cx, |shells, _| {
+        assert_eq!(
+            shells.thread(THREAD).map(|thread| thread.title.as_str()),
+            Some("Add retries to the webhook dispatcher")
+        );
+        assert_eq!(shells.error(), None);
+    });
+    let again = cx.update(ThreadShells::global);
+    assert_eq!(again.entity_id(), shells.entity_id());
 }
 
 // A recording backend.

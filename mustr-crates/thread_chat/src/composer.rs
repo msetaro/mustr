@@ -670,6 +670,7 @@ impl ThreadView {
                             .child(
                                 h_flex()
                                     .gap_1p5()
+                                    .child(self.settings_bar.clone())
                                     .children(hint)
                                     .when_some(blocked, |this, blocked| {
                                         this.child(

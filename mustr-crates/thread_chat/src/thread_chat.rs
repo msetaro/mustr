@@ -3,14 +3,18 @@
 //!
 //! Everything goes through T3's orchestration API behind [`ThreadBackend`], which the app sets
 //! with [`set_backend`]. Other parts of mustr drive threads through [`send_message`] (for
-//! example, the review's "Send to agent") and open them with [`open_thread`].
+//! example, the review's "Send to agent") and open them with [`open_thread`]. [`ThreadShells`]
+//! keeps T3's shell, every thread and project, for the whole app.
 
 pub mod backend;
 pub mod commands;
 mod composer;
+mod family_bar;
 mod header;
 pub mod model;
 mod new_thread;
+mod settings_bar;
+pub mod shell;
 mod sidebar;
 mod thread_view;
 mod timeline;
@@ -23,7 +27,10 @@ pub use backend::{
     ThreadBackendExt, backend, set_backend,
 };
 pub use composer::{SendMessage, SteerMessage, StopThread};
+pub use family_bar::ThreadFamilyBar;
 pub use new_thread::{AgentChoice, NewThreadForm, agent_choices, runtime_mode_for};
+pub use settings_bar::ThreadSettingsBar;
+pub use shell::{Shell, ThreadShells};
 pub use sidebar::{ShellStatus, ThreadEntry, ThreadList, ThreadsSidebar};
 pub use thread_view::{NewThread, ThreadView, open_thread};
 
