@@ -27,6 +27,12 @@ cargo run -p mustr
 ```
 
 - The first build takes a while. Later builds are incremental.
+- **As an app,** for daily use: `script/mustr-bundle-mac --open`. It builds mustr, wraps it in
+  `target/mustr-debug/mustr.app` with an `Info.plist` and mustr's icon, signs it ad hoc for this
+  Mac, and opens it. Only a bundle gets system notifications (GPUI needs a bundle identifier), the
+  `mustr://` URL scheme, and mustr's name in the Dock and the ⌘-Tab switcher. Add `--release` for a
+  faster app. Keep the bundle where the script puts it: debug builds find their assets by walking up
+  from the executable to the checkout.
 - **Release build:** `cargo run -p mustr --release`.
 - **Precompiled shaders,** as Zed ships them: `cargo run -p mustr --no-default-features`. This
   needs full Xcode with its Metal toolchain. On Xcode 26 and later, also run
@@ -118,10 +124,10 @@ Nothing has run on a Mac yet.
 - **What the cross check can't see.** It runs without the macOS SDK: C code from build scripts
   goes to a stand-in compiler, and GPUI's shader outputs are stubbed. So C-level build failures
   (missing headers, SDK versions) and link errors can only show up on a Mac.
-- **No app bundle.** `cargo run` has no `Info.plist`, so macOS shows "mustr" from the executable's
-  name, there's no `mustr://` URL scheme, and GPUI's system notifications are off (they need a
-  bundle identifier). Packaging (a signed, notarized `.app` and `.dmg`) is M3 work
-  (`mustr-docs/PLAN.md`).
+- **`cargo run` has no app bundle.** It has no `Info.plist`, so there's no `mustr://` URL scheme and
+  GPUI's system notifications are off (they need a bundle identifier); mustr shows in-app toasts
+  only. `script/mustr-bundle-mac` fixes that for this Mac. Packaging for other Macs (a Developer ID
+  signed, notarized `.app` and `.dmg`) is M3 work (`mustr-docs/PLAN.md`).
 - **Font size shortcuts do nothing** (⌘=, ⌘-, ⌘0), on every platform. Zed's keymap binds them,
   but their handlers are in Zed's `crates/zed`, which mustr doesn't include.
 - **Intel Macs** have no T3 engine (see Prerequisites).
