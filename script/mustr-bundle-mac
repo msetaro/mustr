@@ -5,10 +5,13 @@
 #   script/mustr-bundle-mac            # debug build, then target/mustr-debug/mustr.app
 #   script/mustr-bundle-mac --release  # release build, then target/mustr-release/mustr.app
 #   script/mustr-bundle-mac --open     # also launches it
+#   script/mustr-bundle-mac --release --out-dir DIR --no-sign
+#                                      # DIR/mustr.app, unsigned (script/mustr-package-mac)
 #
-# The bundle is signed ad hoc, for this Mac only. It isn't notarized; that's packaging work.
+# The bundle is signed ad hoc, for this Mac only. script/mustr-package-mac makes the release zip.
 # Debug builds read their assets from the checkout, which they find by walking up from the
-# executable, so the bundle stays inside the checkout's target folder.
+# executable, so a debug bundle stays inside the checkout's target folder. Release builds embed
+# their assets and run from anywhere.
 
 set -euo pipefail
 
@@ -18,19 +21,32 @@ root=$(pwd)
 profile=debug
 cargo_flags=()
 open_after=false
-for arg in "$@"; do
-    case "$arg" in
+out_dir=
+sign=true
+while [[ $# -gt 0 ]]; do
+    case "$1" in
         --release)
             profile=release
             cargo_flags+=(--release)
             ;;
         --open) open_after=true ;;
+        --out-dir)
+            [[ $# -ge 2 ]] || { echo "mustr-bundle-mac: --out-dir needs a directory" >&2; exit 2; }
+            out_dir=$2
+            shift
+            ;;
+        --no-sign) sign=false ;;
         *)
-            echo "mustr-bundle-mac: unknown argument $arg" >&2
+            echo "mustr-bundle-mac: unknown argument $1" >&2
             exit 2
             ;;
     esac
+    shift
 done
+if [[ -n "$out_dir" && "$profile" == debug ]]; then
+    echo "mustr-bundle-mac: a debug bundle must stay in the checkout; --out-dir needs --release" >&2
+    exit 2
+fi
 
 if [[ "$(uname -s)" != Darwin ]]; then
     echo "mustr-bundle-mac: this builds a macOS app bundle; run it on a Mac" >&2
@@ -78,7 +94,12 @@ target_dir=${CARGO_TARGET_DIR:-$root/target}
 binary="$target_dir/$profile/mustr"
 version=$(sed -n 's/^version = "\(.*\)"$/\1/p' mustr-crates/mustr/Cargo.toml | head -n 1)
 
-app="$root/target/mustr-$profile/mustr.app"
+if [[ -n "$out_dir" ]]; then
+    mkdir -p "$out_dir"
+    app="$(cd "$out_dir" && pwd)/mustr.app"
+else
+    app="$root/target/mustr-$profile/mustr.app"
+fi
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 # A copy-on-write clone on APFS, so the large debug binary costs no time or space.
@@ -133,7 +154,9 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - --identifier dev.mustr.mustr "$app"
+if [[ "$sign" == true ]]; then
+    codesign --force --sign - --identifier dev.mustr.mustr "$app"
+fi
 
 echo "Built $app"
 if [[ "$open_after" == true ]]; then

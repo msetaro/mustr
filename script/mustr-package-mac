@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Packages mustr for a release, on an Apple silicon Mac: a release build in mustr.app (made by
+# script/mustr-bundle-mac), signed, then zipped for the release page and the in-app updater.
+#
+#   script/mustr-package-mac                 # dist/mustr-<version>-macos-aarch64.zip
+#   script/mustr-package-mac --out-dir DIR   # DIR/mustr-<version>-macos-aarch64.zip
+#
+# The release workflow (.github/workflows/mustr-release.yml) runs it; mustr-docs/RELEASING.md
+# describes the rest. Environment:
+#   MUSTR_CODESIGN_IDENTITY  the signing identity; "-" (ad hoc, the default) until mustr has an
+#                            Apple Developer ID (see "Signing" below).
+#   CARGO_PROFILE_RELEASE_DEBUG  0 by default here: the shipped binary carries no debug info.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+root=$(pwd)
+
+dist=$root/dist
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --out-dir)
+            [[ $# -ge 2 ]] || { echo "mustr-package-mac: --out-dir needs a directory" >&2; exit 2; }
+            dist=$2
+            shift
+            ;;
+        *)
+            echo "mustr-package-mac: unknown argument $1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+if [[ "$(uname -s)" != Darwin ]]; then
+    echo "mustr-package-mac: this packages mustr's macOS app; run it on a Mac" >&2
+    exit 1
+fi
+if [[ "$(uname -m)" != arm64 ]]; then
+    echo "mustr-package-mac: the release zip is for Apple silicon; run this on an Apple silicon Mac" >&2
+    exit 1
+fi
+
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' mustr-crates/mustr/Cargo.toml | head -n 1)
+[[ -n "$version" ]] || { echo "mustr-package-mac: no version in mustr-crates/mustr/Cargo.toml" >&2; exit 1; }
+
+mkdir -p "$dist"
+dist=$(cd "$dist" && pwd)
+# The output folder ignores itself, so the checkout stays clean without touching .gitignore.
+[[ -e "$dist/.gitignore" ]] || printf '*\n' > "$dist/.gitignore"
+stage=$(mktemp -d "$dist/.stage.XXXXXX")
+trap 'rm -rf "$stage"' EXIT
+
+# Debug info would make the binary several times larger, and it's only for local debugging.
+export CARGO_PROFILE_RELEASE_DEBUG=${CARGO_PROFILE_RELEASE_DEBUG:-0}
+script/mustr-bundle-mac --release --out-dir "$stage" --no-sign
+app="$stage/mustr.app"
+
+# ---------------------------------------------------------------------------------------------
+# Signing. Ad hoc ("-") until mustr has an Apple Developer ID. To sign with one, set
+# MUSTR_CODESIGN_IDENTITY="Developer ID Application: <name> (<team ID>)" with the certificate in
+# the keychain; the hardened runtime (--options runtime) and a secure timestamp come with it.
+# It also needs (mustr-docs/RELEASING.md, "Adding a Developer ID"):
+#   - entitlements, with --entitlements: the hardened runtime blocks the JIT that WebAssembly
+#     grammars use (Zed signs with crates/zed/resources/zed.entitlements);
+#   - notarizing after the zip is made (xcrun notarytool submit "$zip" --wait ...), stapling
+#     (xcrun stapler staple "$app"), and zipping again.
+# ---------------------------------------------------------------------------------------------
+identity=${MUSTR_CODESIGN_IDENTITY:--}
+sign_flags=(--force --sign "$identity" --identifier dev.mustr.mustr)
+if [[ "$identity" != - ]]; then
+    sign_flags+=(--options runtime --timestamp)
+fi
+codesign "${sign_flags[@]}" "$app"
+codesign --verify --strict --verbose=2 "$app"
+
+zip="$dist/mustr-$version-macos-aarch64.zip"
+rm -f "$zip"
+# ditto keeps the signature, permissions, and symlinks, as Finder's Compress does.
+ditto -c -k --keepParent "$app" "$zip"
+
+# Unpack it as the installer and the updater will, and check what they check.
+check="$stage/check"
+mkdir "$check"
+ditto -x -k "$zip" "$check"
+codesign --verify --strict "$check/mustr.app"
+plist="$check/mustr.app/Contents/Info.plist"
+bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")
+bundle_version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
+if [[ "$bundle_id" != dev.mustr.mustr || "$bundle_version" != "$version" ]]; then
+    echo "mustr-package-mac: the zip holds $bundle_id $bundle_version, not dev.mustr.mustr $version" >&2
+    exit 1
+fi
+
+echo "Packaged mustr $version ($(stat -f %z "$zip") bytes, SHA-256 $(shasum -a 256 "$zip" | cut -d ' ' -f 1)):"
+echo "$zip"

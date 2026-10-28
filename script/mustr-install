@@ -1,0 +1,172 @@
+#!/bin/sh
+# Installs mustr's macOS app (Apple silicon) from its latest GitHub release. Each release
+# publishes this script as install.sh:
+#
+#   curl -fsSL https://github.com/msetaro/mustr/releases/latest/download/install.sh | sh
+#
+# Why this works without an Apple Developer ID: macOS's Gatekeeper checks apps that carry the
+# com.apple.quarantine attribute, which browsers, Mail, and AirDrop set on what they download.
+# curl doesn't set it, so the ad-hoc signed mustr.app this script downloads opens without the
+# "can't be opened" dialog. (Download the zip in a browser instead, and macOS refuses to open it.)
+#
+# What it checks: the zip's size and SHA-256 against the release's manifest.json, and that the
+# app is mustr (bundle ID dev.mustr.mustr) at the manifest's version. It can't check the
+# manifest's Ed25519 signature (manifest.json.sig) with what macOS ships; it relies on HTTPS and
+# GitHub for that. mustr's own updater checks the signature on every update after this one.
+#
+# Environment:
+#   MUSTR_VERSION=0.2.0   install that release (a prerelease, too) instead of the latest
+#   MUSTR_INSTALL_DIR=DIR install DIR/mustr.app instead of in /Applications (or ~/Applications)
+#   MUSTR_INSTALL_BASE_URL=URL  read the release files from URL instead of GitHub
+#
+# It never uses sudo. Everything runs from main, at the end, so a partial download runs nothing.
+
+set -eu
+
+repository=msetaro/mustr
+bundle_id=dev.mustr.mustr
+platform=macos-aarch64
+
+say() {
+    printf 'mustr: %s\n' "$*"
+}
+
+fail() {
+    printf 'mustr: %s\n' "$*" >&2
+    exit 1
+}
+
+# A value from manifest.json. plutil reads JSON, and ships with macOS.
+manifest_value() {
+    plutil -extract "$1" raw -o - "$work/manifest.json" 2>/dev/null ||
+        fail "the release's manifest.json has no $1"
+}
+
+bundle_value() {
+    plutil -extract "$2" raw -o - "$1/Contents/Info.plist" 2>/dev/null || true
+}
+
+mustr_is_running() {
+    [ "$(osascript -e "application id \"$bundle_id\" is running" 2>/dev/null || echo false)" = true ]
+}
+
+# Asks a yes-or-no question on the terminal. stdin is this script when it's piped to sh.
+confirm() {
+    { printf 'mustr: %s [y/N] ' "$1" > /dev/tty; } 2> /dev/null || return 1
+    { read -r answer < /dev/tty; } 2> /dev/null || return 1
+    case "$answer" in
+        y | Y | yes | Yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+quit_running_mustr() {
+    mustr_is_running || return 0
+    if ! confirm "mustr is running. Quit it now to install the new version?"; then
+        fail "quit mustr (mustr > Quit mustr, or Command-Q), then run this again"
+    fi
+    say "asking mustr to quit"
+    osascript -e "tell application id \"$bundle_id\" to quit" > /dev/null 2>&1 || true
+    waited=0
+    while mustr_is_running; do
+        [ "$waited" -lt 30 ] || fail "mustr is still running (it may be asking about unsaved files); quit it, then run this again"
+        sleep 1
+        waited=$((waited + 1))
+    done
+}
+
+choose_install_dir() {
+    if [ -n "${MUSTR_INSTALL_DIR:-}" ]; then
+        mkdir -p "$MUSTR_INSTALL_DIR"
+        install_dir=$MUSTR_INSTALL_DIR
+    elif [ -d "$HOME/Applications/mustr.app" ] && [ ! -d /Applications/mustr.app ]; then
+        # Update where it's installed already.
+        install_dir=$HOME/Applications
+    elif [ -w /Applications ]; then
+        install_dir=/Applications
+    else
+        say "/Applications isn't writable for your account, so mustr goes in ~/Applications"
+        say "(to install it for every account, an administrator can move it to /Applications)"
+        mkdir -p "$HOME/Applications"
+        install_dir=$HOME/Applications
+    fi
+}
+
+main() {
+    [ "$(uname -s)" = Darwin ] || fail "this installs mustr's macOS app; it needs a Mac"
+    [ "$(uname -m)" = arm64 ] || fail "mustr's releases are for Apple silicon Macs, and this Mac is $(uname -m)"
+    for tool in curl ditto plutil shasum osascript; do
+        command -v "$tool" > /dev/null 2>&1 || fail "$tool is missing; it comes with macOS"
+    done
+
+    if [ -n "${MUSTR_INSTALL_BASE_URL:-}" ]; then
+        base_url=${MUSTR_INSTALL_BASE_URL%/}
+    elif [ -n "${MUSTR_VERSION:-}" ]; then
+        base_url="https://github.com/$repository/releases/download/v${MUSTR_VERSION#v}"
+    else
+        base_url="https://github.com/$repository/releases/latest/download"
+    fi
+
+    work=$(mktemp -d "${TMPDIR:-/tmp}/mustr-install.XXXXXX")
+    trap 'rm -rf "$work"' EXIT
+    trap 'exit 1' HUP INT TERM
+
+    say "reading $base_url/manifest.json"
+    curl -fsSL "$base_url/manifest.json" -o "$work/manifest.json" ||
+        fail "couldn't download $base_url/manifest.json"
+    version=$(manifest_value version)
+    asset=$(manifest_value "platforms.$platform.name")
+    size=$(manifest_value "platforms.$platform.size")
+    sha256=$(manifest_value "platforms.$platform.sha256")
+    case "$asset" in
+        */* | .* | "") fail "the manifest names an odd download, $asset" ;;
+    esac
+
+    say "downloading mustr $version ($asset, $size bytes)"
+    curl -fL --progress-bar "$base_url/$asset" -o "$work/$asset" ||
+        fail "couldn't download $base_url/$asset"
+    actual_size=$(stat -f %z "$work/$asset")
+    [ "$actual_size" = "$size" ] ||
+        fail "the download has $actual_size bytes, and the manifest says $size; nothing was installed"
+    actual_sha256=$(shasum -a 256 "$work/$asset" | cut -d ' ' -f 1)
+    [ "$actual_sha256" = "$sha256" ] ||
+        fail "the download's SHA-256 is $actual_sha256, and the manifest says $sha256; nothing was installed"
+
+    ditto -x -k "$work/$asset" "$work/extracted" || fail "couldn't extract $asset"
+    new_app=$work/extracted/mustr.app
+    [ -d "$new_app" ] || fail "$asset doesn't hold mustr.app"
+    [ "$(bundle_value "$new_app" CFBundleIdentifier)" = "$bundle_id" ] ||
+        fail "the app in $asset isn't mustr (its bundle ID isn't $bundle_id)"
+    [ "$(bundle_value "$new_app" CFBundleShortVersionString)" = "$version" ] ||
+        fail "the app in $asset isn't mustr $version"
+
+    choose_install_dir
+    app=$install_dir/mustr.app
+    previous=$install_dir/.mustr.app.previous
+    if [ -e "$app" ]; then
+        [ "$(bundle_value "$app" CFBundleIdentifier)" = "$bundle_id" ] ||
+            fail "$app is some other app; move it, then run this again"
+    fi
+    quit_running_mustr
+
+    # Move the installed app aside, put the new one in place, and put the old one back if that
+    # fails. mustr deletes .mustr.app.previous when it next starts; so does this script.
+    if [ -e "$app" ]; then
+        rm -rf "$previous"
+        mv "$app" "$previous" || fail "couldn't move $app aside (do you have permission to change $install_dir?)"
+    fi
+    if ! ditto "$new_app" "$app"; then
+        rm -rf "$app"
+        if [ -e "$previous" ]; then
+            mv "$previous" "$app" || fail "couldn't install mustr, nor put the old one back; it's at $previous"
+        fi
+        fail "couldn't copy mustr.app to $install_dir"
+    fi
+    rm -rf "$previous"
+
+    say "installed mustr $version in $app"
+    say "open it from Launchpad or Spotlight, or with: open \"$app\""
+    say "it updates itself from now on (mustr > Check for Updates...)"
+}
+
+main "$@"
