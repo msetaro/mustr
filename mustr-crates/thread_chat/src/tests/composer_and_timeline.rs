@@ -232,8 +232,9 @@ async fn an_image_alone_is_a_message(cx: &mut TestAppContext) {
 #[gpui::test]
 async fn new_threads_start_with_their_images(cx: &mut TestAppContext) {
     let backend = Arc::new(FakeBackend::default());
-    backend.raw_responses.lock().push(minted("attachment-1"));
     let (view, cx) = open_view(backend.clone(), None, cx);
+    // After the new-thread form has loaded T3's settings, which the fake answers in order.
+    backend.raw_responses.lock().push(minted("attachment-1"));
     let bytes = png(16, 9);
     type_message(&view, "Make the header match this", cx);
     cx.write_to_clipboard(ClipboardItem::new_image(&gpui::Image::from_bytes(

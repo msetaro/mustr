@@ -2,7 +2,7 @@ use crate::{
     agent_review::{AgentReviewTarget, open_agent_review},
     agent_review_store::{ReviewedMarks, agent_reviews_dir},
     agent_threads::{AgentThread, agent_threads, agent_work_candidates},
-    inbox::{self, ProjectRow, PullRequestEntry, PullRequestList, ThreadRow, ThreadStatus},
+    inbox::{ProjectRow, PullRequestEntry, PullRequestList, ThreadRow, ThreadStatus},
     pull_request_review, review_backend,
     t3_connection::{self, ConnectionStatus, EngineKind, EngineSetup, T3Connection, T3Session},
     t3_engine::T3Mode,
@@ -25,8 +25,9 @@ use t3_client::t3_api::{rpc, types};
 use thread_chat::{Shell, ThreadShells};
 use ui::{Button, ButtonStyle, DiffStat, Divider, Indicator, prelude::*};
 use workspace::{
-    Workspace,
+    Toast, Workspace,
     item::{Item, ItemEvent},
+    notifications::NotificationId,
 };
 
 const RECENT_THREADS: usize = 20;
