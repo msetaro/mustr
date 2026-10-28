@@ -11105,6 +11105,7 @@ dependencies = [
  "gpui_platform",
  "gpui_tokio",
  "http_client",
+ "image",
  "inspector_ui",
  "language",
  "languages",
