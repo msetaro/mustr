@@ -955,7 +955,7 @@ fn the_family_read_fills_in_what_the_shell_leaves_out() {
     assert_eq!(merged.threads["child-delegated"].title, "Renamed");
 
     // A child the shell removed after the read stays removed.
-    let mut removed = shell.clone();
+    let mut removed = shell;
     removed.removed.insert("child-done".into(), 8);
     let merged = super::merge_family(Some(&removed), &read, &thread);
     assert!(!merged.threads.contains_key("child-done"));

@@ -54,11 +54,16 @@ fn redact(value: &mut Value, host: &str, user: &str) {
     }
 }
 
-/// The first item of the stream `tag`, or `None` if none comes within a few seconds.
-async fn first_item(connection: &RpcConnection, tag: &str, payload: Value) -> Result<Vec<Value>> {
+/// The first item of the stream `tag`, or none if none comes within a few seconds.
+async fn first_item(
+    connection: &RpcConnection,
+    tag: &str,
+    payload: Value,
+    sleep: &Sleep,
+) -> Result<Vec<Value>> {
     let mut items = connection.subscribe(tag, payload)?;
     let first = smol::future::or(async { items.next().await }, async {
-        smol::Timer::after(Duration::from_secs(10)).await;
+        sleep(Duration::from_secs(10)).await;
         None
     })
     .await;
@@ -127,10 +132,11 @@ fn captures_what_a_real_engine_sends() -> Result<()> {
                 "Start",
             ],
         ] {
-            let status = std::process::Command::new("git")
+            let status = smol::process::Command::new("git")
                 .args(args)
                 .current_dir(&repo)
-                .status()?;
+                .status()
+                .await?;
             anyhow::ensure!(status.success(), "git {args:?} failed");
         }
 
@@ -257,7 +263,13 @@ fn captures_what_a_real_engine_sends() -> Result<()> {
                 captured.push(("OrchestrationV2ThreadDetailSnapshot", vec![thread]));
                 captured.push((
                     "OrchestrationV2ShellStreamItem",
-                    first_item(&connection, "orchestration.subscribeShell", json!({})).await?,
+                    first_item(
+                        &connection,
+                        "orchestration.subscribeShell",
+                        json!({}),
+                        &sleep,
+                    )
+                    .await?,
                 ));
                 captured.push((
                     "OrchestrationV2ThreadStreamItem",
@@ -265,12 +277,13 @@ fn captures_what_a_real_engine_sends() -> Result<()> {
                         &connection,
                         "orchestration.subscribeThread",
                         json!({ "threadId": thread_id }),
+                        &sleep,
                     )
                     .await?,
                 ));
                 captured.push((
                     "ScheduledTaskListResult",
-                    first_item(&connection, "scheduledTasks.subscribe", json!({})).await?,
+                    first_item(&connection, "scheduledTasks.subscribe", json!({}), &sleep).await?,
                 ));
                 let archived = connection
                     .request("orchestration.getArchivedShellSnapshot", json!({}))

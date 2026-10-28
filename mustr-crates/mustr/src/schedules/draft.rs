@@ -232,7 +232,7 @@ impl Draft {
                 }
                 Ok(ScheduledTaskUpsertSchedule::Interval(
                     ScheduledTaskUpsertScheduleInterval {
-                        every_ms: (every_ms as i64).into(),
+                        every_ms: every_ms as i64,
                         type_: ScheduledTaskUpsertScheduleIntervalType::Interval,
                     },
                 ))
