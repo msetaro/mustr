@@ -424,8 +424,11 @@ impl Item for ThreadView {
         Some(self.title())
     }
 
+    /// So the app can add toolbar items for threads (`mustr/src/window.rs`). Zed's toolbar
+    /// draws nothing while none of its items shows, and its search bars hide for threads, so
+    /// it takes no space until an item does.
     fn show_toolbar(&self) -> bool {
-        false
+        true
     }
 
     fn to_item_events(event: &Self::Event, f: &mut dyn FnMut(ItemEvent)) {
