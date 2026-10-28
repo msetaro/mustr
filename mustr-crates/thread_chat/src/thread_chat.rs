@@ -26,6 +26,16 @@ mod timeline;
 // WP1, thread settings and new threads:
 // WP2, composer and timeline:
 // WP3, thread list and projects:
+pub mod organize;
+pub mod projects;
+pub use organize::{
+    ArchiveThread, MarkThreadUnread, PinThread, RenameThread, SettleThread, UnpinThread,
+    UnsettleThread,
+};
+pub use projects::AddProject;
+pub use sidebar::{SearchThreads, Section, ThreadListFilter, ThreadsSidebarEvent};
+#[cfg(test)]
+mod thread_list_tests;
 
 #[cfg(test)]
 mod tests;
@@ -59,6 +69,8 @@ pub fn init(cx: &mut App) {
     // WP1, thread settings and new threads:
     // WP2, composer and timeline:
     // WP3, thread list and projects:
+    organize::init(cx);
+    sidebar::init(cx);
     // WP5, subagents and workflows:
 }
 
@@ -79,6 +91,10 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         // WP1, thread settings and new threads:
         // WP2, composer and timeline:
         // WP3, thread list and projects:
+        KeyBinding::new("secondary-shift-s", SettleThread, Some("ThreadView")),
+        KeyBinding::new("secondary-shift-s", SettleThread, Some("ThreadsSidebar")),
+        KeyBinding::new("secondary-alt-k", SearchThreads, Some("Workspace")),
+        KeyBinding::new("escape", menu::Cancel, Some("ThreadsSidebar > Editor")),
     ]
 }
 

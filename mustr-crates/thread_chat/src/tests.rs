@@ -572,51 +572,36 @@ fn shell_json() -> Value {
 #[test]
 fn the_thread_list_follows_the_shell() {
     let snapshot: OrchestrationV2ShellSnapshot = serde_json::from_value(shell_json()).unwrap();
-    let mut list = ThreadList::from_snapshot(&snapshot);
+    let mut shell = Shell::from_snapshot(&snapshot);
+    let now = time::OffsetDateTime::now_utc();
+    let list = ThreadList::from_shell(&shell, &Default::default(), now);
+    // Created at the same time, so by id.
     assert_eq!(
-        list.threads
+        list.active
             .iter()
             .map(|thread| thread.id.as_str())
             .collect::<Vec<_>>(),
-        [THREAD, "old"]
+        ["old", THREAD]
     );
-    assert_eq!(
-        list.threads[0].status,
-        ShellStatus::Working("running".into())
-    );
-    assert_eq!(list.projects["project-1"], "api");
+    assert_eq!(list.active[1].status, Some(ShellStatus::Working));
+    assert_eq!(list.active[0].status, None);
+    assert_eq!(list.active[0].project.as_deref(), Some("api"));
 
     let mut waiting = shell_thread("old", "Old thread", "running", "2026-10-28T00:00:00.000Z");
     waiting["pendingRuntimeRequest"] =
         json!({ "id": "request-1", "kind": "command", "createdAt": NOW });
-    let updated: OrchestrationV2ShellStreamItem = serde_json::from_value(json!({
-        "kind": "thread.updated", "sequence": 8, "location": "active", "thread": waiting
-    }))
-    .unwrap();
-    assert!(list.apply(updated));
-    assert_eq!(list.threads[0].id, "old");
-    assert_eq!(list.threads[0].status, ShellStatus::NeedsInput);
-    assert_eq!(list.threads[0].status.label(), "needs input");
+    assert!(shell.apply(shell_update(8, "active", waiting)));
+    let list = ThreadList::from_shell(&shell, &Default::default(), now);
+    assert_eq!(list.active[0].status, Some(ShellStatus::PendingApproval));
+    assert_eq!(list.active[0].status.unwrap().label(), "Pending approval");
 
-    // On a resumed subscription T3 first sends the projects alone; the threads stay.
-    let mut projects_only = shell_json();
-    projects_only["threads"] = json!([]);
-    projects_only["projects"][0]["title"] = json!("api (renamed)");
-    let enrichment: OrchestrationV2ShellStreamItem = serde_json::from_value(json!({
-        "kind": "snapshot", "snapshot": projects_only, "resolvedRepositoryIdentityRoots": []
-    }))
-    .unwrap();
-    assert!(list.apply(enrichment));
-    assert_eq!(list.threads.len(), 2);
-    assert_eq!(list.projects["project-1"], "api (renamed)");
-
-    let removed: OrchestrationV2ShellStreamItem = serde_json::from_value(json!({
-        "kind": "thread.removed", "sequence": 9, "location": "active", "threadId": THREAD
-    }))
-    .unwrap();
-    assert!(list.apply(removed));
-    assert_eq!(list.threads.len(), 1);
-    assert_eq!(list.sequence, 9);
+    let mut settled = shell_thread(THREAD, "Add retries", "completed", NOW);
+    settled["settledOverride"] = json!("settled");
+    settled["settledAt"] = json!(NOW);
+    assert!(shell.apply(shell_update(9, "active", settled)));
+    let list = ThreadList::from_shell(&shell, &Default::default(), now);
+    assert_eq!(list.active.len(), 1);
+    assert_eq!(list.settled[0].id, THREAD);
 }
 
 // The app's shell.

@@ -108,7 +108,7 @@ impl NavPanel {
     /// example, from `observe_new`).
     pub fn new(workspace: &Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let file_tree = cx.new(|cx| FileTreePanel::new(workspace, window, cx));
-        let threads = cx.new(|cx| ThreadsSidebar::new(workspace.downgrade(), cx));
+        let threads = cx.new(|cx| ThreadsSidebar::new(workspace.downgrade(), window, cx));
         let subscription = cx.subscribe_in(
             workspace,
             window,
