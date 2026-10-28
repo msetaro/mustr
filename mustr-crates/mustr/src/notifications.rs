@@ -23,6 +23,8 @@
 //! Unread marks are the threads sidebar's (`thread.visit` and `lastVisitedAt`, in
 //! `thread_chat/src/sidebar.rs`); opening a thread from a notification records the visit there.
 
+#[cfg(debug_assertions)]
+pub mod replay;
 #[cfg(test)]
 mod tests;
 
