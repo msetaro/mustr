@@ -16,7 +16,9 @@ use t3_client::t3_api::{
     rpc,
     types::{ModelSelection, ScheduledTask},
 };
-use thread_chat::{Access, AgentChoice, ThreadBackend, ThreadBackendExt as _};
+use thread_chat::{
+    Access, AgentChoice, ThreadBackend, ThreadBackendExt as _, thread_settings::ModelChoice,
+};
 use ui::{
     Color, ContextMenu, DropdownMenu, DropdownStyle, IconPosition, Label, LabelCommon as _,
     LabelSize, Switch, ToggleState, Tooltip, prelude::*,
@@ -113,7 +115,7 @@ impl TaskEditor {
         }
         if draft.model.is_none()
             && let Some(agent) = choices.agents.first()
-            && let Some((_, slug)) = agent
+            && let Some(ModelChoice { slug, .. }) = agent
                 .default_model
                 .and_then(|index| agent.models.get(index))
                 .or(agent.models.first())
@@ -222,7 +224,7 @@ impl TaskEditor {
             .default_model
             .and_then(|index| agent.models.get(index))
             .or(agent.models.first())
-            .map(|(_, slug)| slug.clone())
+            .map(|model| model.slug.clone())
             .unwrap_or_default();
         self.draft.model = Some(model_selection(&agent.instance_id, &slug));
         cx.notify();
@@ -235,7 +237,7 @@ impl TaskEditor {
         else {
             return;
         };
-        if let Some((_, slug)) = agent.models.get(index) {
+        if let Some(ModelChoice { slug, .. }) = agent.models.get(index) {
             let unchanged = self.draft.model.as_ref().is_some_and(|model| {
                 selection_ids(model) == (Some(agent.instance_id.as_str()), Some(slug.as_str()))
             });
@@ -392,7 +394,7 @@ impl Render for TaskEditor {
             agent
                 .models
                 .iter()
-                .position(|(_, slug)| Some(slug.as_str()) == model_slug)
+                .position(|model| Some(model.slug.as_str()) == model_slug)
         });
         let agent_control = if self.choices.agents.is_empty() {
             note(match &self.draft.model {
@@ -429,10 +431,14 @@ impl Render for TaskEditor {
                         "schedule-model",
                         model_index
                             .and_then(|index| agent.models.get(index))
-                            .map(|(name, _)| name.clone())
+                            .map(|model| model.name.clone())
                             .or_else(|| model_slug.map(str::to_string))
                             .unwrap_or_else(|| "Pick a model".to_string()),
-                        agent.models.iter().map(|(name, _)| name.clone()).collect(),
+                        agent
+                            .models
+                            .iter()
+                            .map(|model| model.name.clone())
+                            .collect(),
                         model_index,
                         Self::select_model,
                         window,

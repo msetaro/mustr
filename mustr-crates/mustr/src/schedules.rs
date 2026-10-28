@@ -606,8 +606,8 @@ impl SchedulesView {
             .find(|agent| agent.instance_id == instance);
         let slug = task.model_selection.model.as_str().unwrap_or_default();
         let model = agent
-            .and_then(|agent| agent.models.iter().find(|(_, model)| model == slug))
-            .map_or_else(|| slug.to_string(), |(name, _)| name.clone());
+            .and_then(|agent| agent.models.iter().find(|model| model.slug == *slug))
+            .map_or_else(|| slug.to_string(), |model| model.name.clone());
         let agent = agent.map_or_else(|| instance.to_string(), |agent| agent.name.clone());
         let mode = draft::RUNTIME_MODES
             .iter()
