@@ -1118,3 +1118,76 @@ async fn queued_messages_can_be_edited(cx: &mut TestAppContext) {
         assert_eq!(view.composer_state.editing_queued, None)
     });
 }
+
+// Secret requests.
+
+fn thread_asking_for_a_secret() -> Projection {
+    let mut projection = finished_thread();
+    projection.items.push(item(
+        "secret_request",
+        "i9",
+        9,
+        Some("run-1"),
+        "waiting",
+        json!({
+            "label": "a GitHub token",
+            "reason": "To open the pull request",
+            "placeholder": "ghp_…",
+            "secretStatus": "pending"
+        }),
+    ));
+    projection
+}
+
+#[gpui::test]
+async fn secret_requests_are_answered_with_a_masked_input(cx: &mut TestAppContext) {
+    let backend = FakeBackend::with_thread(thread_asking_for_a_secret(), 10);
+    let (view, cx) = open_view(backend.clone(), Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(1200.)));
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("thread-secret-input-i9").is_some());
+
+    let input = view.read_with(cx, |view, _| {
+        view.composer_state
+            .secret_inputs
+            .get("i9")
+            .cloned()
+            .unwrap()
+    });
+    input.update_in(cx, |editor, window, cx| {
+        editor.set_text("ghp_example", window, cx)
+    });
+    let save = cx.debug_bounds("thread-secret-save-i9").unwrap();
+    cx.simulate_click(save.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    let decline = cx.debug_bounds("thread-secret-decline-i9").unwrap();
+    cx.simulate_click(decline.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+
+    assert_eq!(
+        *backend.raw_calls.lock(),
+        [
+            RawCall {
+                tag: "secrets.answerRequest".into(),
+                payload: json!({
+                    "threadId": THREAD,
+                    "turnItemId": "i9",
+                    "answer": { "type": "save", "secret": "ghp_example" }
+                }),
+                access: Access::Operate,
+            },
+            RawCall {
+                tag: "secrets.answerRequest".into(),
+                payload: json!({
+                    "threadId": THREAD,
+                    "turnItemId": "i9",
+                    "answer": { "type": "decline" }
+                }),
+                access: Access::Operate,
+            },
+        ]
+    );
+    // The input is cleared once T3 has the secret.
+    assert_eq!(input.read_with(cx, |editor, cx| editor.text(cx)), "");
+    assert!(backend.commands().is_empty());
+}

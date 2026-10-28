@@ -14,7 +14,7 @@
 use t3_api::{
     tagged::{
         ChatAttachment, OrchestrationV2Command, OrchestrationV2CommandDispatchMode,
-        OrchestrationV2ThreadLaunchWorkspaceStrategy,
+        OrchestrationV2ThreadLaunchWorkspaceStrategy, SecretRequestAnswerInputAnswer,
     },
     types::{
         ChatImageAttachment, ChatImageAttachmentType, ModelSelection, OrchestrationV2Actor,
@@ -41,7 +41,9 @@ use t3_api::{
         OrchestrationV2ThreadLaunchWorkspaceStrategyRootType,
         OrchestrationV2ThreadLaunchWorkspaceStrategyWorktree,
         OrchestrationV2ThreadLaunchWorkspaceStrategyWorktreeType, ProviderApprovalDecision,
-        ProviderInteractionMode, ProviderUserInputAnswers, RuntimeMode,
+        ProviderInteractionMode, ProviderUserInputAnswers, RuntimeMode, SecretRequestAnswerInput,
+        SecretRequestAnswerInputAnswerDecline, SecretRequestAnswerInputAnswerDeclineType,
+        SecretRequestAnswerInputAnswerSave, SecretRequestAnswerInputAnswerSaveType,
     },
 };
 
@@ -358,6 +360,32 @@ pub fn edit_queued(
         thread_id: thread_id.to_string(),
         type_: OrchestrationV2CommandQueuedRunEditType::QueuedRunEdit,
     })
+}
+
+/// Answers the agent's request for a secret (`secrets.answerRequest`): saves it, or declines
+/// with `None`.
+pub fn answer_secret(
+    thread_id: &str,
+    turn_item_id: &str,
+    secret: Option<String>,
+) -> SecretRequestAnswerInput {
+    SecretRequestAnswerInput {
+        answer: match secret {
+            Some(secret) => {
+                SecretRequestAnswerInputAnswer::Save(SecretRequestAnswerInputAnswerSave {
+                    secret,
+                    type_: SecretRequestAnswerInputAnswerSaveType::Save,
+                })
+            }
+            None => {
+                SecretRequestAnswerInputAnswer::Decline(SecretRequestAnswerInputAnswerDecline {
+                    type_: SecretRequestAnswerInputAnswerDeclineType::Decline,
+                })
+            }
+        },
+        thread_id: thread_id.to_string(),
+        turn_item_id: turn_item_id.to_string(),
+    }
 }
 
 /// Restarts a held queue (`queue.resume`).
@@ -922,6 +950,27 @@ mod tests {
         assert_eq!(
             wire(&resume_queue("thread-1", "command-5".into())),
             json!({ "type": "queue.resume", "commandId": "command-5", "threadId": "thread-1" })
+        );
+    }
+
+    #[test]
+    fn secrets_are_saved_or_declined() {
+        assert_eq!(
+            serde_json::to_value(answer_secret("thread-1", "item-4", Some("s3cr3t".into())))
+                .unwrap(),
+            json!({
+                "threadId": "thread-1",
+                "turnItemId": "item-4",
+                "answer": { "type": "save", "secret": "s3cr3t" }
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(answer_secret("thread-1", "item-4", None)).unwrap(),
+            json!({
+                "threadId": "thread-1",
+                "turnItemId": "item-4",
+                "answer": { "type": "decline" }
+            })
         );
     }
 

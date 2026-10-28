@@ -3,6 +3,7 @@
 
 use crate::{
     attachments::{ComposerImage, UploadState},
+    backend::ThreadBackendExt as _,
     commands::{self, CommandIds, Delivery, Message, PlanRef},
     model::{ItemKind, PendingRequest, QueuedMessage, ThreadState},
     thread_view::{CONTENT_MAX_WIDTH, Loadable, ThreadView},
@@ -50,6 +51,10 @@ pub struct ComposerState {
     pub(crate) recalled: Option<(usize, String)>,
     /// The queued message the composer is editing, by its run's id.
     pub(crate) editing_queued: Option<String>,
+    /// Masked inputs for the agent's requests for secrets, by item id.
+    pub(crate) secret_inputs: collections::HashMap<String, Entity<Editor>>,
+    /// Secret requests being answered, by item id.
+    pub(crate) answering_secrets: collections::HashSet<String>,
     _save_draft: Option<gpui::Task<()>>,
 }
 
@@ -357,6 +362,85 @@ impl ThreadView {
                         this.composer
                             .update(cx, |editor, cx| editor.clear(window, cx));
                         this.images.clear_sent(&sent_images);
+                    }
+                    Err(error) => this.error = Some(format!("{error:#}").into()),
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// The masked input for a secret request, made the first time it's shown.
+    pub(crate) fn secret_input(
+        &mut self,
+        item_id: &str,
+        placeholder: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<Editor> {
+        if let Some(input) = self.composer_state.secret_inputs.get(item_id) {
+            return input.clone();
+        }
+        let placeholder = placeholder.unwrap_or("Paste the secret").to_string();
+        let input = cx.new(|cx| {
+            let mut editor = Editor::single_line(window, cx);
+            editor.set_masked(true, cx);
+            editor.set_placeholder_text(&placeholder, window, cx);
+            editor
+        });
+        self.composer_state
+            .secret_inputs
+            .insert(item_id.to_string(), input.clone());
+        input
+    }
+
+    /// Answers the agent's request for a secret (`secrets.answerRequest`): saves what's in its
+    /// input, or declines. The secret goes only to T3; mustr never logs or keeps it.
+    pub(crate) fn answer_secret(
+        &mut self,
+        item_id: String,
+        save: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return;
+        };
+        let secret = if save {
+            let Some(input) = self.composer_state.secret_inputs.get(&item_id) else {
+                return;
+            };
+            let secret = input.read(cx).text(cx);
+            if secret.trim().is_empty() {
+                return;
+            }
+            Some(secret.trim().to_string())
+        } else {
+            None
+        };
+        if !self
+            .composer_state
+            .answering_secrets
+            .insert(item_id.clone())
+        {
+            return;
+        }
+        let answer = self.backend.call::<t3_api::rpc::SecretsAnswerRequest>(
+            commands::answer_secret(&thread_id, &item_id, secret),
+            crate::backend::Access::Operate,
+        );
+        self.error = None;
+        cx.notify();
+        self._tasks.push(cx.spawn_in(window, async move |this, cx| {
+            let result = answer.await;
+            this.update_in(cx, |this, window, cx| {
+                this.composer_state.answering_secrets.remove(&item_id);
+                match result {
+                    Ok(()) => {
+                        if let Some(input) = this.composer_state.secret_inputs.get(&item_id) {
+                            input.update(cx, |editor, cx| editor.clear(window, cx));
+                        }
                     }
                     Err(error) => this.error = Some(format!("{error:#}").into()),
                 }

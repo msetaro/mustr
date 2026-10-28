@@ -154,6 +154,17 @@ pub enum ItemKind {
         title: Option<String>,
         questions: Vec<Question>,
     },
+    /// The agent asked for a secret, such as a token, which it waits for
+    /// (`chat/SecretRequestCard.tsx` in T3).
+    SecretRequest {
+        title: Option<String>,
+        /// What the secret is, such as "GitHub token".
+        label: String,
+        reason: String,
+        placeholder: Option<String>,
+        /// `pending`, `saved`, `declined`, or `cancelled`.
+        status: String,
+    },
     Error {
         message: String,
         /// What kind of failure it was, such as `usage_limit`.
@@ -497,10 +508,13 @@ impl TimelineItem {
             ),
             OrchestrationV2TurnItem::SecretRequest(item) => item!(
                 item,
-                notice(
-                    non_empty(item.title.as_ref())
-                        .unwrap_or_else(|| "The agent asked for a secret".into())
-                )
+                ItemKind::SecretRequest {
+                    title: non_empty(item.title.as_ref()),
+                    label: item.label.clone(),
+                    reason: item.reason.clone(),
+                    placeholder: non_empty(item.placeholder.as_ref()),
+                    status: wire_string(&item.secret_status),
+                }
             ),
             OrchestrationV2TurnItem::Unrecognized(_) => return None,
         })

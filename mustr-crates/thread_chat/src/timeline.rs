@@ -26,6 +26,15 @@ const MESSAGE_IMAGE_HEIGHT: f32 = 76.;
 const TOOL_IMAGE_WIDTH: f32 = 320.;
 const TOOL_IMAGE_HEIGHT: f32 = 200.;
 
+/// What a secret request's card shows.
+struct SecretRequestView {
+    title: Option<String>,
+    label: String,
+    reason: String,
+    placeholder: Option<String>,
+    status: String,
+}
+
 /// An image of the timeline, and how to show it.
 struct Thumbnail {
     key: AssetKey,
@@ -691,6 +700,24 @@ impl ThreadView {
                         .child(Label::new(message.clone()).size(LabelSize::Small)),
                 )
                 .into_any_element(),
+            ItemKind::SecretRequest {
+                title,
+                label,
+                reason,
+                placeholder,
+                status,
+            } => self.render_secret_request(
+                item,
+                SecretRequestView {
+                    title: title.clone(),
+                    label: label.clone(),
+                    reason: reason.clone(),
+                    placeholder: placeholder.clone(),
+                    status: status.clone(),
+                },
+                window,
+                cx,
+            ),
             ItemKind::Notice { text } => h_flex()
                 .gap_2()
                 .child(div().flex_1().h(px(1.)).bg(palette.border.hsla()))
@@ -705,6 +732,135 @@ impl ThreadView {
                 self.render_work(vec![item.clone()], window, cx)
             }
         }
+    }
+
+    /// The agent's request for a secret: a masked input with Save and Decline while it waits,
+    /// then how it was answered (`chat/SecretRequestCard.tsx` in T3).
+    fn render_secret_request(
+        &mut self,
+        item: &TimelineItem,
+        request: SecretRequestView,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let palette = palette(cx);
+        let pending = request.status == "pending";
+        let heading = request
+            .title
+            .clone()
+            .unwrap_or_else(|| format!("The agent asks for {}", request.label));
+        let mut card = Card::new()
+            .gap_1p5()
+            .border_color(if pending {
+                palette.warning.hsla().opacity(0.6)
+            } else {
+                palette.border.hsla()
+            })
+            .child(
+                h_flex()
+                    .gap_1p5()
+                    .child(
+                        Icon::new(IconName::Lock)
+                            .size(IconSize::Small)
+                            .color(if pending {
+                                Color::Warning
+                            } else {
+                                Color::Muted
+                            }),
+                    )
+                    .child(
+                        Label::new(heading)
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
+                    .child(div().flex_1())
+                    .when(!pending, |this| {
+                        this.child(
+                            Label::new(request.status.clone())
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        )
+                    }),
+            )
+            .when(!request.reason.trim().is_empty(), |this| {
+                this.child(
+                    Label::new(request.reason.clone())
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+            });
+        if pending && item.inherited {
+            card = card.child(
+                Label::new("Waiting for an answer in the original thread")
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
+            );
+        } else if pending {
+            let input = self.secret_input(&item.id, request.placeholder.as_deref(), window, cx);
+            let busy = self.composer_state.answering_secrets.contains(&item.id)
+                || self.backend.write_blocked_reason().is_some();
+            let item_id = item.id.clone();
+            card = card.child(
+                h_flex()
+                    .gap_1p5()
+                    .child(
+                        div()
+                            .debug_selector(|| format!("thread-secret-input-{item_id}"))
+                            .flex_1()
+                            .min_w_0()
+                            .px_2()
+                            .py_1()
+                            .rounded(tokens::CONTROL_RADIUS)
+                            .border(tokens::BORDER_WIDTH)
+                            .border_color(palette.border.hsla())
+                            .bg(palette.background.hsla())
+                            .child(input),
+                    )
+                    .child(
+                        div()
+                            .debug_selector({
+                                let item_id = item.id.clone();
+                                move || format!("thread-secret-save-{item_id}")
+                            })
+                            .child(
+                                TextButton::new(
+                                    SharedString::from(format!("secret-save-{}", item.id)),
+                                    "Save",
+                                )
+                                .style(MustrButtonStyle::Primary)
+                                .disabled(busy)
+                                .tooltip("Give the agent this secret")
+                                .on_click(cx.listener({
+                                    let item_id = item.id.clone();
+                                    move |this, _, window, cx| {
+                                        this.answer_secret(item_id.clone(), true, window, cx)
+                                    }
+                                })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .debug_selector({
+                                let item_id = item.id.clone();
+                                move || format!("thread-secret-decline-{item_id}")
+                            })
+                            .child(
+                                TextButton::new(
+                                    SharedString::from(format!("secret-decline-{}", item.id)),
+                                    "Decline",
+                                )
+                                .disabled(busy)
+                                .on_click(cx.listener({
+                                    let item_id = item.id.clone();
+                                    move |this, _, window, cx| {
+                                        this.answer_secret(item_id.clone(), false, window, cx)
+                                    }
+                                })),
+                            ),
+                    ),
+            );
+        }
+        card.into_any_element()
     }
 
     /// A message's copy button, shown on hover, as T3's `chat/MessageCopyButton.tsx`.
