@@ -13,6 +13,7 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use futures::{FutureExt as _, StreamExt as _, future::BoxFuture, stream::BoxStream};
 use gpui::App;
 use http_client::{HttpClient, Url};
+use parking_lot::Mutex;
 use serde_json::Value;
 use std::sync::Arc;
 use t3_client::{
@@ -36,7 +37,14 @@ use thread_chat::{Access, AttachmentUpload, ReadOnlyBackend, ThreadBackend};
 
 /// Installs the threads' backend. Call once, after `t3_connection::init`.
 pub fn init(session: CurrentSession, cx: &mut App) {
-    let server_url = T3Connection::global(cx).read(cx).server_url().cloned();
+    let connection = T3Connection::global(cx);
+    let server_url = Arc::new(Mutex::new(connection.read(cx).server_url().cloned()));
+    // The embedded engine's URL is known only once it has started, and changes when it restarts.
+    cx.observe(&connection, {
+        let server_url = server_url.clone();
+        move |connection, cx| *server_url.lock() = connection.read(cx).server_url().cloned()
+    })
+    .detach();
     let backend: Arc<dyn ThreadBackend> = Arc::new(T3ThreadBackend {
         session,
         http: cx.http_client(),
@@ -59,7 +67,8 @@ struct T3ThreadBackend {
     /// Attachments upload over HTTP: T3's upload URLs carry their own signature, so they need
     /// no token, only the server.
     http: Arc<dyn HttpClient>,
-    server_url: Option<Url>,
+    /// T3's server, as the connection knows it now.
+    server_url: Arc<Mutex<Option<Url>>>,
 }
 
 impl T3ThreadBackend {
@@ -238,7 +247,7 @@ impl ThreadBackend for T3ThreadBackend {
         if let Some(reason) = self.blocked_reason(Access::Operate) {
             return refused(reason);
         }
-        let Some(server_url) = self.server_url.clone() else {
+        let Some(server_url) = self.server_url.lock().clone() else {
             return refused("mustr has no T3 server to upload to".to_string());
         };
         let http = self.http.clone();
@@ -257,7 +266,7 @@ impl ThreadBackend for T3ThreadBackend {
     }
 
     fn fetch_asset(&self, relative_url: &str) -> BoxFuture<'static, Result<Vec<u8>>> {
-        let Some(server_url) = self.server_url.clone() else {
+        let Some(server_url) = self.server_url.lock().clone() else {
             return refused("mustr has no T3 server to load assets from".to_string());
         };
         let http = self.http.clone();
@@ -291,7 +300,6 @@ mod tests {
     use futures::AsyncReadExt as _;
     use gpui::TestAppContext;
     use http_client::{AsyncBody, Request, Response, http::HeaderValue};
-    use parking_lot::Mutex;
     use pretty_assertions::assert_eq;
 
     /// One request T3's HTTP server got.
@@ -359,7 +367,9 @@ mod tests {
                 requests: requests.clone(),
                 status,
             }),
-            server_url: Some(Url::parse("http://127.0.0.1:3773").unwrap()),
+            server_url: Arc::new(Mutex::new(Some(
+                Url::parse("http://127.0.0.1:3773").unwrap(),
+            ))),
         };
         (backend, requests)
     }
