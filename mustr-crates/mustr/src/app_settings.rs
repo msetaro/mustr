@@ -262,6 +262,7 @@ mod tests {
         }
         // mustr's title bar shows the tabs.
         assert_eq!(merged["tab_bar"]["show"], Value::Bool(false));
+        assert_eq!(merged["ui_font_size"], Value::from(13));
         assert_eq!(
             merged["theme"]["dark"],
             Value::from(mustr_ui::DARK_THEME_NAME)
