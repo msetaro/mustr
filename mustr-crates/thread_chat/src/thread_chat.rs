@@ -7,18 +7,22 @@
 
 pub mod backend;
 pub mod commands;
+mod composer;
+mod header;
 pub mod model;
 mod new_thread;
 mod sidebar;
 mod thread_view;
+mod timeline;
 
 #[cfg(test)]
 mod tests;
 
 pub use backend::{GlobalThreadBackend, ReadOnlyBackend, ThreadBackend, backend, set_backend};
+pub use composer::{SendMessage, SteerMessage, StopThread};
 pub use new_thread::{AgentChoice, NewThreadForm, agent_choices, runtime_mode_for};
 pub use sidebar::{ShellStatus, ThreadEntry, ThreadList, ThreadsSidebar};
-pub use thread_view::{NewThread, SendMessage, SteerMessage, StopThread, ThreadView, open_thread};
+pub use thread_view::{NewThread, ThreadView, open_thread};
 
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{App, AppContext as _, Task};

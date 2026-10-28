@@ -4,9 +4,10 @@
 
 use crate::{
     backend::{ReadOnlyBackend, ThreadBackend},
+    composer::{SendMessage, SteerMessage},
     model::{ItemKind, ItemStatus, Row, ThreadActivity, ThreadState},
     sidebar::{ShellStatus, ThreadList},
-    thread_view::{SendMessage, SteerMessage, ThreadView},
+    thread_view::ThreadView,
 };
 use anyhow::{Result, anyhow};
 use futures::{
