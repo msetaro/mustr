@@ -4,26 +4,22 @@
 //! and each file's full old/new text over RPC (`pullRequests.diffFileContents`). mustr's
 //! review view needs the full texts, so it can build real diffs with syntax highlighting.
 
-use anyhow::{Context as _, Result, anyhow, bail};
-use futures::{AsyncReadExt as _, StreamExt as _};
-use http_client::{AsyncBody, HttpClient, Method, Request, Url};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
+use anyhow::{Context as _, Result, anyhow};
+use futures::StreamExt as _;
+use http_client::{HttpClient, Url};
+use t3_api::types::{
+    PullRequestDiffFileContentsInput, PullRequestDiffFileContentsInputChangeType,
+    PullRequestDiffInput,
+};
+use t3_api::{http, rpc};
 
+use crate::endpoints::call_endpoint;
 use crate::{AccessToken, RpcConnection, RpcError};
 
-const CONTENT_REQUESTS_IN_FLIGHT: usize = 6;
+/// Identifies a pull request: T3's `PullRequestRef`.
+pub use t3_api::types::PullRequestRef;
 
-/// Identifies a pull request the way T3's `PullRequestRef` does.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PullRequestRef {
-    pub project_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host: Option<String>,
-    pub repository: String,
-    pub number: u64,
-}
+const CONTENT_REQUESTS_IN_FLIGHT: usize = 6;
 
 /// T3's `changeType` values for `pullRequests.diffFileContents`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +39,16 @@ impl ChangeType {
             ChangeType::Deleted => "deleted",
             ChangeType::RenamePure => "rename-pure",
             ChangeType::RenameChanged => "rename-changed",
+        }
+    }
+
+    fn to_wire(self) -> PullRequestDiffFileContentsInputChangeType {
+        match self {
+            ChangeType::Change => PullRequestDiffFileContentsInputChangeType::Change,
+            ChangeType::New => PullRequestDiffFileContentsInputChangeType::New,
+            ChangeType::Deleted => PullRequestDiffFileContentsInputChangeType::Deleted,
+            ChangeType::RenamePure => PullRequestDiffFileContentsInputChangeType::RenamePure,
+            ChangeType::RenameChanged => PullRequestDiffFileContentsInputChangeType::RenameChanged,
         }
     }
 }
@@ -73,40 +79,22 @@ pub async fn pull_request_patch(
     access_token: &AccessToken,
     pull_request: &PullRequestRef,
 ) -> Result<String> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct DiffSlice {
-        patch: String,
-        next_cursor: Option<String>,
-    }
-
-    let url = base_url
-        .join("/api/pull-requests/diff")
-        .with_context(|| format!("invalid T3 server URL {base_url}"))?;
     let mut patch = String::new();
     let mut cursor: Option<String> = None;
     loop {
-        let mut body = serde_json::to_value(pull_request)?;
-        if let Some(cursor) = &cursor {
-            body["cursor"] = json!(cursor);
-        }
-        let request = Request::builder()
-            .method(Method::POST)
-            .uri(url.as_str())
-            .header("Content-Type", "application/json")
-            .header(
-                "Authorization",
-                format!("Bearer {}", access_token.access_token),
-            )
-            .body(AsyncBody::from(body.to_string()))?;
-        let mut response = http.send(request).await?;
-        let mut text = String::new();
-        response.body_mut().read_to_string(&mut text).await?;
-        if !response.status().is_success() {
-            bail!("{url} returned {}: {text}", response.status());
-        }
-        let slice: DiffSlice = serde_json::from_str(&text)
-            .with_context(|| format!("unexpected pull request diff from {url}"))?;
+        let request = PullRequestDiffInput {
+            project_id: pull_request.project_id.clone(),
+            host: pull_request.host.clone(),
+            repository: pull_request.repository.clone(),
+            number: pull_request.number,
+            allow_stale: pull_request.allow_stale,
+            expected_account_id: pull_request.expected_account_id.clone(),
+            commit: None,
+            cursor: cursor.clone(),
+        };
+        let slice =
+            call_endpoint::<http::PullRequestsDiff>(http, base_url, Some(access_token), &request)
+                .await?;
         if !patch.is_empty() && !patch.ends_with('\n') {
             patch.push('\n');
         }
@@ -210,18 +198,30 @@ pub async fn load_pull_request_files(
                 unavailable: Some("Binary file".to_string()),
             });
         }
-        let mut payload = serde_json::to_value(pull_request)?;
-        payload["changeType"] = json!(file.change_type.as_str());
-        payload["oldPath"] = json!(file.old_path);
-        payload["newPath"] = json!(file.new_path);
+        let payload = PullRequestDiffFileContentsInput {
+            project_id: pull_request.project_id.clone(),
+            host: pull_request.host.clone(),
+            repository: pull_request.repository.clone(),
+            number: pull_request.number,
+            allow_stale: pull_request.allow_stale,
+            expected_account_id: pull_request.expected_account_id.clone(),
+            commit: None,
+            change_type: file.change_type.to_wire(),
+            old_path: file.old_path.clone(),
+            new_path: file.new_path.clone(),
+        };
         let contents = match connection
-            .request("pullRequests.diffFileContents", payload)
+            .call::<rpc::PullRequestsDiffFileContents>(payload)
             .await
         {
             Ok(contents) => contents,
-            // A typed failure is about this file (e.g. over the forge's expansion limit),
-            // so show the rest of the pull request. Connection failures still fail the load.
-            Err(error @ RpcError::Failed { .. }) => {
+            // A typed failure is about this file (e.g. over the forge's expansion limit), and
+            // so is a response this build can't decode, so show the rest of the pull
+            // request. Connection failures still fail the load.
+            Err(error @ (RpcError::Failed { .. } | RpcError::Decode { .. })) => {
+                if let RpcError::Decode { message, .. } = &error {
+                    log::warn!("{}: unexpected file contents: {message}", file.new_path);
+                }
                 let reason = error
                     .error_detail()
                     .unwrap_or_else(|| "This file's contents couldn't be loaded".to_string());
@@ -237,16 +237,10 @@ pub async fn load_pull_request_files(
                 return Err(anyhow!(error)).with_context(|| format!("loading {}", file.new_path));
             }
         };
-        let text = |key: &str| {
-            contents
-                .get(key)
-                .and_then(|value| value.as_str())
-                .map(str::to_string)
-        };
         let (old_text, new_text) = match file.change_type {
-            ChangeType::New => (None, text("newContents")),
-            ChangeType::Deleted => (text("oldContents"), None),
-            _ => (text("oldContents"), text("newContents")),
+            ChangeType::New => (None, Some(contents.new_contents)),
+            ChangeType::Deleted => (Some(contents.old_contents), None),
+            _ => (Some(contents.old_contents), Some(contents.new_contents)),
         };
         anyhow::Ok(PullRequestFile {
             file,
@@ -446,17 +440,15 @@ index 9999999..aaaaaaa 100644
     }
 
     #[test]
-    fn pull_request_ref_matches_t3_field_names() -> Result<()> {
-        let pull_request = PullRequestRef {
-            project_id: "project".to_string(),
-            host: Some("github.com".to_string()),
-            repository: "msetaro/mustr".to_string(),
-            number: 7,
-        };
-        assert_eq!(
-            serde_json::to_value(&pull_request)?,
-            json!({ "projectId": "project", "host": "github.com", "repository": "msetaro/mustr", "number": 7 })
-        );
-        Ok(())
+    fn change_types_are_t3s() {
+        for change_type in [
+            ChangeType::Change,
+            ChangeType::New,
+            ChangeType::Deleted,
+            ChangeType::RenamePure,
+            ChangeType::RenameChanged,
+        ] {
+            assert_eq!(change_type.to_wire().as_str(), change_type.as_str());
+        }
     }
 }

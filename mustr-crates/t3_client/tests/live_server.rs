@@ -2,7 +2,7 @@
 //!
 //! ```sh
 //! export T3_PAIRING_TOKEN=$(t3 auth pairing create --scope orchestration:read \
-//!   --ttl 5m --label "mustr test" --json | jq -r .credential)
+//!   --ttl 5m --label "mustr test (read-only)" --json | jq -r .credential)
 //! cargo test -p t3_client --test live_server -- --ignored --nocapture
 //! ```
 //!
@@ -14,6 +14,8 @@ use anyhow::{Context as _, Result};
 use futures::StreamExt as _;
 use http_client::Url;
 use serde_json::json;
+use t3_client::t3_api::tagged::OrchestrationV2ShellStreamItem;
+use t3_client::t3_api::{http, rpc, types};
 use t3_client::{ClientMetadata, RpcConnection, Scope};
 
 #[test]
@@ -34,6 +36,14 @@ fn live_server_round_trip() -> Result<()> {
             descriptor.label,
             descriptor.protocol_version()
         );
+        // The same endpoint through the generated (strict) type.
+        let typed =
+            t3_client::call_endpoint::<http::MetadataDescriptor>(&http, &base_url, None, &())
+                .await?;
+        println!(
+            "typed descriptor: T3 {} on {:?}",
+            typed.server_version, typed.platform.os
+        );
 
         let client = ClientMetadata {
             label: "mustr test (read-only)".to_string(),
@@ -49,6 +59,24 @@ fn live_server_round_trip() -> Result<()> {
         .await?;
         println!("token: {token:?}");
 
+        // An orchestration endpoint: needs the contract's `x-t3-orchestration-protocol`.
+        // The default query also compiles once T3 gives the endpoint query options.
+        let started = Instant::now();
+        let shell = t3_client::call_endpoint_with::<http::OrchestrationShellSnapshot>(
+            &http,
+            &base_url,
+            Some(&token),
+            &(),
+            &Default::default(),
+            &(),
+        )
+        .await?;
+        println!(
+            "GET /api/orchestration/shell: {} threads in {:?}",
+            shell.threads.len(),
+            started.elapsed()
+        );
+
         let ticket = t3_client::websocket_ticket(&http, &base_url, &token).await?;
         let (connection, driver) =
             RpcConnection::connect(&t3_client::websocket_url(&base_url, &ticket)?).await?;
@@ -57,31 +85,43 @@ fn live_server_round_trip() -> Result<()> {
         let started = Instant::now();
         let config = connection.request("server.getConfig", json!({})).await?;
         println!(
-            "server.getConfig: {} keys in {:?}",
+            "server.getConfig (untyped): {} keys in {:?}",
             config.as_object().map_or(0, |object| object.len()),
             started.elapsed()
         );
 
         let started = Instant::now();
-        let pull_requests = connection
-            .request("pullRequests.list", json!({ "state": "open", "limit": 10 }))
+        let config = connection
+            .call::<rpc::ServerGetConfig>(types::ServerGetConfigPayload(Default::default()))
             .await?;
         println!(
-            "pullRequests.list: {} entries in {:?}",
-            pull_requests["entries"].as_array().map_or(0, Vec::len),
+            "server.getConfig: {} providers, {} keybindings in {:?}",
+            config.providers.len(),
+            config.keybindings.len(),
             started.elapsed()
         );
 
-        if let Some(entry) = pull_requests["entries"]
-            .as_array()
-            .and_then(|entries| entries.first())
-        {
-            let pull_request: t3_client::PullRequestRef = serde_json::from_value(json!({
-                "projectId": entry["projectId"],
-                "host": entry["host"],
-                "repository": entry["repository"],
-                "number": entry["number"],
-            }))?;
+        let started = Instant::now();
+        let pull_requests = connection
+            .call::<rpc::PullRequestsList>(serde_json::from_value(
+                json!({ "state": "open", "limit": 10 }),
+            )?)
+            .await?;
+        println!(
+            "pullRequests.list: {} entries in {:?}",
+            pull_requests.entries.len(),
+            started.elapsed()
+        );
+
+        if let Some(entry) = pull_requests.entries.first() {
+            let pull_request = t3_client::PullRequestRef {
+                project_id: entry.project_id.clone(),
+                host: Some(entry.host.clone()),
+                repository: entry.repository.clone(),
+                number: entry.number,
+                allow_stale: None,
+                expected_account_id: None,
+            };
             let started = Instant::now();
             let files = t3_client::load_pull_request_files(
                 &http,
@@ -113,20 +153,25 @@ fn live_server_round_trip() -> Result<()> {
         }
 
         let started = Instant::now();
-        let mut shell = connection.subscribe(
-            "orchestration.subscribeShell",
-            json!({ "omitOlderSettled": true }),
-        )?;
+        let mut shell = connection.stream::<rpc::OrchestrationSubscribeShell>(Default::default())?;
         let first = shell
             .next()
             .await
             .transpose()?
             .context("shell stream ended without a snapshot")?;
-        println!(
-            "orchestration.subscribeShell: first item kind={} in {:?}",
-            first["kind"],
-            started.elapsed()
-        );
+        match &first {
+            OrchestrationV2ShellStreamItem::Snapshot(snapshot) => println!(
+                "orchestration.subscribeShell: snapshot of {} threads, {} projects in {:?}",
+                snapshot.snapshot.threads.len(),
+                snapshot.snapshot.projects.len(),
+                started.elapsed()
+            ),
+            other => println!(
+                "orchestration.subscribeShell: first item kind={:?} in {:?}",
+                other.tag(),
+                started.elapsed()
+            ),
+        }
 
         connection.close();
         if let Err(error) = driver.await {

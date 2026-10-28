@@ -3,6 +3,10 @@
 //! Each frame holds one JSON message or an array of them. Requests are answered by an
 //! `Exit`; streaming requests get `Chunk`s first, and the server only sends the next
 //! chunk after the client acknowledges the previous one with an `Ack`.
+//!
+//! [`RpcConnection::call`] and [`RpcConnection::stream`] are typed by the method tables in
+//! `t3_api::rpc`; [`RpcConnection::request`] and [`RpcConnection::subscribe`] take a tag
+//! and raw JSON.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,10 +15,11 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use async_tungstenite::tungstenite::Message;
 use futures::channel::{mpsc, oneshot};
 use futures::future::BoxFuture;
-use futures::{FutureExt as _, StreamExt as _};
+use futures::{FutureExt as _, Stream, StreamExt as _};
 use http_client::Url;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
+use t3_api::RpcMethod;
 
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum RpcError {
@@ -27,6 +32,9 @@ pub enum RpcError {
     Closed(String),
     #[error("T3 protocol error: {0}")]
     Protocol(String),
+    /// The server's response doesn't match this build's types for the RPC.
+    #[error("couldn't decode the response to {tag}: {message}")]
+    Decode { tag: String, message: String },
 }
 
 impl RpcError {
@@ -37,6 +45,17 @@ impl RpcError {
                 .iter()
                 .find_map(|key| error.get(*key).and_then(Value::as_str))
                 .map(str::to_string),
+            _ => None,
+        }
+    }
+
+    /// The typed error of `M`, if the server returned one. Error unions have an
+    /// `Unrecognized` variant, so errors from newer servers decode too.
+    pub fn typed_error<M: RpcMethod>(&self) -> Option<M::Error> {
+        match self {
+            RpcError::Failed { tag, error } if tag == M::TAG => {
+                serde_json::from_value(error.clone()).ok()
+            }
             _ => None,
         }
     }
@@ -140,6 +159,36 @@ impl RpcConnection {
         Ok((connection, driver))
     }
 
+    /// Calls the non-streaming RPC `M`, e.g. `call::<t3_api::rpc::PullRequestsList>(…)`.
+    pub async fn call<M: RpcMethod>(&self, payload: M::Payload) -> Result<M::Success, RpcError> {
+        if M::STREAM {
+            return Err(RpcError::Protocol(format!(
+                "{} is a streaming RPC; use RpcConnection::stream",
+                M::TAG
+            )));
+        }
+        let value = self.request(M::TAG, encode_payload::<M>(&payload)?).await?;
+        decode::<M>(value)
+    }
+
+    /// Calls the streaming RPC `M`, e.g. `stream::<t3_api::rpc::OrchestrationSubscribeShell>(…)`.
+    /// Yields each chunk value, and ends when the stream completes; an error is delivered
+    /// as the final item. A value this build can't decode is yielded as
+    /// [`RpcError::Decode`] and the stream continues.
+    pub fn stream<M: RpcMethod>(
+        &self,
+        payload: M::Payload,
+    ) -> Result<impl Stream<Item = Result<M::Success, RpcError>> + use<M>, RpcError> {
+        if !M::STREAM {
+            return Err(RpcError::Protocol(format!(
+                "{} isn't a streaming RPC; use RpcConnection::call",
+                M::TAG
+            )));
+        }
+        let chunks = self.subscribe(M::TAG, encode_payload::<M>(&payload)?)?;
+        Ok(chunks.map(|chunk| chunk.and_then(decode::<M>)))
+    }
+
     /// Calls a non-streaming RPC and waits for its result.
     pub async fn request(&self, tag: &str, payload: Value) -> Result<Value, RpcError> {
         let (respond, response) = oneshot::channel();
@@ -212,6 +261,18 @@ impl RpcConnection {
         state.pending.insert(id, pending);
         Ok(())
     }
+}
+
+fn encode_payload<M: RpcMethod>(payload: &M::Payload) -> Result<Value, RpcError> {
+    serde_json::to_value(payload)
+        .map_err(|error| RpcError::Protocol(format!("couldn't encode {}: {error}", M::TAG)))
+}
+
+fn decode<M: RpcMethod>(value: Value) -> Result<M::Success, RpcError> {
+    serde_json::from_value(value).map_err(|error| RpcError::Decode {
+        tag: M::TAG.to_string(),
+        message: error.to_string(),
+    })
 }
 
 fn handle_frame(
@@ -457,6 +518,146 @@ mod tests {
         assert_eq!(ack, json!({ "_tag": "Ack", "requestId": "1" }));
         assert!(state.lock().pending.is_empty());
         Ok(())
+    }
+
+    fn test_connection() -> (RpcConnection, mpsc::UnboundedReceiver<String>) {
+        let (outgoing, outgoing_rx) = mpsc::unbounded();
+        let connection = RpcConnection {
+            outgoing,
+            state: Arc::new(Mutex::new(ConnectionState::default())),
+        };
+        (connection, outgoing_rx)
+    }
+
+    /// Plays the server: reads the next request and answers it with `frames(id)`.
+    async fn answer(
+        connection: &RpcConnection,
+        outgoing_rx: &mut mpsc::UnboundedReceiver<String>,
+        frames: impl FnOnce(&str) -> String,
+    ) -> Result<Value> {
+        let request: Value =
+            serde_json::from_str(&outgoing_rx.next().await.context("no request sent")?)?;
+        let id = request["id"].as_str().context("request without an id")?;
+        handle_frame(&connection.state, &connection.outgoing, &frames(id))?;
+        Ok(request)
+    }
+
+    fn file_contents_input() -> t3_api::types::PullRequestDiffFileContentsInput {
+        t3_api::types::PullRequestDiffFileContentsInput {
+            project_id: "project".to_string(),
+            host: None,
+            repository: "msetaro/mustr".to_string(),
+            number: 7,
+            change_type: t3_api::types::PullRequestDiffFileContentsInputChangeType::Change,
+            old_path: "a.rs".to_string(),
+            new_path: "a.rs".to_string(),
+            allow_stale: None,
+            commit: None,
+            expected_account_id: None,
+        }
+    }
+
+    #[test]
+    fn typed_calls_encode_the_payload_and_decode_the_result() -> Result<()> {
+        use t3_api::rpc::PullRequestsDiffFileContents;
+        let (connection, mut outgoing_rx) = test_connection();
+        smol::block_on(async {
+            let (result, request) = futures::join!(
+                connection.call::<PullRequestsDiffFileContents>(file_contents_input()),
+                answer(&connection, &mut outgoing_rx, |id| {
+                    json!({ "_tag": "Exit", "requestId": id, "exit": { "_tag": "Success",
+                        "value": { "oldContents": "old", "newContents": "new" } } })
+                    .to_string()
+                }),
+            );
+            let request = request?;
+            assert_eq!(request["tag"], "pullRequests.diffFileContents");
+            assert_eq!(request["payload"]["changeType"], "change");
+            assert_eq!(request["payload"]["number"], 7);
+            assert!(request["payload"].get("host").is_none());
+            let contents = result?;
+            assert_eq!(
+                (
+                    contents.old_contents.as_str(),
+                    contents.new_contents.as_str()
+                ),
+                ("old", "new")
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn typed_calls_expose_typed_errors_and_decode_failures() -> Result<()> {
+        use t3_api::rpc::PullRequestsDiffFileContents;
+        use t3_api::tagged::PullRequestsDiffFileContentsRpcError;
+        let (connection, mut outgoing_rx) = test_connection();
+        smol::block_on(async {
+            let (result, request) = futures::join!(
+                connection.call::<PullRequestsDiffFileContents>(file_contents_input()),
+                answer(&connection, &mut outgoing_rx, |id| {
+                    json!({ "_tag": "Exit", "requestId": id, "exit": { "_tag": "Failure",
+                        "cause": [{ "_tag": "Fail", "error": { "_tag": "ErrorFromANewerServer",
+                            "detail": "too large" } }] } })
+                    .to_string()
+                }),
+            );
+            request?;
+            let error = result.err().context("expected an error")?;
+            assert_eq!(error.error_detail().as_deref(), Some("too large"));
+            assert!(matches!(
+                error.typed_error::<PullRequestsDiffFileContents>(),
+                Some(PullRequestsDiffFileContentsRpcError::Unrecognized(_))
+            ));
+
+            let (result, request) = futures::join!(
+                connection.call::<PullRequestsDiffFileContents>(file_contents_input()),
+                answer(&connection, &mut outgoing_rx, |id| {
+                    json!({ "_tag": "Exit", "requestId": id,
+                        "exit": { "_tag": "Success", "value": { "oldContents": 1 } } })
+                    .to_string()
+                }),
+            );
+            request?;
+            assert!(matches!(result, Err(RpcError::Decode { .. })));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn typed_streams_decode_each_chunk() -> Result<()> {
+        use t3_api::rpc::{OrchestrationSubscribeShell, PullRequestsList};
+        use t3_api::tagged::OrchestrationV2ShellStreamItem;
+        let (connection, mut outgoing_rx) = test_connection();
+        smol::block_on(async {
+            let mut shell = connection.stream::<OrchestrationSubscribeShell>(Default::default())?;
+            answer(&connection, &mut outgoing_rx, |id| {
+                json!([
+                    { "_tag": "Chunk", "requestId": id, "values": [
+                        { "kind": "project.removed", "sequence": 3, "projectId": "p1" },
+                        { "kind": "kind-from-a-newer-server", "sequence": 4 }
+                    ] },
+                    { "_tag": "Exit", "requestId": id, "exit": { "_tag": "Success", "value": null } }
+                ])
+                .to_string()
+            })
+            .await?;
+            let first = shell.next().await.context("no first item")??;
+            assert!(matches!(
+                first,
+                OrchestrationV2ShellStreamItem::ProjectRemoved(_)
+            ));
+            let second = shell.next().await.context("no second item")??;
+            assert_eq!(second.tag(), Some("kind-from-a-newer-server"));
+            assert!(shell.next().await.is_none());
+
+            let payload = serde_json::from_value(json!({ "state": "open" }))?;
+            assert!(matches!(
+                connection.stream::<PullRequestsList>(payload),
+                Err(RpcError::Protocol(_))
+            ));
+            Ok(())
+        })
     }
 
     #[test]

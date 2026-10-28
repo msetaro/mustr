@@ -20,6 +20,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
 smol.workspace = true
+t3_api = { path = "../t3_api" }
 thiserror.workspace = true
 url.workspace = true
 

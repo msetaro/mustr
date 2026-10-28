@@ -17841,6 +17841,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "smol",
+ "t3_api",
  "thiserror 2.0.17",
  "url",
 ]
