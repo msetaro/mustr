@@ -19,7 +19,9 @@ collections.workspace = true
 db.workspace = true
 editor.workspace = true
 futures.workspace = true
+fuzzy.workspace = true
 gpui.workspace = true
+ignore.workspace = true
 image.workspace = true
 language.workspace = true
 log.workspace = true
@@ -33,6 +35,7 @@ serde_json.workspace = true
 t3_api = { path = "../t3_api" }
 time.workspace = true
 ui.workspace = true
+util.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 workspace.workspace = true
 zed_actions.workspace = true

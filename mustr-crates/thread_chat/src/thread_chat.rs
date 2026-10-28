@@ -41,6 +41,10 @@ pub use projects::AddProject;
 pub use sidebar::{SearchThreads, Section, ThreadListFilter, ThreadsSidebarEvent};
 #[cfg(test)]
 mod thread_list_tests;
+// WP9, composer mentions and slash commands:
+mod mentions;
+mod slash_commands;
+pub use mentions::set_local_folders;
 
 #[cfg(test)]
 mod tests;

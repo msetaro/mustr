@@ -1517,3 +1517,6 @@ fn cross_package_actions_build_by_name(cx: &mut TestAppContext) {
 
 // The composer's images, plans, and Resume, and the timeline's images.
 mod composer_and_timeline;
+
+// The composer's menu: mentions, commands, and skills.
+mod mentions_and_slash;
