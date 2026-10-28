@@ -2,7 +2,8 @@
 # for a dry run; it isn't CI. It uses none of Zed's workflows or actions.
 #
 #   git tag v0.2.0 && git push origin v0.2.0   # build, sign, and publish mustr 0.2.0
-#   Actions > mustr release > Run workflow     # dry run: build and upload an artifact only
+#   git push -f origin HEAD:release-dry-run    # dry run: build and upload an artifact only
+#   Actions > mustr release > Run workflow     # the same dry run, once this file is on main
 #
 # The build job holds the update-signing key and can't write to the repository; the publish job
 # can write, and never sees the key.
@@ -13,6 +14,9 @@ on:
   push:
     tags:
       - "v*.*.*"
+    # A dry run from any commit. Manual runs (below) need this file on the default branch.
+    branches:
+      - release-dry-run
   workflow_dispatch:
     inputs:
       dry_run:
@@ -29,6 +33,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # Zed's release profile builds each crate as one codegen unit, which is slow and memory-hungry
+  # on a hosted runner (3 cores, 7 GB). 16 units keep thin LTO and cost a little speed.
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
 
 jobs:
   build:
@@ -116,7 +123,7 @@ jobs:
       - name: Sign the update manifest
         env:
           MUSTR_UPDATE_SIGNING_KEY: ${{ secrets.MUSTR_UPDATE_SIGNING_KEY }}
-          PUBLISHING: ${{ github.event_name == 'push' || !inputs.dry_run }}
+          PUBLISHING: ${{ github.ref_type == 'tag' && (github.event_name == 'push' || !inputs.dry_run) }}
         run: |
           if [[ -z "$MUSTR_UPDATE_SIGNING_KEY" ]]; then
             if [[ "$PUBLISHING" == true ]]; then

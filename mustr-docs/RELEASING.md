@@ -77,10 +77,11 @@ action is pinned to a full commit SHA.
    files, the install command, and GitHub's generated notes. A version with a `-` is published as
    a prerelease.
 
-**Dry run.** Actions › mustr release › Run workflow, with "dry run" checked (the default), or
-`gh workflow run mustr-release.yml --ref <branch> -f dry_run=true`. It builds and signs (if the
-secret is set) and uploads the artifact, and publishes nothing. GitHub runs a manual workflow only
-once its file is on the default branch (`main`). Download the artifact from the run's page to try
+**Dry run.** Push the commit to the `release-dry-run` branch:
+`git push -f origin HEAD:release-dry-run`. Once the workflow is on the default branch (`main`),
+Actions › mustr release › Run workflow (or `gh workflow run mustr-release.yml --ref <branch> -f
+dry_run=true`) does the same; GitHub runs a manual workflow only once its file is there. A dry run
+builds and signs (if the secret is set), uploads the artifact, and publishes nothing. Download the artifact from the run's page to try
 the zip on a Mac (unzip it with `ditto -x -k` in Terminal, or Finder will quarantine it).
 
 ## Prereleases
