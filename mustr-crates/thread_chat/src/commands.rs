@@ -13,21 +13,27 @@
 
 use t3_api::{
     tagged::{
-        OrchestrationV2Command, OrchestrationV2CommandDispatchMode,
-        OrchestrationV2ThreadLaunchWorkspaceStrategy,
+        ChatAttachment, OrchestrationV2Command, OrchestrationV2CommandDispatchMode,
+        OrchestrationV2ThreadLaunchWorkspaceStrategy, SecretRequestAnswerInputAnswer,
     },
     types::{
-        ModelSelection, OrchestrationV2Actor, OrchestrationV2CommandDispatchModeQueueAfterActive,
+        ChatImageAttachment, ChatImageAttachmentType, ModelSelection, OrchestrationV2Actor,
+        OrchestrationV2CommandDispatchModeQueueAfterActive,
         OrchestrationV2CommandDispatchModeQueueAfterActiveType,
         OrchestrationV2CommandDispatchModeStartImmediately,
         OrchestrationV2CommandDispatchModeStartImmediatelyType,
         OrchestrationV2CommandMessageDispatch, OrchestrationV2CommandMessageDispatchDeliveryIntent,
-        OrchestrationV2CommandMessageDispatchType,
-        OrchestrationV2CommandQueuedMessagePromoteToSteer,
+        OrchestrationV2CommandMessageDispatchSourcePlanRef,
+        OrchestrationV2CommandMessageDispatchType, OrchestrationV2CommandQueueResume,
+        OrchestrationV2CommandQueueResumeType, OrchestrationV2CommandQueuedMessagePromoteToSteer,
         OrchestrationV2CommandQueuedMessagePromoteToSteerType,
         OrchestrationV2CommandQueuedRunCancel, OrchestrationV2CommandQueuedRunCancelType,
+        OrchestrationV2CommandQueuedRunEdit, OrchestrationV2CommandQueuedRunEditType,
         OrchestrationV2CommandRuntimeRequestRespond,
-        OrchestrationV2CommandRuntimeRequestRespondType, OrchestrationV2CommandThreadStop,
+        OrchestrationV2CommandRuntimeRequestRespondType, OrchestrationV2CommandThreadCreate,
+        OrchestrationV2CommandThreadCreateType, OrchestrationV2CommandThreadDelete,
+        OrchestrationV2CommandThreadDeleteType, OrchestrationV2CommandThreadInteractionModeSet,
+        OrchestrationV2CommandThreadInteractionModeSetType, OrchestrationV2CommandThreadStop,
         OrchestrationV2CommandThreadStopType, OrchestrationV2CommandThreadUserInputDismiss,
         OrchestrationV2CommandThreadUserInputDismissType, OrchestrationV2CreationSource,
         OrchestrationV2ThreadLaunchInput, OrchestrationV2ThreadLaunchInputInitialMessage,
@@ -37,7 +43,9 @@ use t3_api::{
         OrchestrationV2ThreadLaunchWorkspaceStrategyRootType,
         OrchestrationV2ThreadLaunchWorkspaceStrategyWorktree,
         OrchestrationV2ThreadLaunchWorkspaceStrategyWorktreeType, ProviderApprovalDecision,
-        ProviderInteractionMode, ProviderUserInputAnswers, RuntimeMode,
+        ProviderInteractionMode, ProviderUserInputAnswers, RuntimeMode, SecretRequestAnswerInput,
+        SecretRequestAnswerInputAnswerDecline, SecretRequestAnswerInputAnswerDeclineType,
+        SecretRequestAnswerInputAnswerSave, SecretRequestAnswerInputAnswerSaveType,
     },
 };
 
@@ -91,6 +99,64 @@ pub fn send_message(
     delivery: Delivery,
     ids: CommandIds,
 ) -> OrchestrationV2Command {
+    message(thread_id, Message::text(text), delivery, ids)
+}
+
+/// What a `message.dispatch` carries besides its thread, delivery, and ids.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Message {
+    pub text: String,
+    /// Images uploaded for it (see [`image_attachment`]).
+    pub attachments: Vec<ChatAttachment>,
+    /// The model to run it with; `None` keeps the thread's.
+    pub model_selection: Option<ModelSelection>,
+    /// The plan it implements.
+    pub source_plan: Option<PlanRef>,
+    /// A title for T3 to name the thread from, if it has none yet.
+    pub title_seed: Option<String>,
+}
+
+impl Message {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            ..Default::default()
+        }
+    }
+}
+
+/// A proposed plan, by its thread and id (`sourcePlanRef`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlanRef {
+    pub thread_id: String,
+    pub plan_id: String,
+}
+
+/// An uploaded image, as a message names it: by the attachment id `attachments.createUploadUrl`
+/// gave it, with the name, type, and size it was minted for (`attachmentUploadQueue.ts` in T3).
+pub fn image_attachment(
+    attachment_id: &str,
+    name: &str,
+    mime_type: &str,
+    size_bytes: usize,
+) -> ChatAttachment {
+    ChatAttachment::Image(ChatImageAttachment {
+        id: attachment_id.to_string(),
+        mime_type: mime_type.to_string(),
+        name: name.to_string(),
+        size_bytes: size_bytes as i64,
+        source: None,
+        type_: ChatImageAttachmentType::Image,
+    })
+}
+
+/// A message to a thread (`message.dispatch`), with its images and plan.
+pub fn message(
+    thread_id: &str,
+    message: Message,
+    delivery: Delivery,
+    ids: CommandIds,
+) -> OrchestrationV2Command {
     let (dispatch_mode, delivery_intent) = match delivery {
         Delivery::Queue => (
             OrchestrationV2CommandDispatchMode::QueueAfterActive(
@@ -114,7 +180,7 @@ pub fn send_message(
         ),
     };
     OrchestrationV2Command::MessageDispatch(OrchestrationV2CommandMessageDispatch {
-        attachments: Vec::new(),
+        attachments: message.attachments,
         command_id: ids.command_id,
         context: None,
         created_by: OrchestrationV2Actor::User,
@@ -124,18 +190,212 @@ pub fn send_message(
         dispatch_mode,
         manual_continuation_of_run_id: None,
         message_id: ids.message_id,
-        model_selection: None,
+        model_selection: message.model_selection,
         notification: None,
         restart_continuation_of_run_id: None,
         scheduled_task_id: None,
         sender_thread_id: None,
-        source_plan_ref: None,
-        text: text.to_string(),
+        source_plan_ref: message.source_plan.map(|plan| {
+            OrchestrationV2CommandMessageDispatchSourcePlanRef {
+                plan_id: plan.plan_id,
+                thread_id: plan.thread_id,
+            }
+        }),
+        text: message.text,
         thread_id: thread_id.to_string(),
-        title_seed: None,
+        title_seed: message.title_seed,
         type_: OrchestrationV2CommandMessageDispatchType::MessageDispatch,
         usage_limit_continuation_of_run_id: None,
         usage_limit_recovery_request_id: None,
+    })
+}
+
+/// What T3's app sends to implement a plan: the plan itself, after this prefix
+/// (`PLAN_IMPLEMENTATION_PROMPT_PREFIX` in T3's `apps/web/src/proposedPlan.ts`).
+pub const PLAN_IMPLEMENTATION_PREFIX: &str = "PLEASE IMPLEMENT THIS PLAN:\n";
+
+/// The message that implements a plan.
+pub fn plan_implementation_text(markdown: &str) -> String {
+    format!("{PLAN_IMPLEMENTATION_PREFIX}{}", markdown.trim())
+}
+
+/// Switches the thread between planning and doing (`thread.interaction-mode.set`), as T3 does
+/// before a message in the other mode.
+pub fn set_interaction_mode(
+    thread_id: &str,
+    interaction_mode: ProviderInteractionMode,
+    command_id: String,
+) -> OrchestrationV2Command {
+    OrchestrationV2Command::ThreadInteractionModeSet(
+        OrchestrationV2CommandThreadInteractionModeSet {
+            command_id,
+            interaction_mode,
+            thread_id: thread_id.to_string(),
+            type_: OrchestrationV2CommandThreadInteractionModeSetType::ThreadInteractionModeSet,
+        },
+    )
+}
+
+/// The thread a plan is implemented in, when it isn't the plan's own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlanThread {
+    pub project_id: String,
+    pub title: String,
+    pub model_selection: ModelSelection,
+    pub runtime_mode: RuntimeMode,
+    /// The plan's thread's branch and worktree, which the new thread works in too.
+    pub branch: Option<String>,
+    pub worktree_path: Option<String>,
+}
+
+const PLAN_THREAD_TITLE_MAX_CHARS: usize = 50;
+
+/// A plan's title: its first Markdown heading (`proposedPlanTitle` in T3's
+/// `packages/shared/src/proposedPlanText.ts`).
+pub fn plan_title(markdown: &str) -> Option<String> {
+    markdown.lines().find_map(|line| {
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        if indent > 3 {
+            return None;
+        }
+        let rest = line.trim_start_matches(' ');
+        let hashes = rest.len() - rest.trim_start_matches('#').len();
+        if !(1..=6).contains(&hashes) {
+            return None;
+        }
+        let heading = &rest[hashes..];
+        if !heading.starts_with([' ', '\t']) {
+            return None;
+        }
+        Some(heading.trim().to_string()).filter(|heading| !heading.is_empty())
+    })
+}
+
+/// "Implement <plan title>", as T3 names a thread that implements a plan, cut to 50 characters
+/// (`buildPlanImplementationThreadTitle`, then `truncate` in T3's `packages/shared/src/String.ts`).
+pub fn plan_thread_title(markdown: &str) -> String {
+    let title = match plan_title(markdown) {
+        Some(title) => format!("Implement {title}"),
+        None => "Implement plan".to_string(),
+    };
+    let title = title.trim();
+    match title.char_indices().nth(PLAN_THREAD_TITLE_MAX_CHARS) {
+        Some((index, _)) => format!("{}...", &title[..index]),
+        None => title.to_string(),
+    }
+}
+
+/// Creates the empty thread a plan is implemented in (`thread.create`), in plan-free mode.
+pub fn create_plan_thread(
+    plan_thread: PlanThread,
+    thread_id: &str,
+    command_id: String,
+) -> OrchestrationV2Command {
+    OrchestrationV2Command::ThreadCreate(OrchestrationV2CommandThreadCreate {
+        branch: plan_thread.branch,
+        command_id,
+        created_by: OrchestrationV2Actor::User,
+        creation_source: CREATION_SOURCE,
+        imported_native_thread: None,
+        interaction_mode: ProviderInteractionMode::Default,
+        model_selection: plan_thread.model_selection,
+        project_id: plan_thread.project_id,
+        runtime_mode: plan_thread.runtime_mode,
+        thread_id: thread_id.to_string(),
+        title: plan_thread.title,
+        type_: OrchestrationV2CommandThreadCreateType::ThreadCreate,
+        worktree_path: plan_thread.worktree_path,
+    })
+}
+
+/// Deletes a thread (`thread.delete`), as T3 does with a plan's new thread that couldn't start.
+pub fn delete_thread(thread_id: &str, command_id: String) -> OrchestrationV2Command {
+    OrchestrationV2Command::ThreadDelete(OrchestrationV2CommandThreadDelete {
+        command_id,
+        thread_id: thread_id.to_string(),
+        type_: OrchestrationV2CommandThreadDeleteType::ThreadDelete,
+    })
+}
+
+/// What Resume sends to continue a run that was interrupted or stopped at a usage limit.
+pub const CONTINUE_TEXT: &str = "Continue where you left off.";
+
+/// Continues an interrupted or usage-limited run (`message.dispatch` with
+/// `manualContinuationOfRunId`), as T3's Resume does: it starts at once, without a delivery
+/// intent.
+pub fn continue_run(
+    thread_id: &str,
+    run_id: &str,
+    model_selection: Option<ModelSelection>,
+    ids: CommandIds,
+) -> OrchestrationV2Command {
+    let mut command = message(
+        thread_id,
+        Message {
+            model_selection,
+            ..Message::text(CONTINUE_TEXT)
+        },
+        Delivery::Auto,
+        ids,
+    );
+    if let OrchestrationV2Command::MessageDispatch(dispatch) = &mut command {
+        dispatch.delivery_intent = None;
+        dispatch.manual_continuation_of_run_id = Some(run_id.to_string());
+    }
+    command
+}
+
+/// Replaces a queued message's text before it runs (`queued-run.edit`). Its attachments are
+/// left out, which keeps the ones it has.
+pub fn edit_queued(
+    thread_id: &str,
+    queued_run_id: &str,
+    text: &str,
+    command_id: String,
+) -> OrchestrationV2Command {
+    OrchestrationV2Command::QueuedRunEdit(OrchestrationV2CommandQueuedRunEdit {
+        attachments: None,
+        command_id,
+        context: None,
+        run_id: queued_run_id.to_string(),
+        text: text.to_string(),
+        thread_id: thread_id.to_string(),
+        type_: OrchestrationV2CommandQueuedRunEditType::QueuedRunEdit,
+    })
+}
+
+/// Answers the agent's request for a secret (`secrets.answerRequest`): saves it, or declines
+/// with `None`.
+pub fn answer_secret(
+    thread_id: &str,
+    turn_item_id: &str,
+    secret: Option<String>,
+) -> SecretRequestAnswerInput {
+    SecretRequestAnswerInput {
+        answer: match secret {
+            Some(secret) => {
+                SecretRequestAnswerInputAnswer::Save(SecretRequestAnswerInputAnswerSave {
+                    secret,
+                    type_: SecretRequestAnswerInputAnswerSaveType::Save,
+                })
+            }
+            None => {
+                SecretRequestAnswerInputAnswer::Decline(SecretRequestAnswerInputAnswerDecline {
+                    type_: SecretRequestAnswerInputAnswerDeclineType::Decline,
+                })
+            }
+        },
+        thread_id: thread_id.to_string(),
+        turn_item_id: turn_item_id.to_string(),
+    }
+}
+
+/// Restarts a held queue (`queue.resume`).
+pub fn resume_queue(thread_id: &str, command_id: String) -> OrchestrationV2Command {
+    OrchestrationV2Command::QueueResume(OrchestrationV2CommandQueueResume {
+        command_id,
+        thread_id: thread_id.to_string(),
+        type_: OrchestrationV2CommandQueueResumeType::QueueResume,
     })
 }
 
@@ -621,6 +881,177 @@ mod tests {
         let title = title_from_message(&long);
         assert!(title.ends_with('…'));
         assert!(title.chars().count() <= TITLE_MAX_CHARS + 1);
+    }
+
+    #[test]
+    fn messages_carry_images_and_the_plan_they_implement() {
+        let message = Message {
+            attachments: vec![image_attachment(
+                "attachment-1",
+                "shot.png",
+                "image/png",
+                2048,
+            )],
+            model_selection: Some(ModelSelection {
+                instance_id: Some(json!("claudeAgent")),
+                model: json!("claude-sonnet"),
+                options: None,
+                provider: None,
+            }),
+            source_plan: Some(PlanRef {
+                thread_id: "thread-1".into(),
+                plan_id: "plan-1".into(),
+            }),
+            title_seed: Some("Retries".into()),
+            ..Message::text(plan_implementation_text("  # Retries\n\n1. Do it\n"))
+        };
+        assert_eq!(
+            wire(&super::message("thread-1", message, Delivery::Auto, ids())),
+            json!({
+                "type": "message.dispatch",
+                "commandId": "command-1",
+                "createdBy": "user",
+                "creationSource": "web",
+                "threadId": "thread-1",
+                "messageId": "message-1",
+                "text": "PLEASE IMPLEMENT THIS PLAN:\n# Retries\n\n1. Do it",
+                "attachments": [{
+                    "type": "image", "id": "attachment-1", "name": "shot.png",
+                    "mimeType": "image/png", "sizeBytes": 2048
+                }],
+                "modelSelection": { "instanceId": "claudeAgent", "model": "claude-sonnet" },
+                "sourcePlanRef": { "threadId": "thread-1", "planId": "plan-1" },
+                "titleSeed": "Retries",
+                "deliveryIntent": "auto",
+                "dispatchMode": { "type": "start_immediately" }
+            })
+        );
+    }
+
+    #[test]
+    fn plan_and_resume_commands() {
+        assert_eq!(
+            wire(&set_interaction_mode(
+                "thread-1",
+                ProviderInteractionMode::Default,
+                "command-2".into()
+            )),
+            json!({
+                "type": "thread.interaction-mode.set",
+                "commandId": "command-2",
+                "threadId": "thread-1",
+                "interactionMode": "default"
+            })
+        );
+        let plan_thread = PlanThread {
+            project_id: "project-1".into(),
+            title: plan_thread_title("# Retries"),
+            model_selection: ModelSelection {
+                instance_id: Some(json!("codex")),
+                model: json!("gpt-5"),
+                options: None,
+                provider: None,
+            },
+            runtime_mode: RuntimeMode::FullAccess,
+            branch: Some("t3/retries".into()),
+            worktree_path: None,
+        };
+        assert_eq!(
+            wire(&create_plan_thread(
+                plan_thread,
+                "thread-2",
+                "command-3".into()
+            )),
+            json!({
+                "type": "thread.create",
+                "commandId": "command-3",
+                "createdBy": "user",
+                "creationSource": "web",
+                "threadId": "thread-2",
+                "projectId": "project-1",
+                "title": "Implement Retries",
+                "modelSelection": { "instanceId": "codex", "model": "gpt-5" },
+                "runtimeMode": "full-access",
+                "interactionMode": "default",
+                "branch": "t3/retries",
+                // A thread in the project's checkout has no worktree; T3 takes `null`.
+                "worktreePath": null
+            })
+        );
+        assert_eq!(
+            wire(&delete_thread("thread-2", "command-4".into())),
+            json!({ "type": "thread.delete", "commandId": "command-4", "threadId": "thread-2" })
+        );
+        assert_eq!(
+            wire(&continue_run("thread-1", "run-7", None, ids())),
+            json!({
+                "type": "message.dispatch",
+                "commandId": "command-1",
+                "createdBy": "user",
+                "creationSource": "web",
+                "threadId": "thread-1",
+                "messageId": "message-1",
+                "manualContinuationOfRunId": "run-7",
+                "text": "Continue where you left off.",
+                "attachments": [],
+                "dispatchMode": { "type": "start_immediately" }
+            })
+        );
+        assert_eq!(
+            wire(&edit_queued(
+                "thread-1",
+                "run-q",
+                "Then update the docs",
+                "command-6".into()
+            )),
+            json!({
+                "type": "queued-run.edit",
+                "commandId": "command-6",
+                "threadId": "thread-1",
+                "runId": "run-q",
+                "text": "Then update the docs"
+            })
+        );
+        assert_eq!(
+            wire(&resume_queue("thread-1", "command-5".into())),
+            json!({ "type": "queue.resume", "commandId": "command-5", "threadId": "thread-1" })
+        );
+    }
+
+    #[test]
+    fn secrets_are_saved_or_declined() {
+        assert_eq!(
+            serde_json::to_value(answer_secret("thread-1", "item-4", Some("s3cr3t".into())))
+                .unwrap(),
+            json!({
+                "threadId": "thread-1",
+                "turnItemId": "item-4",
+                "answer": { "type": "save", "secret": "s3cr3t" }
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(answer_secret("thread-1", "item-4", None)).unwrap(),
+            json!({
+                "threadId": "thread-1",
+                "turnItemId": "item-4",
+                "answer": { "type": "decline" }
+            })
+        );
+    }
+
+    #[test]
+    fn plan_threads_are_named_after_the_plans_heading() {
+        assert_eq!(
+            plan_title("Intro\n\n## Add retries \nmore"),
+            Some("Add retries".into())
+        );
+        assert_eq!(plan_title("    # Indented code"), None);
+        assert_eq!(plan_title("#hashtag"), None);
+        assert_eq!(plan_thread_title("No heading"), "Implement plan");
+        assert_eq!(
+            plan_thread_title("# Retry every webhook delivery with exponential backoff and jitter"),
+            "Implement Retry every webhook delivery with expone..."
+        );
     }
 
     #[test]

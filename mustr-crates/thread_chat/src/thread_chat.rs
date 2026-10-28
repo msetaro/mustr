@@ -29,6 +29,7 @@ pub use settings_bar::{
     ToggleModelOptions, ToggleModelPicker, TogglePermissionMode, TogglePlanMode,
 };
 // WP2, composer and timeline:
+pub mod attachments;
 // WP3, thread list and projects:
 pub mod organize;
 pub mod projects;
