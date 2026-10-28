@@ -18,7 +18,8 @@ mod rpc;
 pub use auth::{
     AccessToken, ClientMetadata, EnvironmentDescriptor, ORCHESTRATION_PROTOCOL_HEADER,
     ORCHESTRATION_PROTOCOL_VERSION, Scope, check_protocol_compatibility,
-    exchange_pairing_credential, fetch_descriptor, websocket_ticket, websocket_url,
+    exchange_pairing_credential, fetch_descriptor, pinned_server_version, websocket_ticket,
+    websocket_url,
 };
 pub use endpoints::{call_endpoint, call_endpoint_as, call_endpoint_with};
 pub use pull_requests::{
