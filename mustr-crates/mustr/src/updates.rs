@@ -8,8 +8,10 @@
 //! the running bundle ([`bundle`]). Then the status bar offers "Restart to update". It never
 //! restarts on its own, and it touches only its own bundle and `<data dir>/updates/`.
 //!
-//! It runs only in release builds started from an app bundle on macOS. `"updates": {"enabled":
-//! false}` in the settings stops the automatic checks; mustr › Check for Updates… still checks.
+//! It runs only in release builds made by `script/mustr-package-mac` and started from an app bundle
+//! on macOS. A local `script/mustr-bundle-mac --release` build doesn't replace itself with the
+//! published release. `"updates": {"enabled": false}` in the settings stops the automatic checks;
+//! mustr › Check for Updates… still checks.
 //!
 //! The steps follow Zed's updater (`crates/auto_update/src/auto_update.rs`: `AutoUpdater::poll`
 //! and `update`, `download_release`, `install_release_macos`), which mustr doesn't use: it reads
@@ -66,6 +68,8 @@ const DEBUG_BUNDLE_ENV: &str = "MUSTR_DEBUG_UPDATE_BUNDLE";
 const DEBUG_PUBLIC_KEY_ENV: &str = "MUSTR_DEBUG_UPDATE_PUBLIC_KEY";
 
 const PUBLIC_KEY_FILE: &str = include_str!("../resources/update-signing-key.pub");
+/// `script/mustr-package-mac` sets `MUSTR_PACKAGED` when it builds what it ships.
+const PACKAGED: bool = option_env!("MUSTR_PACKAGED").is_some();
 /// The platform in the manifest that this build installs.
 const PLATFORM: &str = mustr_release::PLATFORM_MACOS_AARCH64;
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(20);
@@ -81,6 +85,7 @@ pub fn init(cx: &mut App) {
     let setup = setup(Environment {
         macos: cfg!(target_os = "macos"),
         release_build: !cfg!(debug_assertions),
+        packaged: PACKAGED,
         executable: executable.as_deref(),
         public_key_file: PUBLIC_KEY_FILE,
         debug_bundle: debug_variable(DEBUG_BUNDLE_ENV).map(PathBuf::from),
@@ -184,6 +189,8 @@ fn watch_settings(cx: &mut App) {
 pub(crate) struct Environment<'a> {
     pub macos: bool,
     pub release_build: bool,
+    /// Built by `script/mustr-package-mac` ([`PACKAGED`]).
+    pub packaged: bool,
     pub executable: Option<&'a Path>,
     pub public_key_file: &'a str,
     /// Debug builds only ([`DEBUG_BUNDLE_ENV`]).
@@ -208,6 +215,13 @@ pub(crate) fn setup(environment: Environment) -> Result<Setup, SharedString> {
             }
             if !environment.release_build {
                 return Err("debug builds don't update themselves".into());
+            }
+            if !environment.packaged {
+                return Err(
+                    "only the builds script/mustr-package-mac makes update themselves; \
+                            this one was built locally"
+                        .into(),
+                );
             }
             let executable = environment
                 .executable

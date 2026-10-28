@@ -53,6 +53,9 @@ trap 'rm -rf "$stage"' EXIT
 
 # Debug info would make the binary several times larger, and it's only for local debugging.
 export CARGO_PROFILE_RELEASE_DEBUG=${CARGO_PROFILE_RELEASE_DEBUG:-0}
+# Marks the build as shipped, which turns on its updater (mustr-crates/mustr/src/updates.rs).
+# Local builds (script/mustr-bundle-mac --release) don't replace themselves with releases.
+export MUSTR_PACKAGED=1
 script/mustr-bundle-mac --release --out-dir "$stage" --no-sign
 app="$stage/mustr.app"
 

@@ -59,7 +59,8 @@ action is pinned to a full commit SHA.
    2. Installs the Rust toolchain that `rust-toolchain.toml` pins, and checks that `cmake` is
       there (the build needs it: `mustr-docs/MACOS.md`).
    3. Restores the cargo cache (`actions/cache`).
-   4. Runs `script/mustr-package-mac`: a release build of `mustr` without debug info, wrapped in
+   4. Runs `script/mustr-package-mac`: a release build of `mustr` without debug info and with
+      `MUSTR_PACKAGED=1` (only such builds update themselves), wrapped in
       `mustr.app` by `script/mustr-bundle-mac`, signed ad hoc
       (`codesign --force --sign - --identifier dev.mustr.mustr`), zipped with
       `ditto -c -k --keepParent`, then unzipped again to check the signature, bundle ID, and

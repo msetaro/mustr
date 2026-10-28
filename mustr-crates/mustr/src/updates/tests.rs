@@ -44,6 +44,7 @@ fn the_updater_runs_only_in_release_bundles_on_macos() {
     let environment = |macos, release_build, executable| Environment {
         macos,
         release_build,
+        packaged: true,
         executable,
         public_key_file: &key_file,
         debug_bundle: None,
@@ -63,6 +64,19 @@ fn the_updater_runs_only_in_release_bundles_on_macos() {
     assert_eq!(
         setup(environment(true, false, Some(bundled))),
         Err("debug builds don't update themselves".into())
+    );
+    // A local `script/mustr-bundle-mac --release` build.
+    let local = Environment {
+        packaged: false,
+        ..environment(true, true, Some(bundled))
+    };
+    assert_eq!(
+        setup(local),
+        Err(
+            "only the builds script/mustr-package-mac makes update themselves; this one was \
+             built locally"
+                .into()
+        )
     );
     assert_eq!(
         setup(environment(

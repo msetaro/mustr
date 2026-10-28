@@ -37,8 +37,9 @@ keeps working. Then the status bar shows **Restart to update**. mustr never rest
 - The replaced app waits next to the new one as `.mustr.app.previous` (hidden) until mustr next
   starts. To go back by hand before then: quit mustr, then in that folder
   `rm -rf mustr.app && mv .mustr.app.previous mustr.app`.
-- Only release builds run from an app bundle update themselves. `cargo run` and
-  `script/mustr-bundle-mac` builds log `Updates: off, because …` and don't.
+- Only the release builds `script/mustr-package-mac` makes, run from an app bundle, update
+  themselves. `cargo run` and `script/mustr-bundle-mac` builds (`--release` too) log
+  `Updates: off, because …` and don't, so a local build never turns into the published release.
 - Cutting releases is in `mustr-docs/RELEASING.md`.
 
 ## Prerequisites
