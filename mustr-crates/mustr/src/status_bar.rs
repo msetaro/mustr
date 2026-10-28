@@ -1,0 +1,264 @@
+//! mustr's status bar items: the T3 sync state and drafts on the left, and key hints for the
+//! active item on the right. They replace Zed's items, which mustr never adds (Zed adds them in
+//! `initialize_workspace`, crates/zed/src/zed.rs), and the dock buttons that `Workspace::new`
+//! adds, which mustr removes; the icon rail replaces them.
+
+use crate::t3_connection::{ConnectionStatus, T3Connection};
+use gpui::{
+    App, AppContext as _, Context, Entity, Hsla, IntoElement, ParentElement as _, Render,
+    SharedString, Styled as _, Subscription, Task, Window, div, px,
+};
+use mustr_ui::{StatusHint, tokens};
+use review::ReviewView;
+use std::time::{Duration, Instant};
+use theme::ActiveTheme as _;
+use ui::{FluentBuilder as _, h_flex};
+use workspace::{HideStatusItem, ItemHandle, StatusItemView, Workspace, dock::PanelButtons};
+
+pub fn init(cx: &mut App) {
+    cx.observe_new(|workspace: &mut Workspace, window, cx| {
+        let Some(window) = window else {
+            return;
+        };
+        let sync_status = cx.new(SyncStatus::new);
+        let drafts = cx.new(|_| DraftsStatus::default());
+        let key_hints = cx.new(|_| KeyHints::default());
+        workspace.status_bar().update(cx, |status_bar, cx| {
+            while let Some(index) = status_bar.position_of_item::<PanelButtons>() {
+                status_bar.remove_item_at(index, cx);
+            }
+            status_bar.add_left_item(sync_status, window, cx);
+            status_bar.add_left_item(drafts, window, cx);
+            status_bar.add_right_item(key_hints, window, cx);
+        });
+    })
+    .detach();
+}
+
+fn status_text(color: Hsla, text: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .px(px(5.))
+        .text_size(tokens::text_size(tokens::TEXT_SIZE_XSMALL))
+        .text_color(color)
+        .whitespace_nowrap()
+        .child(text.into())
+}
+
+/// `● Synced 12s ago`, or why mustr isn't connected to T3.
+pub struct SyncStatus {
+    connection: Entity<T3Connection>,
+    /// When the connection last delivered a fresh session, which reloads every view.
+    synced_at: Option<Instant>,
+    _refresh: Task<()>,
+    _subscription: Subscription,
+}
+
+impl SyncStatus {
+    fn new(cx: &mut Context<Self>) -> Self {
+        let connection = T3Connection::global(cx);
+        let subscription = cx.observe(&connection, |this, connection, cx| {
+            this.synced_at = connection
+                .read(cx)
+                .status()
+                .is_connected()
+                .then(Instant::now);
+            cx.notify();
+        });
+        let synced_at = connection
+            .read(cx)
+            .status()
+            .is_connected()
+            .then(Instant::now);
+        // Re-render only when the label would change.
+        let refresh = cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(delay) = this.update(cx, |this, cx| {
+                    cx.notify();
+                    this.synced_at.map_or(Duration::from_secs(60), |synced_at| {
+                        until_label_changes(synced_at.elapsed())
+                    })
+                }) else {
+                    break;
+                };
+                cx.background_executor().timer(delay).await;
+            }
+        });
+        Self {
+            connection,
+            synced_at,
+            _refresh: refresh,
+            _subscription: subscription,
+        }
+    }
+}
+
+/// "12s ago", "3m ago", "2h ago".
+fn ago(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs();
+    match seconds {
+        0..60 => format!("{seconds}s ago"),
+        60..3600 => format!("{}m ago", seconds / 60),
+        _ => format!("{}h ago", seconds / 3600),
+    }
+}
+
+/// How long until [`ago`] reads differently.
+fn until_label_changes(elapsed: Duration) -> Duration {
+    let unit = match elapsed.as_secs() {
+        0..60 => 1,
+        60..3600 => 60,
+        _ => 3600,
+    };
+    let unit = Duration::from_secs(unit);
+    let into_unit = Duration::from_nanos((elapsed.as_nanos() % unit.as_nanos()) as u64);
+    unit - into_unit
+}
+
+impl Render for SyncStatus {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = mustr_ui::palette(cx);
+        let (dot, text): (Hsla, SharedString) = match self.connection.read(cx).status() {
+            ConnectionStatus::Connected { .. } => (
+                palette.ok.hsla(),
+                match self.synced_at {
+                    Some(synced_at) => format!("Synced {}", ago(synced_at.elapsed())).into(),
+                    None => "Synced".into(),
+                },
+            ),
+            ConnectionStatus::Connecting(_) => {
+                (palette.text_muted.hsla(), "Connecting to T3…".into())
+            }
+            ConnectionStatus::NeedsPairing(_) => {
+                (palette.warning.hsla(), "Not paired with T3".into())
+            }
+            ConnectionStatus::Failed(_) => (cx.theme().status().error, "T3 offline".into()),
+        };
+        h_flex()
+            .pl(px(5.))
+            .child(div().flex_none().size(px(6.)).rounded_full().bg(dot))
+            .child(status_text(palette.text_muted.hsla(), text))
+    }
+}
+
+impl StatusItemView for SyncStatus {
+    fn set_active_pane_item(
+        &mut self,
+        _: Option<&dyn ItemHandle>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) {
+    }
+
+    fn hide_setting(&self, _: &App) -> Option<HideStatusItem> {
+        None
+    }
+}
+
+/// The active review's pending comments. Drafts aren't written yet, so this only says there
+/// are none, while a review is active.
+#[derive(Default)]
+pub struct DraftsStatus {
+    reviewing: bool,
+}
+
+impl Render for DraftsStatus {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = mustr_ui::palette(cx);
+        div().when(self.reviewing, |this| {
+            this.child(status_text(palette.text_muted.hsla(), "No drafts"))
+        })
+    }
+}
+
+impl StatusItemView for DraftsStatus {
+    fn set_active_pane_item(
+        &mut self,
+        item: Option<&dyn ItemHandle>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.reviewing = is_review(item);
+        cx.notify();
+    }
+
+    fn hide_setting(&self, _: &App) -> Option<HideStatusItem> {
+        None
+    }
+}
+
+/// Key hints for the active item.
+#[derive(Default)]
+pub struct KeyHints {
+    reviewing: bool,
+}
+
+const REVIEW_HINTS: [(&[&str], &str); 4] = [
+    (&["j", "k"], "hunk"),
+    (&["]", "f"], "file"),
+    (&["c"], "comment"),
+    (&["v"], "viewed"),
+];
+
+impl Render for KeyHints {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        h_flex()
+            .gap(px(14.))
+            .pr(px(5.))
+            .when(self.reviewing, |this| {
+                this.children(
+                    REVIEW_HINTS
+                        .iter()
+                        .map(|(keys, label)| StatusHint::new(keys.iter().copied(), *label)),
+                )
+            })
+    }
+}
+
+impl StatusItemView for KeyHints {
+    fn set_active_pane_item(
+        &mut self,
+        item: Option<&dyn ItemHandle>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.reviewing = is_review(item);
+        cx.notify();
+    }
+
+    fn hide_setting(&self, _: &App) -> Option<HideStatusItem> {
+        None
+    }
+}
+
+fn is_review(item: Option<&dyn ItemHandle>) -> bool {
+    item.is_some_and(|item| item.downcast::<ReviewView>().is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_age_labels() {
+        assert_eq!(ago(Duration::from_millis(300)), "0s ago");
+        assert_eq!(ago(Duration::from_secs(12)), "12s ago");
+        assert_eq!(ago(Duration::from_secs(185)), "3m ago");
+        assert_eq!(ago(Duration::from_secs(7300)), "2h ago");
+    }
+
+    #[test]
+    fn sync_age_refreshes_when_the_label_changes() {
+        assert_eq!(
+            until_label_changes(Duration::from_millis(12_250)),
+            Duration::from_millis(750)
+        );
+        assert_eq!(
+            until_label_changes(Duration::from_secs(185)),
+            Duration::from_secs(55)
+        );
+        assert_eq!(
+            until_label_changes(Duration::from_secs(3600)),
+            Duration::from_secs(3600)
+        );
+    }
+}

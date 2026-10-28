@@ -1,5 +1,6 @@
 use crate::{
     inbox::{self, PullRequestEntry, PullRequestList, ThreadRow, ThreadStatus},
+    nav_panel::NavPanel,
     pull_request_review,
     t3_connection::{self, ConnectionStatus, T3Connection, T3Session},
 };
@@ -9,7 +10,7 @@ use gpui::{
     App, Entity, EventEmitter, FocusHandle, Focusable, Global, Subscription, Task, WeakEntity,
 };
 use mustr_ui::tokens;
-use review::{FileTreePanel, ReviewContents, ReviewView};
+use review::{ReviewContents, ReviewView};
 use std::sync::Arc;
 use ui::{Button, ButtonStyle, DiffStat, Divider, Indicator, prelude::*};
 use workspace::{
@@ -218,7 +219,7 @@ impl HomeView {
                 })?;
                 open_review.await?;
                 workspace.update_in(cx, |workspace, window, cx| {
-                    workspace.open_panel::<FileTreePanel>(window, cx);
+                    workspace.open_panel::<NavPanel>(window, cx);
                     if !review_data.problems.is_empty() {
                         let id = NotificationId::composite::<HomeView>(display_ref.clone());
                         let note = format!(

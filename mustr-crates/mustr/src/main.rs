@@ -6,7 +6,10 @@ mod data_dir;
 mod home;
 mod inbox;
 mod keymap;
+mod nav_panel;
+mod navigation;
 mod pull_request_review;
+mod status_bar;
 mod t3_connection;
 mod themes;
 mod title_bar;
@@ -111,6 +114,9 @@ fn main() {
     log::info!("========== starting mustr {app_version} ==========");
     log::info!("Data directory: {}", data_dir.display());
 
+    app_settings::ensure_settings_file(paths::settings_file())
+        .context("creating the settings file")
+        .log_err();
     let settings_text = std::fs::read_to_string(paths::settings_file()).ok();
     let t3_server_url = t3_connection::resolve_server_url(args.t3_server, settings_text.as_deref());
     match &t3_server_url {
@@ -129,7 +135,7 @@ fn main() {
         .log_err();
 
     let app = Application::new_inaccessible(gpui_platform::current_platform(false))
-        .with_assets(Assets)
+        .with_assets(mustr_ui::MustrAssets::new(Assets))
         .with_restart_arguments(vec![
             OsString::from("--user-data-dir"),
             data_dir.as_os_str().to_owned(),
@@ -340,5 +346,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     which_key::init(cx);
     app_settings::observe_app_settings(cx);
     title_bar::init(cx);
+    status_bar::init(cx);
     window::init(cx);
 }

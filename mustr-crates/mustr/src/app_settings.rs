@@ -2,7 +2,7 @@ use anyhow::Result;
 use fs::Fs;
 use gpui::{Action as _, App, AppContext as _, DismissEvent, UpdateGlobal as _};
 use settings::{InvalidSettingsError, Settings, SettingsFile, SettingsStore};
-use std::sync::Arc;
+use std::{io::Write as _, path::Path, sync::Arc};
 use theme::ActiveTheme as _;
 use theme_settings::ThemeSettings;
 use ui::IconName;
@@ -15,6 +15,30 @@ use workspace::{
 };
 
 const DEFAULT_OVERRIDES: &str = include_str!("../assets/default_overrides.json");
+
+/// What a new settings file holds. Zed's settings writer garbles the first setting it adds to
+/// an empty object after a comment, or after a comment containing `://`, so the comments are
+/// inside the braces and the link has no scheme.
+pub const INITIAL_SETTINGS: &str = "{\n  // mustr settings\n  //\n  // mustr uses Zed's settings format. For the available settings, see\n  // zed.dev/docs/configuring-zed\n}\n";
+
+/// Writes [`INITIAL_SETTINGS`] if there's no settings file yet. When something saves a setting
+/// (the diff style, the theme selector), Zed's `SettingsStore::update_settings_file` starts a
+/// missing file from Zed's template, which would set Zed's theme and font sizes over mustr's
+/// defaults.
+pub fn ensure_settings_file(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut file) => Ok(file.write_all(INITIAL_SETTINGS.as_bytes())?),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
 
 /// Replaces Zed's default settings with Zed's defaults plus mustr's overrides,
 /// so mustr can change defaults without editing `assets/settings/default.json`.
@@ -236,7 +260,9 @@ mod tests {
                 "Zed auto-installs the {extension} extension; turn it off in default_overrides.json"
             );
         }
-        assert_eq!(merged["tab_bar"], defaults["tab_bar"]);
+        // mustr's title bar shows the tabs.
+        assert_eq!(merged["tab_bar"]["show"], Value::Bool(false));
+        assert_eq!(merged["ui_font_size"], Value::from(13));
         assert_eq!(
             merged["theme"]["dark"],
             Value::from(mustr_ui::DARK_THEME_NAME)
@@ -246,5 +272,37 @@ mod tests {
             Value::from(mustr_ui::LIGHT_THEME_NAME)
         );
         assert_eq!(merged["theme"]["mode"], Value::from("dark"));
+    }
+
+    #[gpui::test]
+    fn initial_settings_survive_saving_a_setting(cx: &mut gpui::TestAppContext) {
+        let store = cx.update(SettingsStore::test);
+        let new_text = store
+            .new_text_for_update(INITIAL_SETTINGS.to_string(), |settings| {
+                settings.editor.diff_view_style = Some(settings::DiffViewStyle::Unified);
+            })
+            .unwrap();
+        let parsed: Value = settings::parse_json_with_comments(&new_text).unwrap();
+        assert_eq!(parsed, serde_json::json!({"diff_view_style": "unified"}));
+        assert!(
+            new_text.contains("  // zed.dev/docs/configuring-zed\n"),
+            "{new_text}"
+        );
+    }
+
+    #[test]
+    fn creates_a_mustr_settings_file_only_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config").join("settings.json");
+        ensure_settings_file(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), INITIAL_SETTINGS);
+        settings::parse_json_with_comments::<Value>(INITIAL_SETTINGS).unwrap();
+
+        std::fs::write(&path, "{\"vim_mode\": true}").unwrap();
+        ensure_settings_file(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{\"vim_mode\": true}"
+        );
     }
 }
