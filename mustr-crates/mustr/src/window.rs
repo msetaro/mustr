@@ -1,9 +1,9 @@
-use crate::{app_settings::INITIAL_SETTINGS, home::HomeView};
+use crate::{app_settings::INITIAL_SETTINGS, home::HomeView, nav_panel::NavPanel};
 use gpui::{
     App, AppContext as _, Context, Entity, Menu, MenuItem, OsAction, PromptLevel, TaskExt as _,
     TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions, point, px,
 };
-use review::{FileTreePanel, ToggleFileTree};
+use review::ToggleFileTree;
 use settings::{Settings as _, SettingsStore};
 use std::{
     path::Path,
@@ -91,11 +91,17 @@ pub fn init(cx: &mut App) {
 
         // Zed adds its panels in `initialize_panels` (crates/zed/src/zed.rs); mustr's are
         // created synchronously, so dock restoration can finish right away.
-        let file_tree = cx.new(|cx| FileTreePanel::new(&workspace_handle, window, cx));
-        workspace.add_panel(file_tree, window, cx);
+        let nav_panel = cx.new(|cx| NavPanel::new(&workspace_handle, window, cx));
+        workspace.add_panel(nav_panel.clone(), window, cx);
         workspace.finish_dock_restoration(cx);
+        // The window's first item may already be open.
+        let active_item = workspace.active_item(cx);
+        let left_dock = workspace.left_dock().clone();
+        nav_panel.update(cx, |nav_panel, cx| {
+            nav_panel.active_item_changed(active_item.as_deref(), &left_dock, window, cx)
+        });
         workspace.register_action(|workspace, _: &ToggleFileTree, window, cx| {
-            workspace.toggle_panel_focus::<FileTreePanel>(window, cx);
+            workspace.toggle_panel_focus::<NavPanel>(window, cx);
         });
 
         cx.subscribe_in(

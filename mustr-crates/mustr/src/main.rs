@@ -6,6 +6,7 @@ mod data_dir;
 mod home;
 mod inbox;
 mod keymap;
+mod nav_panel;
 mod navigation;
 mod pull_request_review;
 mod t3_connection;
@@ -133,7 +134,7 @@ fn main() {
         .log_err();
 
     let app = Application::new_inaccessible(gpui_platform::current_platform(false))
-        .with_assets(Assets)
+        .with_assets(mustr_ui::MustrAssets::new(Assets))
         .with_restart_arguments(vec![
             OsString::from("--user-data-dir"),
             data_dir.as_os_str().to_owned(),
