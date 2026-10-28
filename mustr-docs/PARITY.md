@@ -16,6 +16,9 @@ what to build so a developer can stop opening T3's app.
 - **Priority** for a developer replacing T3's app at work: **P0** blocks the switch. **P1** is
   needed within weeks. **P2** is nice to have. **Skip** means mustr doesn't need it, with the reason
   given.
+- **The user:** macOS on Apple Silicon, with Claude Code and Codex. Their must-haves are subagents
+  and scheduled tasks, worktrees and terminals, and the PR flow. Those rows say "P0: user's
+  must-have".
 
 ## 1. Where mustr stands
 
@@ -39,8 +42,14 @@ The gaps that block daily use:
 - **Shipping work:** there's no commit, push or PR from a thread, and no Open in editor.
 - **Projects:** you can't add a project, and there are no scratch threads. Once mustr runs its own
   engine, you'd have to open T3's app to do either.
+- **Subagents and schedules:** a subagent shows as a tool row, so its thread can't be opened or
+  stopped. Workflows and scheduled tasks have no UI.
+- **Worktrees and terminals:** there's no terminal and no branch list. Existing worktrees can't be
+  reused, branches can't be switched, and worktrees can't be removed.
+- **PR flow:** a PR can't be linked or watched, a thread can't start from a PR, and a PR can't be
+  merged.
 
-Terminals, notifications, revert and fork, @-mentions, and slash commands come next (P1). Running
+Notifications, revert and fork, @-mentions, and slash commands come next (P1). Running
 T3's engine inside mustr is in progress on `m3/embedded-engine` and isn't counted below.
 
 ## 2. Features by area
@@ -62,12 +71,12 @@ T3's engine inside mustr is in progress on `m3/embedded-engine` and isn't counte
 |---|---|---|---|---|---|
 | Add a project | Adds a local folder as a project (`components/AddProjectToMachineDialog.tsx`, `CommandPaletteAddProject.tsx`) | `projects.mutate` `{project.create}` (or `POST /api/projects/mutate`); `filesystem.browse` for remote | Missing: the form says "Add one in T3 Code first" (`thread_chat/src/new_thread.rs:393`) | S | P0: with mustr's own engine there's no other way |
 | New thread: project, agent, model | Draft composer with a project heading and model picker | `orchestration.launchThread` | Done (`thread_chat/src/new_thread.rs`) | — | P0 |
-| Worktree from a base branch | Picks the base branch (`components/WorktreeBaseBranchPicker.tsx`) | `launchThread` `workspaceStrategy: worktree{baseRef}`, `vcs.listRefs` | Partial: the base ref is free text, with no branch list | S | P1 |
-| Existing worktree or branch | "New thread in this worktree"; `mod+shift+l` reuses the previous worktree | `existing_worktree{worktreePath}`, `root{branch}` | Missing: only the checkout or a new worktree | S | P1 |
+| Worktree from a base branch | Picks the base branch from a paged list, with a "Start from remote" switch (`components/WorktreeBaseBranchPicker.tsx`) | `launchThread` `workspaceStrategy: worktree{baseRef}`, `vcs.listRefs` | Partial: the base ref is free text, with no branch list | S | P0: user's must-have |
+| Existing worktree or branch | "New thread in this worktree"; `mod+shift+l` reuses the previous worktree | `existing_worktree{worktreePath}`, `root{branch}` | Missing: only the checkout or a new worktree | S | P0: user's must-have |
 | Scratch thread (no project) | Runs in `~/.t3/scratch/<date-slug>` (`docs/user/thread-sidebar.md`) | `projects.ensureScratch`, then `launchThread` | Missing | S | P0: 19 scratch threads in `~/.t3/scratch` this month |
 | Start in background | `mod+Enter` starts the thread and opens another draft | `launchThread` | Missing | S | P2 |
 | One prompt, several models | Shift-click models; one thread and worktree each (`chat/useMultipleModelSend.ts`) | `launchThread` once per model | Missing | S | P2 |
-| Thread from a PR | "Work on PR": checks out a PR locally or in a worktree for an agent (`components/PullRequestThreadDialog.tsx`) | `git.resolvePullRequest`, `git.preparePullRequestThread` | Missing | M | P1: the "fix the review comments" flow |
+| Thread from a PR | "Work on PR": checks out a PR locally or in a worktree for an agent (`components/PullRequestThreadDialog.tsx`) | `git.resolvePullRequest`, `git.preparePullRequestThread` | Missing | M | P0: user's must-have; the "fix the review comments" flow |
 | Rename, regenerate title | Thread menu | `thread.metadata.update` `{title, regenerateTitle}` | Partial: T3's title is shown, but can't be renamed | S | P1 |
 | Project settings | Default model, workspace mode, scripts, icon (`settings/ProjectSettingsPanel.tsx`) | `projects.mutate` `{project.update}` | Partial: the project's default model is honored (`new_thread.rs:266`) | M | P2 |
 | Clone a repo as a project | Clone from a forge | `projectClone.*`, `sourceControl.cloneRepository` | Missing | M | P2 |
@@ -135,7 +144,7 @@ T3's engine inside mustr is in progress on `m3/embedded-engine` and isn't counte
 | Live command output | Output streams while a command runs (`chat/CommandOutputPanel.tsx`) | `orchestration.subscribeCommandOutput` | Partial: fetched once on expand | S | P1 |
 | Copy a message or code block | `chat/MessageCopyButton.tsx` | — | Missing | S | P1 |
 | Find in thread | `mod+F` (`chat/ThreadFindBar.tsx`) | `orchestration.searchThread` | Missing | S | P1 |
-| Subagents | Subagent bar and Agents panel; open or stop a child (`chat/ProviderSubagentBar.tsx`, `chat/ThreadRelationshipsControl.tsx`) | `orchestration.getThreadFamily` *(0.1.3)*, `subagent.stop` | Partial: a tool row (`model.rs:385`); the child can't be opened or stopped | M | P1 |
+| Subagents | The subagent bar in a child ("Open parent") and the parent's lineage list, to open or stop a child (`chat/ProviderSubagentBar.tsx`, `chat/ThreadRelationshipsControl.tsx`) | On 0.1.1: shell `lineage` (`parentThreadId`, `rootThreadId`, `relationshipToParent: subagent`), the subagent item's `childThreadId`, `subagent.stop` `{runId, subagentId}`. *(0.1.3)* adds `orchestration.getThreadFamily` | Partial: a tool row (`model.rs:385`); the child can't be opened or stopped | M | P0: user's must-have |
 | "New since last visit" | Visit watermark (`chat/ThreadVisitWatermark.tsx`) | `thread.visit` | Missing | S | P1 |
 | Markdown extras | Mermaid, math, tables, file links that open the file (`chat/MarkdownMermaidCodeBlock.tsx`, `chat/MarkdownFileLink.tsx`) | — | Partial: Zed markdown; file links don't open in mustr | M | P2 |
 | Inline charts, HTML renders | `chat/HtmlRenderFrame.tsx` (agents' `html_render`, `html_preview`) | `assets.createUrl` | Missing | M | P2: mustr has no HTML engine; open in the system browser |
@@ -167,9 +176,9 @@ T3's engine inside mustr is in progress on `m3/embedded-engine` and isn't counte
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
 | A worktree per thread | Created when the thread launches | `launchThread` | Done | — | P0 |
-| Remove worktrees | Offers removal of an unshared worktree on archive or delete; automatic cleanup rules (`worktreeCleanup.ts`, `settings/StorageSettings.tsx`) | `orchestration.getWorktreeThreadIds` *(0.1.3)*, `vcs.removeWorktree`; `server.runStorageCleanup` | Missing | S | P1: about 150 T3 worktrees on this machine |
-| Switch or create a branch | `mod+shift+g` (`components/BranchPicker.tsx`) | `vcs.listRefs`, `vcs.switchRef`, `vcs.createRef` | Missing | S | P1 |
-| Git status | Ahead, behind and dirty for the git actions | `subscribeVcsStatus`, `vcs.refreshStatus` | Missing | S | P1 (feeds §2.11) |
+| Remove worktrees | Offers removal of an unshared worktree on archive or delete; automatic cleanup rules (`worktreeCleanup.ts`, `settings/StorageSettings.tsx`) | `vcs.removeWorktree`; whether a worktree is shared: `orchestration.getWorktreeThreadIds` *(0.1.3)*, or on 0.1.1 the shell threads with the same `worktreePath`; `server.runStorageCleanup` | Missing | S | P0: user's must-have; about 150 T3 worktrees on this machine |
+| Switch or create a branch | `mod+shift+g` (`components/BranchPicker.tsx`) | `vcs.listRefs`, `vcs.switchRef`, `vcs.createRef` | Missing | S | P0: user's must-have |
+| Git status | Ahead, behind and dirty for the git actions | `subscribeVcsStatus`, `vcs.refreshStatus` | Missing | S | P0: user's must-have (feeds §2.11) |
 | Worktree handoff | Moves a thread between the checkout and a worktree | `thread.metadata.update` `{worktreePath, branch}` | Missing | M | P2 |
 | Project scripts | Run `dev` or `test` from `t3.json`; `runOnSettle` (`components/ProjectScriptsControl.tsx`) | `terminal.open`; `projects.mutate` scripts | Missing | M | P2 |
 
@@ -179,10 +188,10 @@ T3's engine inside mustr is in progress on `m3/embedded-engine` and isn't counte
 |---|---|---|---|---|---|
 | Commit, push, create PR | One control for commit, push and PR, with progress. T3 writes the commit message and PR text, and links the PR to the thread (`components/GitActionsControl.tsx`) | `git.runStackedAction` (stream; `commit`, `push`, `create_pr`, `commit_push`, `commit_push_pr`), `subscribeVcsStatus` | Missing | M | P0 |
 | The thread's PR | PR chip with checks in the header and sidebar (`components/ThreadStatusIndicators.tsx`, `chat/ThreadDetailsPrRow.tsx`) | Shell `linkedPullRequest`, `branchPullRequest`; `pullRequests.summary`, `pullRequests.checks` | Partial: decoded for the inbox (`mustr/src/agent_threads.rs`); not shown in the thread | S | P0 (with the row above) |
-| Link or unlink a PR | `pullRequest/LinkPullRequestDialog.tsx` | `thread.pull-request.link`, `thread.pull-request.unlink` | Missing | S | P1 |
-| Watch a PR | The agent reacts to CI and comments | `thread.pull-request.watch` | Missing | S | P1 |
+| Link or unlink a PR | `pullRequest/LinkPullRequestDialog.tsx` | `thread.pull-request.link`, `thread.pull-request.unlink` | Missing | S | P0: user's must-have |
+| Watch a PR | The agent reacts to CI and comments | `thread.pull-request.watch` | Missing | S | P0: user's must-have |
 | A PR's threads | `pullRequest/PullRequestThreadLinks.tsx` | `pullRequests.linkedThreads` | Missing | S | P1 |
-| Merge, ready, close | `pullRequest/PullRequestDetailActions.tsx` | `pullRequests.runAction` | Missing (a PLAN §5 should-have) | S | P1 |
+| Merge, ready, close | `pullRequest/PullRequestDetailActions.tsx` | `pullRequests.runAction` | Missing (a PLAN §5 should-have) | S | P0: user's must-have |
 | PR inbox, review, comments, submit | `pullRequest/PullRequestsPage.tsx` | `pullRequests.*` | Done: mustr's core (`review/`, `mustr/src/home.rs`) | — | — |
 | Review guides | `pullRequest/PullRequestGuideTab.tsx`; agents' `write_pull_request_guides` | `pullRequests.reviewGuide`, `generateReviewGuide` | Missing | M | P2 |
 | Reviewers, labels, title; stacks | `pullRequest/PullRequestReviewerPicker.tsx`, `PullRequestStack*.tsx` | `requestReviewers`, `setLabels`, `update`, `stack` | Missing | M | P2 |
@@ -193,7 +202,7 @@ T3's engine inside mustr is in progress on `m3/embedded-engine` and isn't counte
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
 | Open in editor | Cursor, VS Code, Zed and others for the thread's folder (`chat/OpenInPicker.tsx`) | `shell.openInEditor`; editors from `server.getConfig` | Missing (listed in PLAN §8) | S | P0: the way out for anything mustr lacks |
-| Terminal per thread | A drawer in the thread's worktree that stays open (`components/ThreadTerminalDrawer.tsx`, `components/PersistentThreadTerminals.tsx`) | `terminal.open/attach/write/resize/close`, `subscribeTerminalEvents` (`terminal:*` scopes) | Missing: Zed's `terminal_view` is set up (`mustr/src/main.rs:394`) but there's no panel | M | P1: Zed's terminal at the worktree for local threads, T3's terminals for remote |
+| Terminal per thread | A drawer in the thread's worktree that stays open (`components/ThreadTerminalDrawer.tsx`, `components/PersistentThreadTerminals.tsx`) | `terminal.open/attach/write/resize/close`, `subscribeTerminalEvents` (`terminal:*` scopes) | Missing: Zed's `terminal_view` is set up (`mustr/src/main.rs:394`) but there's no panel | M | P0: user's must-have. Use Zed's terminal at the worktree for local threads, and T3's `terminal.*` for remote ones |
 | Terminal excerpt to the composer | `chat/TerminalContextInlineChip.tsx` | `message.dispatch.context` (terminal) | Missing | S | P2 |
 
 ### 2.13 Preview browser and devices
@@ -209,9 +218,9 @@ T3's engine inside mustr is in progress on `m3/embedded-engine` and isn't counte
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
 | Orchestrator MCP for agents | 63 tools at `/mcp`: threads, queue, PRs, preview, schedules (`apps/server/src/mcp/toolkits/`) | Served by the server | Done: needs no client | — | — |
-| Delegated tasks, workflows | Workflow rows and stopping them (`chat/ThreadLineageWorkflowRow.tsx`, `chat/WorkflowOpeningBlock.tsx`) | `orchestration.getWorkflowScript`, `orchestration.stopWorkflow` | Missing | M | P2 |
+| Delegated tasks, workflows | Delegated-task rows, background work with Stop, and workflow rows (`chat/ThreadLineageWorkflowRow.tsx`, `chat/WorkflowOpeningBlock.tsx`, `chat/ThreadNow.tsx`) | Shell `pendingBackgroundTasks`, `blockedOnThreadWait`; `orchestration.getWorkflowScript`, `orchestration.stopWorkflow`; `thread.stop` | Missing: delegated calls show as plain tool rows | M | P0: user's must-have |
 | Outside agents | Claude Code or Codex in your own terminal sign in to T3's `/mcp`; you approve them at `/connect-agent` (`components/auth/ConnectAgentSurface.tsx`) | `/oauth/mcp/*` | Missing: the server still serves that page, so a system browser works | S | P2 |
-| Scheduled tasks | List, edit, enable, run now, webhook triggers (`settings/ScheduledTasksSettings.tsx`, `chat/ThreadAutomationsPanel.tsx`) | `scheduledTasks.*`, `/api/hooks/:hookId/:token` | Missing | M | P2: agents create them with `schedule_task`, and they run on the server |
+| Scheduled tasks | List, edit, enable, run now and delete tasks on an interval, a fixed time or a webhook, with the webhook's delivery log (`settings/ScheduledTasksSettings.tsx`, `chat/ThreadAutomationsPanel.tsx`) | `scheduledTasks.subscribe`, `upsert`, `setEnabled`, `runNow`, `delete`; webhooks read-only: `listWebhookDeliveries`, `getWebhookDelivery` | Missing | M | P0: user's must-have; agents also create them with `schedule_task` |
 
 ### 2.15 Thread organization
 
@@ -260,21 +269,38 @@ T3's engine inside mustr is in progress on `m3/embedded-engine` and isn't counte
 | Mobile app | `apps/mobile` | The same server | n/a | — | Skip: keeps working against the server when mustr pairs with the user's T3 |
 | Snap Shot, browser import | Screen capture tool; cookie import for preview (`docs/user/snap-shot.md`, `docs/user/browser-import.md`) | — | Missing | — | Skip: desktop extras; browser import only matters with the preview |
 
+**On the 0.1.1 pin.** Every P0 works on 0.1.1. Where 0.1.3 adds a call, mustr uses 0.1.1's data
+until the pin moves:
+- **Subagents:** 0.1.1's shell holds every thread, subagent children included, and each has a
+  `lineage`: `parentThreadId`, `rootThreadId`, and `relationshipToParent` (`fork` or `subagent`).
+  A subagent turn item names its `childThreadId` and `subagentId`. So mustr builds a thread's family
+  from the shell it already follows, and stops a child with `subagent.stop` (or the whole tree with
+  `thread.stop`).
+- **On 0.1.3, use `getThreadFamily`:** its snapshots leave out idle subagent children
+  (`omitIdleSubagents`, `packages/contracts/src/orchestrationV2.ts:3438`), which is why
+  `orchestration.getThreadFamily` exists. Switch to it when the pin moves.
+- **Other 0.1.3-only calls:** for shared worktrees, match `worktreePath` across the shell's
+  threads instead of calling `getWorktreeThreadIds`. `getOlderSettledThreads` isn't needed, since
+  0.1.1's shell has every thread. Only `queued-run.start` (P2) waits for the pin.
+- **Already there:** workflows (`getWorkflowScript`, `stopWorkflow`), all nine
+  `scheduledTasks.*` calls, `terminal.*`, `vcs.*`, `git.*` and `pullRequests.runAction` are in
+  0.1.1 (`t3_api/src/generated/methods.rs`).
+
 **Counts** (125 rows):
-- **P0:** 28. 11 are done and 17 open: 16 for §3, plus the embedded engine.
-- **P1:** 44.
-- **P2:** 40.
+- **P0:** 41. 11 are done and 30 open: 29 for §3, plus the embedded engine.
+- **P1:** 33.
+- **P2:** 38.
 - **Skip:** 11.
 - **No priority:** 2 done rows.
 
 **Scopes:** P0 fits mustr's current grant (`orchestration:read`, `orchestration:operate`,
-`source-control:write`). P1 adds `terminal:read` and `terminal:operate` (T3 terminals),
-`filesystem:read` (@-mentions), `settings:write` and
-`providers:manage`. `access:*` and `relay:*` stay out.
+`source-control:write`), except T3's terminals for remote threads, which need `terminal:read` and
+`terminal:operate`. Local threads use Zed's terminal and need no scope. P1 adds `filesystem:read`
+(@-mentions), `settings:write` and `providers:manage`. `access:*` and `relay:*` stay out.
 
 ## 3. Recommended build order
 
-All 16 open P0 rows, in four packages that separate agents can build at the same time. Each package
+All 29 open P0 rows, in six packages that separate agents can build at the same time. Each package
 owns its files. A short WP0 lands first and adds the seams that keep the packages out of each
 other's files. Rules for every package:
 - Write through the installed backend or connection, so `MUSTR_DRY_RUN_WRITES` still refuses
@@ -289,21 +315,32 @@ other's files. Rules for every package:
 - Add `ThreadBackend::call_raw(tag, payload)` and `upload(...)` to `thread_chat/src/backend.rs` and
   `mustr/src/thread_backend.rs`. They honor the dry-run and scope checks, so later packages never
   edit the backend.
-- Add an empty `thread_chat/src/settings_bar.rs` (`ThreadSettingsBar`), which `composer.rs` already
-  renders.
+- Add empty `thread_chat/src/settings_bar.rs` (`ThreadSettingsBar`, rendered by `composer.rs`)
+  and `thread_chat/src/family_bar.rs` (`ThreadFamilyBar`, rendered above the timeline).
 - Return `true` from `ThreadView::show_toolbar` so the app can add a Zed `ToolbarItemView`.
-- Reserve the `mod` and `init` lines in `thread_chat/src/thread_chat.rs` and `mustr/src/main.rs`.
-  Also reserve the toolbar line next to `add_search_bars` in `mustr/src/window.rs:297`, where
-  panes get their toolbar items. These are the only shared files, and every later edit to them is a
-  one-line append.
+- Add cross-package actions in `thread_chat/src/thread_chat.rs`, each handled by its owner:
+  `OpenThreadTerminal { thread_id }` (WP6), `ReviewThreadChanges { thread_id }` (WP4),
+  `NewThreadInWorktree { project_id, worktree_path, branch }` (WP1), and
+  `RemoveThreadWorktree { thread_id }` (WP6). WP4's toolbar can then open WP6's terminal, and
+  WP3's Archive can offer WP6's worktree removal, without editing each other's files.
+- Add a rail registry to `mustr/src/nav_panel.rs` (`register_rail_entry(id, icon, tooltip,
+  action)`, drawn between Home and Settings in `render_rail`), so WP5 and WP6 add entries without
+  editing it.
+- Reserve the only shared lines, so later edits are one-line appends: the `mod` and `init` lines
+  in `thread_chat/src/thread_chat.rs` and `mustr/src/main.rs`, the toolbar line next to
+  `add_search_bars` (`mustr/src/window.rs:297`), and a dock-panel line next to
+  `workspace.add_panel(nav_panel…)` (`mustr/src/window.rs:95`).
 
-**WP1: Thread settings and new threads** (about 1 week)
+**WP1: Thread settings and new threads** (about 1.5 weeks)
 - **Owns:** `thread_chat/src/settings_bar.rs`, `thread_chat/src/new_thread.rs`, and a new
   `thread_chat/src/thread_settings.rs` (command builders, defaults).
 - **Builds:** permission-mode picker, with T3's default from `server.getSettings` replacing the
   forced `approval-required`; model and provider picker mid-thread; model options (effort, fast
   mode, thinking, context window from provider capabilities); the plan-mode toggle; and scratch
   threads ("No project" through `projects.ensureScratch`).
+- **Also builds (user's must-haves):** the base-branch picker (`vcs.listRefs`, "Start from
+  remote"), and new threads in an existing worktree or on a branch (`existing_worktree`, `root
+  {branch}`), including the `NewThreadInWorktree` handler.
 - **Commands:** `thread.runtime-mode.set`, `thread.model-selection.set`,
   `thread.interaction-mode.set`.
 
@@ -319,31 +356,54 @@ other's files. Rules for every package:
 **WP3: Thread list and projects** (about 1 week)
 - **Owns:** `thread_chat/src/sidebar.rs`, a new `thread_chat/src/organize.rs` (Zed actions and
   context menu: settle, un-settle, archive), a new `thread_chat/src/projects.rs` (Add project: the OS
-  folder picker, then `projects.mutate` `{project.create}`), `mustr/src/nav_panel.rs`, and the
-  thread sections of `mustr/src/home.rs`.
+  folder picker, then `projects.mutate` `{project.create}`), the built-in rail entries in
+  `mustr/src/nav_panel.rs`, and the thread sections of `mustr/src/home.rs`.
 - **Builds:** sidebar sections for pinned, active, snoozed and settled threads (pinned and snoozed
   are display only; pinning and snoozing themselves are P1 and P2), and settle and un-settle with
-  `mod+shift+s` settle-and-advance. It also adds Archive, and Add project in the sidebar header
-  and the palette. Home's "Recent agent threads" leaves out settled threads.
+  `mod+shift+s` settle-and-advance. It also adds Archive (which dispatches `RemoveThreadWorktree`),
+  and Add project in the sidebar header and the palette. Home's "Recent agent threads" leaves out
+  settled threads.
 
-**WP4: Ship the work** (about 1 week)
+**WP4: Ship the work and the PR flow** (about 2 weeks)
 - **Owns:** a new `mustr/src/thread_toolbar.rs` (a `ToolbarItemView` for `ThreadView`), a new
-  `mustr/src/thread_git.rs`, `mustr/src/agent_review.rs`, and `review/src/agent.rs`.
-- **Builds:**
-  - **Review changes**, which opens the thread's Changes or its latest turn in the review.
-  - **Open in ▾** through `shell.openInEditor`, with editors from `server.getConfig`.
-  - **Commit, push, PR ▾** through the `git.runStackedAction` stream, with phase progress and
-    errors per step.
-  - The thread's PR chip, which opens mustr's PR review.
-- The same actions also go in the agent review header.
+  `mustr/src/thread_git.rs`, `mustr/src/agent_review.rs`, `review/src/agent.rs`, and for the PR
+  header actions `review/src/header.rs` and `mustr/src/pull_request_review.rs`.
+- **Builds:** **Review changes** (the thread's Changes or latest turn in the review); **Open in ▾**
+  (`shell.openInEditor`, editors from `server.getConfig`); **Commit, push, PR ▾** (the
+  `git.runStackedAction` stream, with phase progress and errors per step); the thread's PR chip,
+  which opens mustr's PR review; and a **Terminal** button that dispatches `OpenThreadTerminal`.
+- **Also builds (user's must-haves):** git status (`subscribeVcsStatus`), which feeds the commit
+  and push states; branch switch and create (`vcs.listRefs`, `vcs.switchRef`, `vcs.createRef`,
+  then `thread.metadata.update` `{branch}`); link, unlink and watch a PR
+  (`thread.pull-request.link`, `unlink`, `watch`); **Work on PR** in the PR header
+  (`git.resolvePullRequest`, `git.preparePullRequestThread`, then `NewThreadInWorktree`); and
+  merge (merge, squash or rebase), ready and close through `pullRequests.runAction`.
+- The same thread actions also go in the agent review header.
 
-**After P0:** start the P1s that make mustr's switch stick.
-- **Terminals:** a Zed terminal panel at the worktree, or T3's `terminal.*`.
-- **Notifications and badge.**
-- **Composer:** @-mentions and the slash menu, drafts, recall, and queue edits.
-- **History:** revert and fork, rename, pin, unread, and search.
-- **Pull requests:** link, watch, and threads started from PRs.
-- **Accounts:** usage limits, then provider setup.
+**WP5: Subagents, workflows and scheduled tasks** (about 1.5 weeks)
+- **Owns:** a new `thread_chat/src/family_bar.rs` and a new `mustr/src/schedules.rs` (a schedules
+  page, with a rail entry through the registry).
+- **Builds the family bar:** in a child, "Open parent" and the subagent's status. In a parent, its
+  children with Open (`open_thread`) and Stop (`subagent.stop`), delegated tasks and background
+  work (`pendingBackgroundTasks`, `blockedOnThreadWait`), and workflow rows with the script
+  (`getWorkflowScript`) and Stop (`stopWorkflow`). On 0.1.1 the family comes from the shell's
+  `lineage`; a version check moves it to `getThreadFamily` on 0.1.3.
+- **Builds the schedules page** (`scheduledTasks.subscribe`, `upsert`, `setEnabled`, `runNow`,
+  `delete`): a list, an edit form for interval and fixed-time triggers, and webhook triggers shown
+  read-only with their delivery log (`listWebhookDeliveries`, `getWebhookDelivery`).
 
-The same file ownership holds for these: composer and timeline items go to WP2's files, list
-items to WP3's, and git, PR and terminal items to WP4's.
+**WP6: Terminals and worktrees** (about 1.5 weeks)
+- **Owns:** a new `mustr/src/terminal_panel.rs` and a new `mustr/src/worktrees.rs`.
+- **Builds the terminal:** a Zed terminal dock panel opened at the thread's `worktreePath` (Zed's
+  `terminal_view` is already set up in `mustr/src/main.rs:394`), one per thread and kept across
+  navigation, as the `OpenThreadTerminal` handler. T3's `terminal.*` is used only for remote
+  threads, behind the `terminal:*` scopes.
+- **Builds the worktrees view:** the shell's worktrees with their threads; removing unshared ones
+  (`vcs.removeWorktree`, matching `worktreePath` across threads on 0.1.1), which also handles
+  `RemoveThreadWorktree`; and opening a worktree as an editor project, so Zed's file finder,
+  search and language servers cover it.
+
+**After P0:** start the P1s that make the switch stick: notifications and the badge; @-mentions,
+the slash menu, drafts, recall and queue edits; revert, fork, rename, pin, unread and search; and
+usage limits, then provider setup. The same ownership holds: composer and timeline items go to
+WP2, list items to WP3, git and PR items to WP4, and family items to WP5.
