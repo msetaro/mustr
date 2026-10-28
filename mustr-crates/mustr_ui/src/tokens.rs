@@ -3,7 +3,7 @@
 //! `assets/themes/mustr/mustr.json` is written from the same values, and the
 //! tests in this crate check that the two agree.
 
-use gpui::{Hsla, Pixels, Rgba, px};
+use gpui::{Hsla, Pixels, Rems, Rgba, px, rems};
 
 /// A color written as `0xRRGGBBAA`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -41,6 +41,10 @@ pub struct Palette {
     pub text: ColorToken,
     pub text_muted: ColorToken,
     pub accent: ColorToken,
+    /// Text on an accent background, such as a primary button.
+    pub accent_foreground: ColorToken,
+    /// A faint accent fill, for selected rows and accent chips.
+    pub accent_soft: ColorToken,
     pub added_line: ColorToken,
     pub added_line_strong: ColorToken,
     pub deleted_line: ColorToken,
@@ -74,6 +78,8 @@ pub const DARK: Palette = Palette {
     text: ColorToken(0xd6dce3ff),
     text_muted: ColorToken(0x8792a0ff),
     accent: ColorToken(0x5aa2ffff),
+    accent_foreground: ColorToken(0x04111fff),
+    accent_soft: ColorToken(0x5aa2ff24),
     added_line: ColorToken(0x2ea04324),
     added_line_strong: ColorToken(0x2ea0436b),
     deleted_line: ColorToken(0xf851491f),
@@ -101,6 +107,8 @@ pub const LIGHT: Palette = Palette {
     text: ColorToken(0x1f2328ff),
     text_muted: ColorToken(0x636c76ff),
     accent: ColorToken(0x0969daff),
+    accent_foreground: ColorToken(0xffffffff),
+    accent_soft: ColorToken(0x0969da1a),
     added_line: ColorToken(0xe6ffecff),
     added_line_strong: ColorToken(0xabf2bcff),
     deleted_line: ColorToken(0xffebe9ff),
@@ -135,9 +143,30 @@ pub const UI_FONT_FAMILY: &str = ".SystemUIFont";
 /// Zed's bundled monospace font.
 pub const CODE_FONT_FAMILY: &str = ".ZedMono";
 
+/// mustr's default `ui_font_size`, which is the size of one rem. The text sizes below are
+/// written for it, and [`text_size`] scales them when the user picks another size.
+pub const UI_FONT_SIZE: Pixels = px(13.);
+
+/// Key caps.
+pub const TEXT_SIZE_TINY: Pixels = px(10.);
+/// The status bar, pills, and counts.
+pub const TEXT_SIZE_XSMALL: Pixels = px(10.5);
 pub const TEXT_SIZE_SMALL: Pixels = px(11.5);
 pub const TEXT_SIZE_MEDIUM: Pixels = px(12.);
 pub const TEXT_SIZE_LARGE: Pixels = px(13.);
 
+/// Cards.
 pub const CORNER_RADIUS: Pixels = px(8.);
+/// Buttons, tabs, segmented controls, and inputs.
+pub const CONTROL_RADIUS: Pixels = px(6.);
+/// Key caps.
+pub const KBD_RADIUS: Pixels = px(4.);
 pub const BORDER_WIDTH: Pixels = px(1.);
+
+/// The width of the icon rail.
+pub const RAIL_WIDTH: Pixels = px(38.);
+
+/// One of the text sizes above, in rems, so it follows the user's `ui_font_size`.
+pub fn text_size(size: Pixels) -> Rems {
+    rems(size / UI_FONT_SIZE)
+}

@@ -1,8 +1,12 @@
-//! mustr's look: the mustr theme family and the design tokens behind it.
-//!
-//! mustr's own components will live here too (`mustr-docs/PLAN.md` §6).
+//! mustr's look: the mustr theme family, the design tokens behind it, and mustr's own
+//! components (`mustr-docs/PLAN.md` §6).
 
+pub mod components;
+pub mod icons;
 pub mod tokens;
+
+pub use components::*;
+pub use icons::{MustrAssets, MustrIcon};
 
 use anyhow::{Context as _, Result};
 use gpui::App;

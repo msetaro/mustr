@@ -11160,8 +11160,10 @@ dependencies = [
  "log",
  "serde_json",
  "settings",
+ "smallvec",
  "theme",
  "theme_settings",
+ "ui",
 ]
 
 [[package]]
