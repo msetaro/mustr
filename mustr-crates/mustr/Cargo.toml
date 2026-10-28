@@ -35,6 +35,7 @@ go_to_line.workspace = true
 gpui = { workspace = true, features = ["stacker"] }
 gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
 gpui_tokio.workspace = true
+http_client.workspace = true
 inspector_ui.workspace = true
 language.workspace = true
 languages = { workspace = true, features = ["load-grammars"] }
@@ -50,18 +51,22 @@ project.workspace = true
 rayon.workspace = true
 release_channel.workspace = true
 reqwest_client.workspace = true
+review = { path = "../review" }
 search.workspace = true
 semver.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 session.workspace = true
 settings.workspace = true
 shellexpand.workspace = true
+t3_client = { path = "../t3_client" }
 terminal_view.workspace = true
 theme.workspace = true
 theme_selector.workspace = true
 theme_settings.workspace = true
 ui.workspace = true
 ui_prompt.workspace = true
+url.workspace = true
 util.workspace = true
 uuid.workspace = true
 vim.workspace = true
@@ -72,3 +77,6 @@ workspace.workspace = true
 zed_actions.workspace = true
 zlog.workspace = true
 zlog_settings.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

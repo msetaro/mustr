@@ -111,7 +111,8 @@ pub fn open_home_window(app_state: Arc<AppState>, cx: &mut App) {
         app_state,
         cx,
         |workspace, window, cx| {
-            let home = cx.new(HomeView::new);
+            let workspace_handle = workspace.weak_handle();
+            let home = cx.new(|cx| HomeView::new(workspace_handle, window, cx));
             workspace.add_item_to_active_pane(Box::new(home), None, true, window, cx);
         },
     );
