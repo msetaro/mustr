@@ -1,8 +1,5 @@
 # mustr's update-signing public key: Ed25519, in base64, on a line of its own. mustr is built
 # with it (src/updates.rs) and checks each release's manifest.json.sig against it.
 #
-# PLACEHOLDER: there's no key line yet, so mustr's updater stays off and logs why. To set it up
-# (mustr-docs/RELEASING.md, "The signing key"):
-#   cargo run -p mustr_release -- keygen <private key file>
-# then put the public key it prints on the line below this comment, commit, and store the
-# private key as the MUSTR_UPDATE_SIGNING_KEY secret.
+# To replace it, see mustr-docs/RELEASING.md, "The signing key".
+T2iIXY56UDk3tmp0sBR4EOU8OLeGJrMa4JWAFhvNOSA=
