@@ -24,6 +24,7 @@ mod timeline;
 // Work packages add their `mod` and `pub use` lines here, each package under its own label, so
 // their branches merge without conflicts (`mustr-docs/PARITY.md` §3).
 // WP1, thread settings and new threads:
+pub mod thread_settings;
 // WP2, composer and timeline:
 // WP3, thread list and projects:
 
