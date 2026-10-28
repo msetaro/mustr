@@ -118,7 +118,7 @@ script/mustr-sync-t3 v0.1.3               # sync/t3-v0.1.3: codegen, pins, commi
 6. Downloads the host's runtime archive to `~/.cache/mustr-dev/t3-runtime/<v>/`, verifies its SHA-256, and extracts it.
 7. Builds and tests, one crate per cargo invocation:
    - `cargo build -p mustr`.
-   - `cargo test -p t3_api`: the round trip of T3's own sample values and fixtures, including the forward-compat ones.
+   - `cargo test -p t3_api`: the round trip of T3's own sample values and fixtures, including the forward-compat ones, the mutated future values, and the newer-server corpus ("Newer servers" below).
    - `cargo test -p t3_client`: it also checks that `T3_VERSION` matches `t3_api/schema/SOURCE.json` and the protocol constant.
    - The contract tests, but only when `MUSTR_CONTRACT_TEST_CMD` is set; none exist yet. They run with `MUSTR_T3_RUNTIME_BIN` set.
 8. Removes `T3CODE_*`/`T3_*` from the environment of anything it spawns.
@@ -137,8 +137,10 @@ script/mustr-sync-t3 v0.1.3               # sync/t3-v0.1.3: codegen, pins, commi
 - Read `api_changes`, `api_removed`, `generated_types`, `.git/mustr-sync/t3-generated-<tag>.diffstat`, and the contracts diff `.git/mustr-sync/t3-contracts-<tag>.diff`.
 - From v0.1.1 to v0.1.3, 57 non-test files changed, with +1692/−1488 lines, so expect real churn. `git diff <base> -- mustr-crates/t3_api/schema/manifest.json` is the API changelog.
 - **Additive changes** (new optional fields, new RPCs, new union members): these usually compile.
-  - A newer T3 doesn't break an older mustr, so there's nothing to do for decoding. String enums and tagged unions have an `Unrecognized` variant, and T3's own lenient fields decode as T3 does: unknown elements are dropped, and undecodable optionals become `None`. See `mustr-crates/t3_api/codegen/README.md`, "Forward compatibility".
+  - A newer T3 doesn't break an older mustr, so there's nothing to do for decoding. String enums and tagged unions have an `Unrecognized` variant, T3's own lenient fields decode as T3 does, and every other list or optional value drops what it can't read. See `mustr-crates/t3_api/codegen/README.md`, "Forward compatibility", and `mustr-docs/T3-PROTOCOL.md`, "Compatibility".
   - Add a match arm only where mustr shows the new variant.
+  - New fields in commands and inputs mustr builds break its struct literals: add them as `None` unless mustr uses them. A server older than the pin ignores fields it doesn't know.
+  - A new RPC that mustr starts calling needs a fallback for servers older than the pin, which answer it with "Unknown request tag" (`thread_chat::is_unsupported_rpc`).
 - **Renamed or removed fields or RPCs:** the compiler lists every call site, because `t3_client` uses the typed `rpc::*`/`http::*` tables. Fix them in mustr's wrappers and UI crates.
   - Never hand-edit `mustr-crates/t3_api/src/generated/` or `schema/`. Fix the codegen (`mustr-crates/t3_api/codegen/`), or wrap the type in `t3_client`.
   - If an RPC mustr uses (PLAN.md §4) is removed with no replacement, stop and ask. Check `api_removed`.
@@ -147,6 +149,13 @@ script/mustr-sync-t3 v0.1.3               # sync/t3-v0.1.3: codegen, pins, commi
   - The contract tests (record and replay) should fail. Re-record fixtures only for intended wire changes, and say so in the PR. Never edit a fixture just to make a test pass.
   - This includes `mustr-crates/t3_api/tests/fixtures/t3-tests/`, which are copied from T3's tests.
 - **New Effect version** (`effect_version`): codegen must use exactly that version, and regen.sh installs it. Review `codegen/dump-schemas.ts` (it uses Effect internals) and `t3_api/src/envelope.rs` (Effect's RPC frames) by hand. If codegen fails (exit 4), fix the codegen, not the contracts.
+
+**Newer servers.** Every few days, and after each sync, check this build against the newest nightly, which shows what the next release will send. Nightlies are never pinned; this only records fixtures.
+1. Find it with `gh release list -R pingdotgg/t3code` (read-only), and download its source tarball into a new, empty directory under `/tmp`. Don't run anything inside it.
+2. `MUSTR_T3_VERSION=<version> MUSTR_T3_COMMIT=<sha> mustr-crates/t3_api/codegen/newer-server.sh <checkout>` runs the codegen on it into a scratch directory and rewrites `t3_api/tests/fixtures/newer-server/` with its RPC and HTTP surface and Arbitrary samples of everything it sends.
+3. `MUSTR_T3_CAPTURE_VERSION=<version> MUSTR_T3_CAPTURE_OUT=mustr-crates/t3_api/tests/fixtures/newer-server/live cargo test -p t3_runtime --test capture_server -- --ignored --nocapture` downloads that engine (checked against its `SHA256SUMS`), runs it in a temporary home, adds a project and a thread without a message, and records what mustr reads. Run it with `HOME` set to a temporary directory too, so the engine doesn't see your agents' sign-ins. Delete the previous version's files from `live/`.
+4. `cargo test -p t3_api`. `newer_server` fails if a value doesn't decode, or if the nightly dropped a call mustr makes. Add a fallback in mustr (and to `DROPPED_WITH_FALLBACK`), or a reason to `NOT_ADDITIVE` for a change in a call mustr never makes. A failure in `future_values` means a new shape the codegen doesn't make tolerant yet.
+- 2026-10-28, 0.1.4-nightly.20261028.3841: 4,356 values and 12 live payloads decode; it dropped `server.getSettings` (mustr falls back to `server.getConfig`), and made the relay's OAuth metadata fields optional.
 
 **Checksums.**
 - `T3_RUNTIME.sha256` comes from the release's `SHA256SUMS` and must match GitHub's digests. T3 publishes no signatures, so this is TLS plus GitHub plus mustr's pin.

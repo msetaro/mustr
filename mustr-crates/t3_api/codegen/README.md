@@ -7,7 +7,7 @@ git clone --depth 1 --branch v0.1.1 https://github.com/pingdotgg/t3code /tmp/t3c
 MUSTR_T3_VERSION=0.1.1 mustr-crates/t3_api/codegen/regen.sh /tmp/t3code-v0.1.1
 ```
 
-`script/mustr-sync-t3` runs it for you (see `mustr-docs/SYNC.md`).
+`script/mustr-sync-t3` runs it for you (see `mustr-docs/SYNC.md`). `codegen/newer-server.sh <newer-checkout>` runs it on a newer T3 into a scratch directory and keeps only that T3's surface and samples, for `tests/newer_server.rs` (`mustr-docs/SYNC.md`, "Newer servers").
 
 | Flag | Meaning |
 |---|---|
@@ -49,7 +49,7 @@ T3 `packages/contracts/src` → (copy into the work dir) → `node dump-schemas.
 
 ## Forward compatibility
 
-An older mustr must keep working against a newer T3 server. T3 evolves its schemas additively, but JSON Schema can't express T3's lenient decoding. So the Rust side handles it in four ways:
+An older mustr must keep working against a newer T3 server. T3 evolves its schemas additively, but JSON Schema can't express T3's lenient decoding. So the Rust side handles it in five ways (`mustr-docs/T3-PROTOCOL.md`, "Compatibility", has the whole picture):
 
 1. **String enums** with two or more values become `crate::string_enum!` invocations: an `Unrecognized(String)` variant, which serializes back verbatim, plus hand-written serde impls. typify's `Display`/`FromStr`/`TryFrom` impls are replaced by infallible ones. Single-value literals stay strict: they are constants such as discriminators, OAuth `grant_type`s, and the protocol header, and T3 rejects other values too.
 2. **Discriminated unions** (416) become `crate::tagged_union!` enums: one newtype variant per tag value, plus `Unrecognized(serde_json::Value)`, which keeps the raw value.
@@ -69,18 +69,33 @@ An older mustr must keep working against a newer T3 server. T3 evolves its schem
 
    - "Strictly" means with every `Unrecognized` fallback disabled, except in open unions. That is exactly T3's decoding of the element, so Rust drops what T3 drops.
    - A missing lenient array decodes as empty.
-4. **Untagged unions** (44, with no discriminator) get `#[serde(remote = "Self")]` and a `Deserialize` that tries a strict pass first, then a lenient one. Otherwise an early variant's fallback would capture a value a later variant matches exactly, for example `KeybindingCommand`: a known command, or any string.
+4. **Untagged unions** (46, with no discriminator) get `#[serde(remote = "Self")]` and a `Deserialize` that tries a strict pass first, then a lenient one. Otherwise an early variant's fallback would capture a value a later variant matches exactly, for example `KeybindingCommand`: a known command, or any string.
+5. **Every other list or optional field** whose type is a struct or a union (917 in 0.1.3, `lenientContainers` in `rust-stats.json`) gets a lenient decoder from `postprocess.rs` step 5, beyond what T3 does:
+
+   | Decoder | Behavior |
+   |---|---|
+   | `lenient_vec`, `lenient_option_vec` | An element that doesn't decode, even with the fallbacks above, is dropped |
+   | `lenient_option` | A value that doesn't decode becomes `None` |
+
+   - So one element of a shape this build can't read (a widened constant, a new untagged member, a changed nested struct) costs that element, not the snapshot, stream item, or list around it.
+   - Inside a strict pass they decode strictly, so T3's lenient fields and untagged unions keep T3's semantics.
+   - Required keys stay required: a required nullable field keeps its key required and only its value is lenient; an optional one gets `default`. Scalars and string enums are left alone, since they can't fail leniently except on a JSON type change.
+   - A `#[serde(transparent)]` list newtype (a stream chunk that is a bare array) gets it too.
+
+**Logging.** Each unknown enum value or union tag, and each dropped element or value, is logged once per kind (`forward_compat::note_unrecognized`, `note_skipped`), never during a strict pass. Typed streams in `t3_client` and `thread_chat` skip an item that doesn't decode at all, logged once per RPC.
 
 **Strict mode** is a thread-local flag (`forward_compat::strictly`). serde decoding is synchronous, so it can't leak across tasks.
 
 **Tests:**
 - `tests/forward_compat.rs` covers each mechanism.
+- `tests/future_values.rs` mutates every sample, T3 fixture and captured payload, guided by `schema/t3-api.schema.json` and the manifest's `taggedUnions`: an unknown field on every struct (which must change nothing), an unknown or unreadable element in every list of structs, unions or enums, and each tag, enum value and optional constant replaced by an unknown one, one at a time. Every mutated value must decode.
+- `tests/newer_server.rs` decodes a newer T3's samples (`fixtures/newer-server/`, from `newer-server.sh`) and captured payloads (`fixtures/newer-server/live/`, from `t3_runtime`'s ignored `capture_server` test) with this build's types, by RPC tag and endpoint, and checks that every `rpc::`/`http::` call in mustr's crates still exists there.
 - In `tests/roundtrip.rs`, `t3_test_fixtures` includes T3's `PullRequestDetail.newer-server` and `ExecutionEnvironmentDescriptor.future-manager`. Rust must drop exactly what T3 drops.
 - Samples that T3's own decode→encode changes carry the T3 result in `<Def>.expected.json`.
 
 **Not covered:**
-- Required fields that T3 removes or renames. These are breaking changes; T3 bumps the orchestration protocol for those.
-- New variants of untagged unions that no existing variant accepts.
+- Required fields that T3 removes, renames, or makes optional, outside any list or optional value. These are breaking changes; T3 bumps the orchestration protocol for those in its orchestration types. (Inside a list or an optional value, the element is dropped.)
+- New variants of untagged unions that no existing variant accepts, outside any list or optional value.
 - The opt-in compact `ids` table of `withRecordIdTable` responses (bounded snapshots, `subscribeThread`, history pages). It is not modelled, so mustr must not send `acceptCompactIds`, nor other `accept*` opt-ins until they are reviewed.
 
 ## Workarounds

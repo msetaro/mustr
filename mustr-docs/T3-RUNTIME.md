@@ -292,7 +292,7 @@ Discovery mirrors `discoverPairTarget` (`cli/pair.ts:239-283`):
    - A missing field means protocol 1.
    - The server enforces this on `/ws`: a missing or different `orchestrationProtocol` gets **HTTP 426** `{code:"orchestration_protocol_incompatible", orchestrationProtocolVersion}` (`apps/server/src/ws.ts:635-640, 3329-3338`).
    - T3's own client applies the same rule (`packages/client-runtime/src/connection/compatibility.ts`). If the server's number is higher, the client must update. If it's lower, the server must update.
-4. **Version:** check `serverVersion` against mustr's supported range. The pinned `T3_VERSION` is the tested version, and the RPC set mustr uses decides the range.
+4. **Version:** the pinned `T3_VERSION` is the tested version. mustr connects to any version on the same protocol and falls back for calls a server lacks (`mustr-docs/T3-PROTOCOL.md`, "Compatibility").
    - If the version is out of range, offer the user `t3 update <V>`. That is the user's own action and is self-updatable when the descriptor has `capabilities.serverSelfUpdate`.
    - Otherwise fall back to mustr's own runtime.
 5. A missing file or a dead pid means T3 is installed but not running. mustr shouldn't start the user's server. It can tell the user to run `t3` or `t3 service install`, or use its own runtime.
@@ -359,7 +359,7 @@ Silent pairing is technically possible on the same machine as the same user (`t3
 - Whether `t3 serve` (not linked to T3 Connect) makes any outbound calls besides PostHog. Examples could be update checks, the relay at `T3CODE_RELAY_URL`, or the model manifest. Check by running it under a network monitor or offline in the spike.
 - T3 publishes no signature that is independent of GitHub. To get one, ask upstream for GitHub artifact attestations or a signed `SHA256SUMS`. Until then, mustr's own pinned hash is the trust anchor.
 - Supporting macOS x64 needs a product decision: drop Intel Macs, or require the user's own T3 there.
-- Choosing between protocol-only and version-range compatibility needs the contract tests. The protocol number has stayed at 2 while the RPC shapes still change between releases.
+- Settled for now as protocol-only compatibility, with fallbacks for calls a server lacks and tolerant decoding (`mustr-docs/T3-PROTOCOL.md`, "Compatibility"). The protocol number has stayed at 2 while the RPC shapes still change between releases; `t3_api`'s `newer_server` test checks the newest nightly.
 - **Needs the user:**
   - Nothing for (b). It requires no sudo and no credentials.
   - For (a), consent to pair mustr with their T3.

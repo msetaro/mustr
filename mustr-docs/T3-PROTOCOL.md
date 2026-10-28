@@ -1,6 +1,6 @@
 # M0 spike: Rust client ↔ T3 Code server
 
-Ran on 2026-10-27 against the local T3 server ("ironforge", T3 runtime 0.1.1, `127.0.0.1:3773`), using a read-only pairing token. The spike's sessions were revoked afterwards.
+Ran on 2026-10-27 against the local T3 server ("ironforge", T3 runtime 0.1.1, `127.0.0.1:3773`), using a read-only pairing token. The spike's sessions were revoked afterwards. mustr now pins T3 Code 0.1.3; which versions it works with is under "Compatibility" at the end.
 
 **Result: the architecture works.** A plain Rust client (reqwest + tokio-tungstenite, about 300 lines) authenticates, connects, and reads PRs, PR diffs with old/new file contents, and the full thread list.
 
@@ -46,3 +46,34 @@ Ran on 2026-10-27 against the local T3 server ("ironforge", T3 runtime 0.1.1, `1
 - **Agent thread review:** threads run in local worktrees (`worktreePath`), so the branch view can use Zed's own git diff on the real worktree, which gives full IntelliSense. Per-turn views use `orchestration.getTurnDiff` with `checkpointTurnCount` from the thread detail (`GET /api/orchestration/threads/:id`).
 - **Codegen:** messages are plain JSON with `_tag` unions, which map directly to `#[serde(tag = "_tag")]` enums.
 - **Credential:** store the bearer token in the OS keychain. It lasts about 30 days, so re-pair or refresh before it expires (check whether `/oauth/token` supports a refresh path in M0).
+
+## Compatibility
+
+mustr is built and tested against one T3 Code release, `t3_server_version` in `mustr-crates/t3_client/T3_VERSION` (0.1.3 since 2026-10-28), and its own engine runs exactly that release. It connects to any T3 Code that speaks the same orchestration protocol (2):
+
+| Server | What happens |
+|---|---|
+| Another protocol | Refused when connecting (`check_protocol_compatibility`; the server answers HTTP 426 too). For an older installed T3, Home offers `t3 update`; for a newer one, mustr needs updating. |
+| An older 0.1.x, such as 0.1.1 | Works, with what that version has. A call it doesn't have fails with Effect's "Unknown request tag" defect, which `RpcError::is_unknown_method` recognizes and mustr's backend turns into `thread_chat::UnsupportedRpc`; callers fall back to the older way, such as the family bar using the shell's `lineage` instead of `orchestration.getThreadFamily`. For an installed T3, Home says quietly "T3 Code 0.1.3 is available." with an Update button (`t3 update`). Nothing blocks. |
+| A newer 0.1.x, such as the 0.1.4 nightlies | Works. What it adds decodes tolerantly (below). A call it dropped falls back the same way: the 0.1.4 nightlies dropped `server.getSettings`, so the new-thread form reads the settings from `server.getConfig`. `t3_api`'s `newer_server` test checks that every `rpc::` and `http::` call in mustr's crates still exists on the newest recorded nightly, or has a declared fallback. |
+
+Checked live on 2026-10-28 against 0.1.1 (the user's T3, read-only), 0.1.3 (mustr's engine), and 0.1.4-nightly.20261028.3841 (in a temporary home).
+
+**What mustr doesn't opt into.** T3 0.1.3 added opt-ins that change what a server sends: `omitIdleSubagents` and `omitOlderSettled` on the shell, and `acceptDedupedBodies`, `acceptCompactIds`, `acceptCompactTurnItems` and `acceptBoundedSnapshot` on a thread's subscription. mustr sends none of them, so the 0.1.3 shell still holds every active thread, as 0.1.1's does. The family bar reads `getThreadFamily` anyway and merges it behind the shell's rows, as T3's own client does, so it stays right if mustr opts into a smaller shell later.
+
+**Tolerant decoding.** A newer server can add a field, an enum value, a union member, an event type, a turn-item kind, or a list element of a shape this build can't read. None of them fails a snapshot, a stream, or a list:
+1. Unknown fields are ignored: no generated type denies them.
+2. String enums with two or more values and tagged unions have an `Unrecognized` variant. An unknown value decodes to it, is logged once per kind (`t3_api::forward_compat::note_unrecognized`), and the views skip it: unknown thread events go to T3's own unknown-event arm and keep their place in the sequence, unknown turn items and shell items are left out, and an unknown status shows as the nearest known one.
+3. T3's own lenient fields (`ForwardCompatibleArray` and the like) decode exactly as T3 decodes them.
+4. Every other list or optional field of a struct or union type is lenient too, beyond T3: an element that still doesn't decode is dropped, and an optional value becomes `None`, each logged once per type. So a widened constant or a changed nested shape loses one element, such as one thread of 1,500, not the whole shell. Inside a strict pass (an untagged union's first try, or a value inside one of T3's lenient fields) they stay strict, so T3's semantics hold where T3 defines them.
+5. Typed streams skip an item that still doesn't decode, logged once per RPC, instead of ending the subscription.
+
+The codegen produces 1 to 4 (`mustr-crates/t3_api/codegen/README.md`, "Forward compatibility"); `t3_client` and `thread_chat` do 5.
+
+**Not covered:** a required field that a newer T3 removes, renames, or makes optional, outside any list or optional value. T3 treats those as breaking and bumps the protocol for its orchestration types; the 0.1.4 nightlies did it to the OAuth metadata at `/.well-known/oauth-*`, which mustr doesn't read.
+
+**How it's proven** (`cargo test -p t3_api`):
+- `forward_compat.rs`: each mechanism on its own.
+- `future_values.rs`: every sample, T3 test fixture, and captured payload, mutated where the schema allows: an unknown field on every struct (which must change nothing), an unknown or unreadable element in every list, and each tag, enum value and optional constant replaced by an unknown one, one at a time. About 4,000 mutated values, all decode.
+- `newer_server.rs`: the newest nightly's own surface, recorded by `codegen/newer-server.sh`: 4,356 Arbitrary values of what it sends, for 256 RPCs and endpoints, decoded with this build's types by RPC tag and path; 12 payloads captured from a running nightly (`fixtures/newer-server/live/`, recorded by `t3_runtime`'s ignored `capture_server` test); and the check that mustr's calls still exist.
+- Refresh both for each new nightly or release: `mustr-docs/SYNC.md`, "Newer servers".
