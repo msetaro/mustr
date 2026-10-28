@@ -2374,28 +2374,6 @@ pub(crate) mod tests {
     }
 
     #[gpui::test]
-    fn test_card_lengths_follow_the_ui_font_size(cx: &mut TestAppContext) {
-        cx.update(|cx| {
-            let settings_store = SettingsStore::test(cx);
-            cx.set_global(settings_store);
-            theme_settings::init(theme::LoadThemes::JustBase, cx);
-            // Cards are drawn in the editor, whose rem size follows the buffer font size, so
-            // they take the UI's size from the settings.
-            for (ui_font_size, buffer_font_size, expected) in
-                [(13., 13., px(8.)), (26., 26., px(16.)), (26., 20., px(16.))]
-            {
-                cx.update_global::<SettingsStore, _>(|store, cx| {
-                    store.update_user_settings(cx, |settings| {
-                        settings.theme.ui_font_size = Some(ui_font_size.into());
-                        settings.theme.buffer_font_size = Some(buffer_font_size.into());
-                    });
-                });
-                assert_eq!(threads::ui_scaled(px(8.), cx), expected);
-            }
-        });
-    }
-
-    #[gpui::test]
     async fn test_thread_cards_in_unified_diff(cx: &mut TestAppContext) {
         let contents = ReviewContents {
             files: review_files(),

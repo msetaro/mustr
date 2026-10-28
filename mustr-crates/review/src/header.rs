@@ -2,9 +2,9 @@
 //! and checks.
 
 use gpui::{AnyElement, App, Hsla, IntoElement, ParentElement as _, SharedString, Styled as _};
-use mustr_ui::tokens;
+use mustr_ui::{tokens, tokens::scaled_pixels};
 
-use crate::{AgentThreadHeader, threads::ui_scaled};
+use crate::AgentThreadHeader;
 use ui::{
     Color, DiffStat, Icon, IconName, IconSize, Label, LabelCommon as _, LabelSize, prelude::*,
 };
@@ -176,7 +176,7 @@ pub(crate) fn pill(label: impl Into<SharedString>, color: Hsla, cx: &App) -> imp
         .border_color(color.opacity(0.5))
         .bg(color.opacity(0.12))
         .text_color(color)
-        .text_size(ui_scaled(tokens::TEXT_SIZE_SMALL, cx))
+        .text_size(scaled_pixels(tokens::TEXT_SIZE_SMALL, cx))
         .child(label.into())
 }
 

@@ -9,7 +9,7 @@ use gpui::{
 };
 use language::LanguageRegistry;
 use markdown::{Markdown, MarkdownElement};
-use mustr_ui::tokens;
+use mustr_ui::{tokens, tokens::scaled_pixels};
 use std::sync::Arc;
 use ui::{
     Button, ButtonSize, ButtonStyle, Color, Icon, IconName, IconSize, KeyBinding, Label,
@@ -17,10 +17,7 @@ use ui::{
 };
 
 use crate::{
-    DraftComment,
-    comment_html::comment_markdown,
-    header::pill,
-    threads::{comment_markdown_style, ui_scaled},
+    DraftComment, comment_html::comment_markdown, header::pill, threads::comment_markdown_style,
 };
 
 actions!(
@@ -100,7 +97,7 @@ impl Composer {
             .w_full()
             .px_2()
             .py_1()
-            .rounded(ui_scaled(tokens::CORNER_RADIUS, cx))
+            .rounded(scaled_pixels(tokens::CORNER_RADIUS, cx))
             .border(tokens::BORDER_WIDTH)
             .border_color(colors.border)
             .bg(colors.editor_background)
@@ -399,7 +396,7 @@ impl Render for DraftCard {
         v_flex()
             .id("draft-card")
             .w_full()
-            .rounded(ui_scaled(tokens::CORNER_RADIUS, cx))
+            .rounded(scaled_pixels(tokens::CORNER_RADIUS, cx))
             .border(tokens::BORDER_WIDTH)
             .border_color(accent.opacity(0.6))
             .bg(colors.surface_background)
