@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Disables the GitHub Actions workflows that came with Zed's code, leaving mustr's own
+# (.github/workflows/mustr-*). mustr keeps Zed's workflow files, since deleting them would make
+# every upstream sync conflict, and GitHub turns on each new workflow file it sees, so run this
+# after each Zed sync merges (mustr-docs/SYNC.md).
+#
+#   script/mustr-disable-zed-workflows                  # dry run: what it would disable
+#   script/mustr-disable-zed-workflows --apply          # disables them
+#   script/mustr-disable-zed-workflows --repo OWNER/NAME
+#
+# Needs gh, logged in; --apply needs admin rights on the repository. Disabling only stops a
+# workflow from running. `gh workflow enable <file>` turns one back on.
+
+set -euo pipefail
+
+repo=msetaro/mustr
+apply=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --apply) apply=true ;;
+        --repo)
+            [[ $# -ge 2 ]] || { echo "mustr-disable-zed-workflows: --repo needs OWNER/NAME" >&2; exit 2; }
+            repo=$2
+            shift
+            ;;
+        *)
+            echo "mustr-disable-zed-workflows: unknown argument $1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+command -v gh >/dev/null || { echo "mustr-disable-zed-workflows: install gh (https://cli.github.com)" >&2; exit 1; }
+
+workflows=$(gh api --paginate "repos/$repo/actions/workflows" \
+    --jq '.workflows[] | [.id, .state, .path] | @tsv')
+
+disabled=0
+would_disable=0
+kept=0
+skipped=0
+while IFS=$'\t' read -r id state path; do
+    [[ -n "$id" ]] || continue
+    case "$path" in
+        .github/workflows/mustr-*)
+            echo "keep      $path ($state)"
+            kept=$((kept + 1))
+            ;;
+        .github/workflows/*)
+            if [[ "$state" != active ]]; then
+                echo "skip      $path ($state)"
+                skipped=$((skipped + 1))
+            elif [[ "$apply" == true ]]; then
+                gh api --silent -X PUT "repos/$repo/actions/workflows/$id/disable"
+                echo "disabled  $path"
+                disabled=$((disabled + 1))
+            else
+                echo "would disable  $path"
+                would_disable=$((would_disable + 1))
+            fi
+            ;;
+        *)
+            # GitHub's own dynamic workflows (Dependabot, CodeQL default setup), not files.
+            echo "skip      $path ($state, not a workflow file)"
+            skipped=$((skipped + 1))
+            ;;
+    esac
+done <<< "$workflows"
+
+echo "==== summary ===="
+echo "repo: $repo"
+echo "mode: $([[ "$apply" == true ]] && echo apply || echo dry-run)"
+echo "kept (mustr's): $kept"
+echo "already off or not files: $skipped"
+if [[ "$apply" == true ]]; then
+    echo "disabled: $disabled"
+else
+    echo "would disable: $would_disable (run again with --apply to disable them)"
+fi
