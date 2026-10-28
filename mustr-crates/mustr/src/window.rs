@@ -18,7 +18,7 @@ use workspace::{
     AppState, CloseWindow, MultiWorkspace, OpenOptions, Pane, Workspace, WorkspaceSettings,
     create_and_open_local_file, with_active_or_new_workspace,
 };
-use zed_actions::{OpenKeymapFile, OpenSettingsFile, Quit};
+use zed_actions::{OpenKeymapFile, OpenSettings, OpenSettingsFile, Quit};
 
 /// The Wayland app ID and X11 `WM_CLASS`. It must match the `.desktop` file name.
 const APP_ID: &str = "dev.mustr.mustr";
@@ -26,26 +26,14 @@ const APP_ID: &str = "dev.mustr.mustr";
 const INITIAL_KEYMAP: &str =
     "// mustr key bindings\n//\n// mustr uses Zed's keymap format.\n[\n]\n";
 
-#[cfg(target_os = "macos")]
-gpui::actions!(
-    mustr,
-    [
-        /// Hides mustr.
-        Hide,
-        /// Hides all other applications.
-        HideOthers,
-        /// Shows all hidden applications.
-        ShowAll,
-    ]
-);
-
 pub fn init(cx: &mut App) {
-    #[cfg(target_os = "macos")]
-    cx.on_action(|_: &Hide, cx| cx.hide())
-        .on_action(|_: &HideOthers, cx| cx.hide_other_apps())
-        .on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
     cx.on_action(quit)
         .on_action(|_: &OpenSettingsFile, cx| {
+            open_config_file(paths::settings_file(), INITIAL_SETTINGS, cx)
+        })
+        // Zed's keymaps bind its settings editor to cmd-, (ctrl-, on Linux). mustr's settings
+        // are its settings file.
+        .on_action(|_: &OpenSettings, cx| {
             open_config_file(paths::settings_file(), INITIAL_SETTINGS, cx)
         })
         .on_action(|_: &OpenKeymapFile, cx| {
@@ -243,33 +231,36 @@ pub fn build_window_options(display_uuid: Option<Uuid>, cx: &mut App) -> WindowO
     }
 }
 
+/// The app menu. macOS shows it in the menu bar; the shortcuts it shows are the key bindings of
+/// its actions. Compare Zed's `crates/zed/src/zed/app_menus.rs`.
 pub fn app_menus() -> Vec<Menu> {
     vec![
         Menu::new("mustr").items(vec![
-            MenuItem::submenu(Menu::new("Settings").items([
-                MenuItem::action("Open Settings File", OpenSettingsFile),
-                MenuItem::action("Open Keymap File", OpenKeymapFile),
-                MenuItem::separator(),
-                MenuItem::action(
-                    "Select Theme...",
-                    zed_actions::theme_selector::Toggle::default(),
-                ),
-                MenuItem::action(
-                    "Select Icon Theme...",
-                    zed_actions::icon_theme_selector::Toggle::default(),
-                ),
-            ])),
+            #[cfg(target_os = "macos")]
+            MenuItem::action("About mustr", crate::macos::About),
+            #[cfg(target_os = "macos")]
+            MenuItem::separator(),
+            MenuItem::action("Settings…", OpenSettings),
+            MenuItem::action("Key Bindings…", OpenKeymapFile),
+            MenuItem::action(
+                "Select Theme…",
+                zed_actions::theme_selector::Toggle::default(),
+            ),
+            MenuItem::action(
+                "Select Icon Theme…",
+                zed_actions::icon_theme_selector::Toggle::default(),
+            ),
             MenuItem::separator(),
             #[cfg(target_os = "macos")]
             MenuItem::os_submenu("Services", gpui::SystemMenuType::Services),
             #[cfg(target_os = "macos")]
             MenuItem::separator(),
             #[cfg(target_os = "macos")]
-            MenuItem::action("Hide mustr", Hide),
+            MenuItem::action("Hide mustr", crate::macos::Hide),
             #[cfg(target_os = "macos")]
-            MenuItem::action("Hide Others", HideOthers),
+            MenuItem::action("Hide Others", crate::macos::HideOthers),
             #[cfg(target_os = "macos")]
-            MenuItem::action("Show All", ShowAll),
+            MenuItem::action("Show All", crate::macos::ShowAll),
             #[cfg(target_os = "macos")]
             MenuItem::separator(),
             MenuItem::action("Quit mustr", Quit),
@@ -287,6 +278,15 @@ pub fn app_menus() -> Vec<Menu> {
                 editor::actions::SelectAll,
                 OsAction::SelectAll,
             ),
+            MenuItem::separator(),
+            MenuItem::action("Find", search::buffer_search::Deploy::find()),
+        ]),
+        // AppKit lists the open windows at the end of the menu named "Window".
+        #[cfg(target_os = "macos")]
+        Menu::new("Window").items([
+            MenuItem::action("Minimize", crate::macos::Minimize),
+            MenuItem::action("Zoom", crate::macos::Zoom),
+            MenuItem::separator(),
         ]),
     ]
 }
@@ -416,4 +416,49 @@ fn open_config_file(abs_path: &'static Path, initial_content: &'static str, cx: 
         })
         .detach_and_log_err(cx);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{Action, Keystroke, TestAppContext};
+
+    /// The app menu shows the shortcuts Zed's default keymap binds to its actions, so mustr has
+    /// to register the actions that keymap names: cmd-, (ctrl-, on Linux) opens the settings, and
+    /// on macOS cmd-h, alt-cmd-h, and cmd-m hide and minimize.
+    #[gpui::test]
+    fn zeds_keymap_binds_the_app_menus_shortcuts(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            crate::app_settings::apply_default_overrides(cx).unwrap();
+            crate::keymap::load_default_keymap(cx);
+
+            let expected: Vec<(Box<dyn Action>, &str)> = vec![
+                (OpenSettings.boxed_clone(), "secondary-,"),
+                (Quit.boxed_clone(), "secondary-q"),
+                #[cfg(target_os = "macos")]
+                (crate::macos::Hide.boxed_clone(), "cmd-h"),
+                #[cfg(target_os = "macos")]
+                (crate::macos::HideOthers.boxed_clone(), "alt-cmd-h"),
+                #[cfg(target_os = "macos")]
+                (crate::macos::Minimize.boxed_clone(), "cmd-m"),
+            ];
+            let key_bindings = cx.key_bindings();
+            let keymap = key_bindings.borrow();
+            for (action, keys) in expected {
+                let keystroke = Keystroke::parse(keys).unwrap();
+                assert!(
+                    keymap
+                        .bindings_for_action(action.as_ref())
+                        .any(
+                            |binding| binding.match_keystrokes(std::slice::from_ref(&keystroke))
+                                == Some(false)
+                        ),
+                    "{} isn't bound to {keys}",
+                    action.name()
+                );
+            }
+        });
+    }
 }

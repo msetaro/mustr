@@ -141,7 +141,7 @@ fn reload_keymaps(cx: &mut App, mut user_key_bindings: Vec<KeyBinding>) {
 }
 
 // Copied from crates/zed/src/zed.rs (`load_default_keymap`).
-fn load_default_keymap(cx: &mut App) {
+pub(crate) fn load_default_keymap(cx: &mut App) {
     let base_keymap = *BaseKeymap::get_global(cx);
     if base_keymap == BaseKeymap::None {
         return;

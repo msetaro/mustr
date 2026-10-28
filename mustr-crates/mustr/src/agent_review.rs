@@ -1038,7 +1038,7 @@ Why remove this?"
         cx.run_until_parked();
         cx.simulate_keystrokes("c");
         cx.simulate_input("Handle the error.");
-        cx.simulate_keystrokes("ctrl-enter");
+        cx.simulate_keystrokes("secondary-enter");
         assert!(
             rpc.calls.lock().is_empty(),
             "comments stay local until sent"
@@ -1047,7 +1047,7 @@ Why remove this?"
         rpc.respond(Ok(json!({ "sequence": 7 })));
         cx.dispatch_action(review::SubmitReview);
         cx.simulate_input("Nearly there.");
-        cx.simulate_keystrokes("ctrl-enter");
+        cx.simulate_keystrokes("secondary-enter");
         cx.run_until_parked();
 
         assert_eq!(

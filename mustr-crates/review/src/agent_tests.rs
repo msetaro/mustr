@@ -66,7 +66,7 @@ fn write_comment(
     select_lines(review_view, first, last, cx);
     cx.simulate_keystrokes("c");
     cx.simulate_input(body);
-    cx.simulate_keystrokes("ctrl-enter");
+    cx.simulate_keystrokes("secondary-enter");
 }
 
 #[gpui::test]
@@ -117,7 +117,7 @@ async fn test_comments_on_an_agents_diff_are_sent_to_the_agent(cx: &mut TestAppC
         review_view.open_submit_form(&SubmitReview, window, cx)
     });
     cx.simulate_input("Thanks!");
-    cx.simulate_keystrokes("ctrl-enter");
+    cx.simulate_keystrokes("secondary-enter");
     cx.run_until_parked();
 
     let quote = |text: &str| QuotedCode {
@@ -185,7 +185,7 @@ async fn test_a_failed_send_keeps_every_comment(cx: &mut TestAppContext) {
     review_view.update_in(cx, |review_view, window, cx| {
         review_view.open_submit_form(&SubmitReview, window, cx)
     });
-    cx.simulate_keystrokes("ctrl-enter");
+    cx.simulate_keystrokes("secondary-enter");
     cx.run_until_parked();
     review_view.read_with(cx, |review_view, cx| {
         assert_eq!(
