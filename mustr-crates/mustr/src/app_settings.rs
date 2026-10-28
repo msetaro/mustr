@@ -248,6 +248,9 @@ mod tests {
 
         let merged: Value = serde_json::from_str(&merged_default_settings().unwrap()).unwrap();
         assert_eq!(merged["disable_ai"], Value::Bool(true));
+        assert_eq!(merged["agent"]["enabled"], Value::Bool(false));
+        assert_eq!(merged["edit_predictions"]["provider"], Value::from("none"));
+        assert_eq!(merged["show_edit_predictions"], Value::Bool(false));
         assert_eq!(merged["server_url"], Value::from("https://zed.invalid"));
         assert_eq!(merged["auto_update"], Value::Bool(false));
         assert_eq!(merged["telemetry"]["metrics"], Value::Bool(false));
@@ -273,6 +276,38 @@ mod tests {
             Value::from(mustr_ui::LIGHT_THEME_NAME)
         );
         assert_eq!(merged["theme"]["mode"], Value::from("dark"));
+    }
+
+    /// The settings Zed's code reads, after mustr's overrides: Zed's AI is off, and Zed's
+    /// client points nowhere.
+    #[gpui::test]
+    fn effective_defaults_turn_off_zed_ai_and_services(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            apply_default_overrides(cx).unwrap();
+
+            assert!(project::DisableAiSettings::get_global(cx).disable_ai);
+            let languages = language::language_settings::AllLanguageSettings::get_global(cx);
+            assert_eq!(
+                languages.edit_predictions.provider,
+                settings::EditPredictionProvider::None
+            );
+            assert!(!languages.defaults.show_edit_predictions);
+
+            let telemetry = client::TelemetrySettings::get_global(cx);
+            assert!(!telemetry.metrics && !telemetry.diagnostics);
+
+            let server_url = &client::ClientSettings::get_global(cx).server_url;
+            let host = url::Url::parse(server_url)
+                .unwrap()
+                .host_str()
+                .unwrap()
+                .to_string();
+            assert!(!host.ends_with("zed.dev"), "{server_url}");
+            // Refused before any DNS lookup.
+            assert!(crate::zed_services::is_blocked_host(&host), "{server_url}");
+        });
     }
 
     #[gpui::test]
