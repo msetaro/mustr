@@ -9,6 +9,7 @@ mod keymap;
 mod nav_panel;
 mod navigation;
 mod pull_request_review;
+mod status_bar;
 mod t3_connection;
 mod themes;
 mod title_bar;
@@ -345,5 +346,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     which_key::init(cx);
     app_settings::observe_app_settings(cx);
     title_bar::init(cx);
+    status_bar::init(cx);
     window::init(cx);
 }
