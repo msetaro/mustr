@@ -35,6 +35,7 @@ use util::ResultExt as _;
 
 use crate::{
     inbox::PullRequestList,
+    review_backend,
     t3_engine::{EmbeddedEngine, EngineState, T3Mode, executor_sleep},
 };
 
@@ -58,9 +59,23 @@ const PAIRING_TIMEOUT: Duration = Duration::from_secs(30);
 const TOKEN_EXPIRY_MARGIN_SECS: u64 = 60;
 const OPEN_PULL_REQUESTS_LIMIT: u32 = 50;
 
-/// The command that mints a pairing credential with [`SCOPES`] on the T3 machine.
+/// The scopes mustr pairs with. While writes are dry runs (`MUSTR_DRY_RUN_WRITES`) that's only
+/// `orchestration:read`, so a test that reaches a real T3 can never mint a token that writes.
+fn pairing_scopes() -> &'static [Scope] {
+    pairing_scopes_for(review_backend::dry_run_requested())
+}
+
+fn pairing_scopes_for(dry_run: bool) -> &'static [Scope] {
+    if dry_run {
+        &[Scope::OrchestrationRead]
+    } else {
+        &SCOPES
+    }
+}
+
+/// The command that mints a pairing credential on the T3 machine.
 pub fn pairing_command() -> String {
-    let scopes = SCOPES
+    let scopes = pairing_scopes()
         .iter()
         .map(|scope| format!("--scope {}", scope.as_str()))
         .collect::<Vec<_>>()
@@ -116,7 +131,7 @@ async fn mint_pairing_credential(
     if let Some(t3_home) = t3_home {
         command.arg("--base-dir").arg(t3_home);
     }
-    for scope in SCOPES {
+    for scope in pairing_scopes() {
         command.args(["--scope", scope.as_str()]);
     }
     command
@@ -608,7 +623,11 @@ fn stored_token_use(session: &SessionCheck, stored_scope: &str) -> (StoredTokenU
         .map_or_else(|| stored_scope.to_string(), |scopes| scopes.join(" "));
     let stored_use = if !session.accepted {
         StoredTokenUse::Discard
-    } else if missing_scopes(scope.split_whitespace()).is_empty() {
+    } else if pairing_scopes().iter().all(|wanted| {
+        scope
+            .split_whitespace()
+            .any(|granted| granted == wanted.as_str())
+    }) {
         StoredTokenUse::Use
     } else {
         StoredTokenUse::PairAgain
@@ -1697,7 +1716,7 @@ async fn pair(
                     http.as_ref(),
                     &server_url,
                     &credential,
-                    &SCOPES,
+                    pairing_scopes(),
                     &ClientMetadata::default(),
                 )
                 .await
@@ -1889,6 +1908,18 @@ mod tests {
         assert_eq!(restored.access_token, "secret");
         assert_eq!(restored.expires_in, 2_600.0);
         assert_eq!(restored.scope, "orchestration:read");
+    }
+
+    #[test]
+    fn dry_runs_pair_for_reading_only() {
+        assert_eq!(
+            pairing_scopes_for(true)
+                .iter()
+                .map(|scope| scope.as_str())
+                .collect::<Vec<_>>(),
+            ["orchestration:read"]
+        );
+        assert_eq!(pairing_scopes_for(false), &SCOPES);
     }
 
     #[test]

@@ -49,7 +49,11 @@ Ignore the rest of `.rules`, which is for Zed's own repository: the README banne
   - Installed mode needs `HOME=<tmp>/home`, so `~/.t3` and `~/.local/bin` are temporary. It also needs `MUSTR_DRY_RUN_SERVICE=1`: systemd and launchd are per user, so a temporary HOME doesn't isolate `t3 service …`. With it set, `t3 service …` and `t3 update` fail locally and show the command they would run.
   - To test "T3 Code is running", start `<tmp>/home/.t3/runtime/versions/<V>/t3 serve --base-dir <tmp>/home/.t3 --host 127.0.0.1 --port <free port>` with that HOME.
   - Afterwards, check that no process runs from `<tmp>`. Also check that the real service's PIDs, the owner of port 3773, `~/.config/systemd/user/t3code.service`, and `~/.t3/runtime` haven't changed.
-  - One exception, for looking at real threads: a test may pair with the user's T3 read-only. Mint a credential with `t3 auth pairing create --scope orchestration:read --json` (don't print it), connect in external mode (`--t3-mode external --t3-server http://127.0.0.1:3773`) with that credential, and set `MUSTR_DRY_RUN_WRITES=1`. Revoke the session afterwards (`t3 auth session list`, `t3 auth session revoke`). Never let the app's own pairing run against the real T3, since it asks for write scopes.
+  - One exception, for looking at real threads: a test may pair with the user's T3 read-only.
+    - Mint a credential with `~/.t3/runtime/versions/<V>/t3 auth pairing create --scope orchestration:read --label "mustr <package> read-only" --json`, and don't print it.
+    - Start mustr with `MUSTR_DRY_RUN_WRITES=1`, `HOME=<tmp>/home`, `T3CODE_HOME` unset and no `t3` on `PATH`, so it can't find T3's CLI and pair itself. Use external mode (`--t3-mode external --t3-server http://127.0.0.1:3773`), then paste the credential.
+    - While `MUSTR_DRY_RUN_WRITES` is set, mustr's own pairing asks only for `orchestration:read` (`pairing_scopes` in `t3_connection.rs`). That's a backstop, not a substitute for the steps above.
+    - Afterwards, revoke only your own session (`t3 auth session list`, `t3 auth session revoke`), by its label. Other packages may have sessions open.
 - Dev builds load assets from the checkout, so start `target/debug/mustr` with the worktree as the working directory.
 - Hidden flags for smoke tests:
   - `--open-first-pr` opens the first open pull request once the list loads.
