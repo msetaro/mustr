@@ -81,6 +81,9 @@ zed_actions.workspace = true
 zlog.workspace = true
 zlog_settings.workspace = true
 
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+image.workspace = true
+
 [dev-dependencies]
 editor = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
