@@ -237,5 +237,14 @@ mod tests {
             );
         }
         assert_eq!(merged["tab_bar"], defaults["tab_bar"]);
+        assert_eq!(
+            merged["theme"]["dark"],
+            Value::from(mustr_ui::DARK_THEME_NAME)
+        );
+        assert_eq!(
+            merged["theme"]["light"],
+            Value::from(mustr_ui::LIGHT_THEME_NAME)
+        );
+        assert_eq!(merged["theme"]["mode"], Value::from("dark"));
     }
 }

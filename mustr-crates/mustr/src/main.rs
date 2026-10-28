@@ -4,8 +4,11 @@
 mod app_settings;
 mod data_dir;
 mod home;
+mod inbox;
 mod keymap;
+mod t3_connection;
 mod themes;
+mod title_bar;
 mod window;
 
 use anyhow::{Context as _, Result};
@@ -41,6 +44,15 @@ struct Args {
     #[arg(long, value_name = "DIR", verbatim_doc_comment)]
     user_data_dir: Option<String>,
 
+    /// The T3 Code server to connect to. Overrides `MUSTR_T3_SERVER` and the
+    /// `"t3": {"url": ...}` setting. The default is http://127.0.0.1:3773.
+    #[arg(long, value_name = "URL", verbatim_doc_comment)]
+    t3_server: Option<String>,
+
+    /// Opens the first open pull request once the list loads (for smoke tests).
+    #[arg(long, hide = true)]
+    open_first_pr: bool,
+
     /// Relays a Git or SSH password prompt over a Unix socket, so git doesn't
     /// need netcat.
     #[cfg(not(target_os = "windows"))]
@@ -70,6 +82,9 @@ fn main() {
         return;
     }
 
+    let home_options = home::HomeOptions {
+        open_first_pull_request: args.open_first_pr,
+    };
     let data_dir = match data_dir::init(args.user_data_dir) {
         Ok(data_dir) => data_dir,
         Err(error) => {
@@ -94,6 +109,13 @@ fn main() {
     let app_version = AppVersion::load(env!("CARGO_PKG_VERSION"), None, None);
     log::info!("========== starting mustr {app_version} ==========");
     log::info!("Data directory: {}", data_dir.display());
+
+    let settings_text = std::fs::read_to_string(paths::settings_file()).ok();
+    let t3_server_url = t3_connection::resolve_server_url(args.t3_server, settings_text.as_deref());
+    match &t3_server_url {
+        Ok(url) => log::info!("T3 server: {url}"),
+        Err(error) => log::error!("{error:#}"),
+    }
 
     // Copied from crates/zed/src/main.rs: `rope` and `sum_tree` build large
     // trees on rayon's global pool.
@@ -147,6 +169,8 @@ fn main() {
             }
         };
         init_ui(&app_state, cx);
+        cx.set_global(home_options);
+        t3_connection::init(t3_server_url, cx);
         cx.activate(true);
         window::open_home_window(app_state, cx);
     });
@@ -296,6 +320,7 @@ fn watch_node_options(cx: &mut App) -> watch::Receiver<Option<NodeBinaryOptions>
 /// Initializes the Zed features mustr keeps. See the init inventory in
 /// mustr-docs/ZED-INTEGRATION.md for what's left out and why.
 fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
+    mustr_ui::init(cx);
     command_palette::init(cx);
     themes::init(app_state.fs.clone(), app_state.languages.clone(), cx);
     editor::init(cx);
@@ -313,5 +338,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     inspector_ui::init(app_state.clone(), cx);
     which_key::init(cx);
     app_settings::observe_app_settings(cx);
+    title_bar::init(cx);
     window::init(cx);
 }

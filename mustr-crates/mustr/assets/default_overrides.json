@@ -20,5 +20,11 @@
     "html": false
   },
   "suggest_extensions": false,
-  "window_title_format": "mustr"
+  "window_title_format": "mustr",
+  // mustr's own themes (assets/themes/mustr), registered by `mustr_ui::init`.
+  "theme": {
+    "mode": "dark",
+    "light": "mustr Light",
+    "dark": "mustr Dark"
+  }
 }
