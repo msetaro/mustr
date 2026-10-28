@@ -4,7 +4,7 @@
 //! Only the fields mustr shows are decoded, and every entry is decoded on its own, so one
 //! malformed or newer-shaped entry doesn't hide the rest.
 
-use review::ReviewFileContents;
+use review::{FileChange, ReviewFileContents, UnavailableFile};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{collections::HashMap, path::Path};
@@ -173,7 +173,12 @@ pub fn recent_threads(snapshot: Value, limit: usize) -> Vec<ThreadRow> {
         .collect()
 }
 
-fn decode_each<T: serde::de::DeserializeOwned>(values: Option<&Value>, what: &str) -> Vec<T> {
+/// Decodes each element of a JSON array on its own, skipping (and logging) the ones mustr can't
+/// read.
+pub(crate) fn decode_each<T: serde::de::DeserializeOwned>(
+    values: Option<&Value>,
+    what: &str,
+) -> Vec<T> {
     let Some(Value::Array(values)) = values else {
         return Vec::new();
     };
@@ -189,12 +194,6 @@ fn decode_each<T: serde::de::DeserializeOwned>(values: Option<&Value>, what: &st
         .collect()
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct UnavailableFile {
-    pub path: String,
-    pub reason: String,
-}
-
 #[derive(Default)]
 pub struct ReviewFiles {
     pub files: Vec<ReviewFileContents>,
@@ -206,19 +205,31 @@ pub struct ReviewFiles {
 pub fn review_files(files: Vec<PullRequestFile>) -> ReviewFiles {
     let mut review = ReviewFiles::default();
     for file in files {
+        let change = match file.file.change_type {
+            ChangeType::Change => FileChange::Modified,
+            ChangeType::New => FileChange::Added,
+            ChangeType::Deleted => FileChange::Deleted,
+            ChangeType::RenamePure | ChangeType::RenameChanged => FileChange::Renamed,
+        };
+        let old_path = (change == FileChange::Renamed).then(|| file.file.old_path.clone());
         let path = match file.file.change_type {
             ChangeType::Deleted => file.file.old_path,
             _ => file.file.new_path,
         };
+        let unavailable = |path: String, reason: String| UnavailableFile {
+            path,
+            old_path: old_path.clone(),
+            change,
+            reason,
+        };
         if let Some(reason) = file.unavailable {
-            review.unavailable.push(UnavailableFile { path, reason });
+            review.unavailable.push(unavailable(path, reason));
             continue;
         }
         if file.old_text.is_none() && file.new_text.is_none() {
-            review.unavailable.push(UnavailableFile {
-                path,
-                reason: "No contents".to_string(),
-            });
+            review
+                .unavailable
+                .push(unavailable(path, "No contents".to_string()));
             continue;
         }
         // Paths come from the pull request, so they're untrusted: no absolute paths, and no
@@ -227,14 +238,14 @@ pub fn review_files(files: Vec<PullRequestFile>) -> ReviewFiles {
             .ok()
             .filter(|relative_path| !relative_path.is_empty());
         let Some(relative_path) = relative_path else {
-            review.unavailable.push(UnavailableFile {
-                path,
-                reason: "Unsupported path".to_string(),
-            });
+            review
+                .unavailable
+                .push(unavailable(path, "Unsupported path".to_string()));
             continue;
         };
         review.files.push(ReviewFileContents {
             path: relative_path.as_ref().into_arc(),
+            old_path,
             base_text: file.old_text,
             head_text: file.new_text,
         });
@@ -370,6 +381,8 @@ mod tests {
             .map(|file| {
                 (
                     file.path.as_unix_str().to_string(),
+                    file.old_path.clone(),
+                    file.change(),
                     file.base_text.clone(),
                     file.head_text.clone(),
                 )
@@ -378,25 +391,49 @@ mod tests {
         assert_eq!(
             shown,
             vec![
-                ("src/main.rs".into(), Some("old".into()), Some("new".into())),
-                ("added.md".into(), None, Some("hi".into())),
-                ("gone.txt".into(), Some("bye".into()), None),
-                ("lib/helpers.rs".into(), Some("a".into()), Some("b".into())),
+                (
+                    "src/main.rs".into(),
+                    None,
+                    FileChange::Modified,
+                    Some("old".into()),
+                    Some("new".into())
+                ),
+                (
+                    "added.md".into(),
+                    None,
+                    FileChange::Added,
+                    None,
+                    Some("hi".into())
+                ),
+                (
+                    "gone.txt".into(),
+                    None,
+                    FileChange::Deleted,
+                    Some("bye".into()),
+                    None
+                ),
+                (
+                    "lib/helpers.rs".into(),
+                    Some("lib/util.rs".into()),
+                    FileChange::Renamed,
+                    Some("a".into()),
+                    Some("b".into())
+                ),
             ]
         );
         let unavailable = review
             .unavailable
             .iter()
-            .map(|file| (file.path.as_str(), file.reason.as_str()))
+            .map(|file| (file.path.as_str(), file.change, file.reason.as_str()))
             .collect::<Vec<_>>();
         assert_eq!(
             unavailable,
             vec![
-                ("logo.png", "Binary file"),
-                ("big.json", "Too large to expand"),
-                ("../escape", "Unsupported path"),
-                ("/etc/passwd", "Unsupported path"),
-                ("empty", "No contents"),
+                ("logo.png", FileChange::Modified, "Binary file"),
+                ("big.json", FileChange::Modified, "Too large to expand"),
+                ("../escape", FileChange::Added, "Unsupported path"),
+                ("/etc/passwd", FileChange::Added, "Unsupported path"),
+                ("empty", FileChange::Modified, "No contents"),
             ]
         );
     }
@@ -406,6 +443,8 @@ mod tests {
         assert_eq!(unavailable_note("o/r#1", &[]), None);
         let one = [UnavailableFile {
             path: "logo.png".into(),
+            old_path: None,
+            change: FileChange::Modified,
             reason: "Binary file".into(),
         }];
         assert_eq!(
@@ -415,6 +454,8 @@ mod tests {
         let many = (0..7)
             .map(|index| UnavailableFile {
                 path: format!("f{index}"),
+                old_path: None,
+                change: FileChange::Modified,
                 reason: "Binary file".into(),
             })
             .collect::<Vec<_>>();

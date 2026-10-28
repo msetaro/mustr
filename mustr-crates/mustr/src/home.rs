@@ -8,7 +8,7 @@ use gpui::{
     App, Entity, EventEmitter, FocusHandle, Focusable, Global, Subscription, Task, WeakEntity,
 };
 use mustr_ui::tokens;
-use review::ReviewView;
+use review::{ReviewContents, ReviewView};
 use std::sync::Arc;
 use ui::{Button, ButtonStyle, DiffStat, Divider, Indicator, prelude::*};
 use workspace::{
@@ -197,8 +197,13 @@ impl HomeView {
                     review.files.len(),
                     review.unavailable.len()
                 );
+                let contents = ReviewContents {
+                    files: review.files,
+                    unavailable: review.unavailable,
+                    ..ReviewContents::default()
+                };
                 let open_review = workspace.update_in(cx, |workspace, window, cx| {
-                    ReviewView::open(review.files, workspace, window, cx)
+                    ReviewView::open(contents, workspace, window, cx)
                 })?;
                 open_review.await?;
                 if let Some(note) = note {
