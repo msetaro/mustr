@@ -9,6 +9,8 @@ mod keymap;
 mod nav_panel;
 mod navigation;
 mod pull_request_review;
+mod review_backend;
+mod review_drafts;
 mod status_bar;
 mod t3_connection;
 mod themes;

@@ -2,6 +2,8 @@ use crate::{
     inbox::{self, PullRequestEntry, PullRequestList, ThreadRow, ThreadStatus},
     nav_panel::NavPanel,
     pull_request_review,
+    review_backend::{self, DryRunRpc, T3ReviewBackend},
+    review_drafts::{self, DraftStore},
     t3_connection::{self, ConnectionStatus, T3Connection, T3Session},
 };
 use anyhow::{Context as _, anyhow};
@@ -20,7 +22,6 @@ use workspace::{
 };
 
 const RECENT_THREADS: usize = 20;
-const PAIRING_COMMAND: &str = "t3 auth pairing create --scope orchestration:read --label mustr";
 const CONTENT_MAX_WIDTH: f32 = 880.;
 
 /// Startup options that change what the home view does on its own.
@@ -177,21 +178,35 @@ impl HomeView {
         };
         self.open_error = None;
         let workspace = self.workspace.clone();
+        let current_rpc = self.connection.read(cx).current_rpc();
         let task = cx.spawn_in(window, async move |this, cx| {
             let display_ref = entry.display_ref();
             let result = async {
                 let reference = entry.reference();
-                // The files and the data around them (header, threads, viewed marks) load
-                // side by side; the files take longest.
+                let rpc = current_rpc;
+                let drafts = DraftStore::new(&review_drafts::drafts_dir(), &reference);
+                // The files, the data around them (header, threads, viewed marks), and the
+                // saved drafts load side by side; the files take longest.
                 let files = cx.background_spawn({
                     let session = session.clone();
                     let reference = reference.clone();
                     async move { session.pull_request_files(&reference).await }
                 });
-                let review_data = cx.background_spawn(async move {
-                    pull_request_review::load(&session, &reference).await
+                let review_data = cx.background_spawn({
+                    let rpc = rpc.clone();
+                    let reference = reference.clone();
+                    async move { pull_request_review::load(&rpc, &reference).await }
                 });
-                let (files, review_data) = futures::join!(files, review_data);
+                let pending = cx.background_spawn({
+                    let drafts = drafts.clone();
+                    async move { drafts.load() }
+                });
+                let (files, mut review_data, pending) = futures::join!(files, review_data, pending);
+                let pending = pending.unwrap_or_else(|error| {
+                    log::error!("couldn't load the pending review: {error:#}");
+                    review_data.problems.push(format!("{error:#}"));
+                    Default::default()
+                });
                 let files = files.with_context(|| format!("loading {display_ref}"))?;
                 let review = inbox::review_files(files);
                 if review.files.is_empty() {
@@ -201,11 +216,16 @@ impl HomeView {
                     ));
                 }
                 log::info!(
-                    "Opening {display_ref}: {} files, {} not shown, {} review threads",
+                    "Opening {display_ref}: {} files, {} not shown, {} review threads, {} drafts \
+                     (kept in {})",
                     review.files.len(),
                     review.unavailable.len(),
                     review_data.threads.len(),
+                    pending.comments.len(),
+                    drafts.path().display(),
                 );
+                let mut permissions = review_data.permissions;
+                permissions.blocked = session.write_blocked_reason().map(Into::into);
                 let contents = ReviewContents {
                     header: review_data.header,
                     files: review.files,
@@ -213,6 +233,21 @@ impl HomeView {
                     unavailable: review.unavailable,
                     threads: review_data.threads,
                     viewed: review_data.viewed,
+                    backend: Some(if review_backend::dry_run_requested() {
+                        log::warn!(
+                            "{} is set: the review won't write to {display_ref}",
+                            review_backend::DRY_RUN_ENV
+                        );
+                        Arc::new(T3ReviewBackend::new(
+                            Arc::new(DryRunRpc(rpc)),
+                            reference,
+                            drafts,
+                        ))
+                    } else {
+                        Arc::new(T3ReviewBackend::new(Arc::new(rpc), reference, drafts))
+                    }),
+                    permissions,
+                    pending,
                 };
                 let open_review = workspace.update_in(cx, |workspace, window, cx| {
                     ReviewView::open(contents, workspace, window, cx)
@@ -301,7 +336,13 @@ impl HomeView {
                     Some(error.clone()),
                 ),
             };
-        let needs_pairing = matches!(connection.status(), ConnectionStatus::NeedsPairing(_));
+        // Connected, but paired without the scopes writes need: pairing again fixes it.
+        let read_only = connection
+            .session()
+            .filter(|_| connection.status().is_connected())
+            .and_then(|session| session.write_blocked_reason());
+        let needs_pairing =
+            matches!(connection.status(), ConnectionStatus::NeedsPairing(_)) || read_only.is_some();
         let can_retry = !matches!(connection.status(), ConnectionStatus::Connecting(_))
             && connection.server_url().is_some();
         let retry_label = if connection.status().is_connected() {
@@ -334,6 +375,13 @@ impl HomeView {
                         .color(Color::Muted),
                 )
             })
+            .when_some(read_only, |this, read_only| {
+                this.child(
+                    Label::new(read_only)
+                        .size(LabelSize::Small)
+                        .color(Color::Warning),
+                )
+            })
             .when(needs_pairing, |this| this.child(self.render_pairing(cx)))
     }
 
@@ -356,7 +404,7 @@ impl HomeView {
                     .rounded(tokens::CORNER_RADIUS / 2.)
                     .bg(colors.editor_background)
                     .child(
-                        Label::new(PAIRING_COMMAND)
+                        Label::new(t3_connection::pairing_command())
                             .size(LabelSize::Small)
                             .buffer_font(cx),
                     ),

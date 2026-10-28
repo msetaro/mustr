@@ -126,6 +126,12 @@ impl FileTreeModel {
         self.tracks_viewed
     }
 
+    pub fn set_viewed(&mut self, file: usize, viewed: FileViewedState) {
+        if let Some(file) = self.files.get_mut(file) {
+            file.viewed = viewed;
+        }
+    }
+
     pub fn file_count(&self) -> usize {
         self.files.len()
     }

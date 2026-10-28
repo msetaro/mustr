@@ -110,10 +110,11 @@ pub(crate) fn pill(label: impl Into<SharedString>, color: Hsla) -> impl IntoElem
         .child(label.into())
 }
 
-/// The header card. `extra` goes below the details (for example, threads on files the review
-/// can't show).
+/// The header card. `actions` go at the end of the title row, and `extra` below the details
+/// (for example, threads on files the review can't show).
 pub(crate) fn render_header(
     header: &PullRequestHeader,
+    actions: Option<AnyElement>,
     extra: Option<AnyElement>,
     cx: &App,
 ) -> impl IntoElement {
@@ -198,7 +199,8 @@ pub(crate) fn render_header(
                         header.additions as usize,
                         header.deletions as usize,
                     ))
-                }),
+                })
+                .children(actions),
         )
         .child(details)
         .children(extra)

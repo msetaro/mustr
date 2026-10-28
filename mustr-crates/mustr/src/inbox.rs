@@ -4,11 +4,11 @@
 //! Only the fields mustr shows are decoded, and every entry is decoded on its own, so one
 //! malformed or newer-shaped entry doesn't hide the rest.
 
-use review::{FileChange, ReviewFileContents, UnavailableFile};
+use review::{CommentableLines, FileChange, HunkLine, ReviewFileContents, UnavailableFile};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{collections::HashMap, path::Path};
-use t3_client::{ChangeType, PullRequestFile, PullRequestRef};
+use t3_client::{ChangeType, PatchHunk, PatchLine, PullRequestFile, PullRequestRef};
 use util::{paths::PathStyle, rel_path::RelPath};
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -248,9 +248,22 @@ pub fn review_files(files: Vec<PullRequestFile>) -> ReviewFiles {
             old_path,
             base_text: file.old_text,
             head_text: file.new_text,
+            commentable: Some(commentable_lines(&file.file.hunks)),
         });
     }
     review
+}
+
+/// The lines the forge accepts comments on: the lines of its patch's hunks (`PLAN.md` §14).
+pub fn commentable_lines(hunks: &[PatchHunk]) -> CommentableLines {
+    CommentableLines::from_hunks(hunks.iter().map(|hunk| {
+        let lines = hunk.lines.iter().map(|line| match line {
+            PatchLine::Context => HunkLine::Context,
+            PatchLine::Added => HunkLine::Added,
+            PatchLine::Deleted => HunkLine::Deleted,
+        });
+        (hunk.old_start, hunk.new_start, lines)
+    }))
 }
 
 const LISTED_UNAVAILABLE_FILES: usize = 5;
@@ -298,6 +311,11 @@ mod tests {
                 new_path: new_path.to_string(),
                 change_type,
                 binary: unavailable == Some("Binary file"),
+                hunks: vec![PatchHunk {
+                    old_start: 1,
+                    new_start: 1,
+                    lines: vec![PatchLine::Deleted, PatchLine::Added],
+                }],
             },
             old_text: old_text.map(str::to_string),
             new_text: new_text.map(str::to_string),
@@ -375,6 +393,13 @@ mod tests {
             pull_request_file("empty", "empty", ChangeType::Change, None, None, None),
         ]);
 
+        assert_eq!(
+            review.files[0]
+                .commentable
+                .as_ref()
+                .and_then(|lines| lines.position(review::DiffSide::Right, 1)),
+            Some(review::CommentPosition::Added { new_line: 1 })
+        );
         let shown = review
             .files
             .iter()

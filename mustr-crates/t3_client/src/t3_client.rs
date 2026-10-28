@@ -22,7 +22,7 @@ pub use auth::{
 };
 pub use endpoints::{call_endpoint, call_endpoint_with};
 pub use pull_requests::{
-    ChangeType, ChangedFile, PullRequestFile, PullRequestRef, changed_files,
+    ChangeType, ChangedFile, PatchHunk, PatchLine, PullRequestFile, PullRequestRef, changed_files,
     load_pull_request_files, pull_request_patch,
 };
 pub use rpc::{RpcConnection, RpcError};

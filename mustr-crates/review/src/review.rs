@@ -1,21 +1,63 @@
 //! mustr's review view: a read-only multibuffer of diffs whose base and head texts are held in
 //! memory (for example, fetched from a T3 Code server) rather than read from a local checkout,
 //! with the pull request's header, its review threads as cards in the diff, and a file tree.
+//!
+//! With a [`ReviewBackend`], the review also writes: replies, resolving threads, editing the
+//! viewer's comments, viewed marks, and a pending review of drafted line comments that's
+//! submitted in one go. Drafts are handed to the backend to persist on every change.
 
+mod backend;
+mod comment_html;
+mod composer;
+mod drafts;
 mod file_tree;
 mod file_tree_panel;
 mod header;
+mod submit;
 mod threads;
 mod toolbar;
 
+pub use backend::{ReviewBackend, ReviewPermissions};
+pub use comment_html::comment_markdown;
+pub use composer::{AddComment, CancelComment, ConfirmComment, DraftCard, SubmitReview};
+pub use drafts::{
+    CommentPosition, CommentableLines, DraftComment, HunkLine, PendingReview, ReviewSubmission,
+    ReviewVerdict, can_submit,
+};
 pub use file_tree::{FileChange, FileTreeFile, FileTreeModel, FileTreeRow, FileViewedState};
 pub use file_tree_panel::{FileTreePanel, ToggleFileTree};
 pub use header::{ChecksState, ChecksSummary, PullRequestHeader, PullRequestState};
-pub use threads::{DiffSide, EditorSide, OutdatedThreads, ReviewThread, ThreadCard, ThreadComment};
+pub use submit::SubmitMode;
+pub use threads::{
+    DiffSide, EditorSide, OutdatedThreads, ReviewThread, ThreadCard, ThreadCardEvent, ThreadComment,
+};
+
+/// The review view's key bindings, for the app to bind after its default keymap (so users can
+/// rebind them):
+/// - `c` in the diff comments on the selected lines. Not while a comment is being written,
+///   since the composers live inside the diff's editor.
+/// - `secondary-enter` adds, sends, or saves the comment being written; `escape` stops.
+pub fn key_bindings() -> Vec<gpui::KeyBinding> {
+    use gpui::KeyBinding;
+    vec![
+        KeyBinding::new(
+            "c",
+            AddComment,
+            Some("ReviewView && !editing_comment > Editor && mode == full"),
+        ),
+        KeyBinding::new(
+            "secondary-enter",
+            ConfirmComment,
+            Some("ReviewComposer > Editor"),
+        ),
+        KeyBinding::new("escape", CancelComment, Some("ReviewComposer > Editor")),
+    ]
+}
 
 use anyhow::Result;
 use buffer_diff::BufferDiff;
 use collections::{HashMap, HashSet};
+use composer::DraftCardEvent;
 use editor::{
     Editor, EditorEvent, EditorSettings, HiddenDiffHunkRenderer, MultiBuffer, SelectionEffects,
     SplittableEditor,
@@ -25,14 +67,15 @@ use editor::{
 };
 use gpui::{
     AnyElement, App, AppContext as _, AsyncWindowContext, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, Font, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Task, WeakEntity, Window, px,
+    FocusHandle, Focusable, Font, IntoElement, KeyContext, ParentElement as _, Render,
+    SharedString, Styled as _, Subscription, Task, WeakEntity, Window, px,
 };
 use language::{
     Buffer, Capability, DiskState, File, HighlightedText, LanguageRegistry, LineEnding,
     OffsetRangeExt as _, Point, ReplicaId, Rope, TextBuffer,
 };
 use multi_buffer::PathKey;
+use multi_buffer::{MultiBufferRow, RowInfo};
 use mustr_ui::tokens;
 use project::{Project, ProjectPath, WorktreeId};
 use settings::Settings as _;
@@ -43,8 +86,12 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use threads::{card_block, estimated_card_lines, thread_anchor, thread_head_row};
-use ui::{Color, Icon, IconName, IconSize, Label, LabelCommon as _, LabelSize, prelude::*};
+use std::{collections::BTreeMap, time::Duration};
+use submit::SubmitForm;
+use threads::{ThreadWrites, card_block, line_anchor, thread_anchor, thread_head_row};
+use ui::{
+    Color, Icon, IconButton, IconName, IconSize, Label, LabelCommon as _, LabelSize, prelude::*,
+};
 use util::{ResultExt as _, paths::PathStyle, rel_path::RelPath};
 use workspace::{
     Item, ItemHandle as _, ItemNavHistory, ToolbarItemLocation, Workspace, item::ItemEvent,
@@ -60,6 +107,9 @@ pub struct ReviewFileContents {
     pub base_text: Option<String>,
     /// `None` when the file was deleted.
     pub head_text: Option<String>,
+    /// The lines the forge accepts line comments on, or `None` when any line may be commented
+    /// on (a local review).
+    pub commentable: Option<CommentableLines>,
 }
 
 impl ReviewFileContents {
@@ -94,6 +144,11 @@ pub struct ReviewContents {
     /// The viewer's viewed marks by path, or `None` when the forge keeps none. Files missing from
     /// the map are unviewed.
     pub viewed: Option<std::collections::HashMap<String, FileViewedState>>,
+    /// Writes to the forge and saves drafts. `None` for a read-only review.
+    pub backend: Option<Arc<dyn ReviewBackend>>,
+    pub permissions: ReviewPermissions,
+    /// The pending review saved last time.
+    pub pending: PendingReview,
 }
 
 /// How far above a file's first line to look for its header and the blocks listed with it.
@@ -171,6 +226,7 @@ struct ReviewEntry {
     change: FileChange,
     buffer: Entity<Buffer>,
     diff: Entity<BufferDiff>,
+    commentable: Option<CommentableLines>,
 }
 
 /// The parts of [`ReviewContents`] the view keeps once the buffers are built.
@@ -180,13 +236,25 @@ struct LoadedReview {
     unavailable: Vec<UnavailableFile>,
     threads: Vec<ReviewThread>,
     viewed: Option<std::collections::HashMap<String, FileViewedState>>,
+    backend: Option<Arc<dyn ReviewBackend>>,
+    permissions: ReviewPermissions,
+    pending: PendingReview,
 }
 
 /// A file the review shows. Its index in [`ReviewView::files`] is its index in the file tree.
 struct ShownFile {
     path_key: PathKey,
+    path: String,
+    old_path: Option<String>,
     buffer: Entity<Buffer>,
     diff: Entity<BufferDiff>,
+    commentable: Option<CommentableLines>,
+}
+
+impl ShownFile {
+    fn has_path(&self, path: &str) -> bool {
+        self.path == path || self.old_path.as_deref() == Some(path)
+    }
 }
 
 /// The editor blocks holding thread cards, so they can be replaced when the diff switches
@@ -199,6 +267,8 @@ struct ThreadBlocks {
     synced_split: Option<bool>,
     /// Thread id to the editor and block of its card.
     placed: HashMap<String, (EditorSide, CustomBlockId)>,
+    /// Draft id to the editor and block of its card.
+    drafts: HashMap<String, (EditorSide, CustomBlockId)>,
     /// File index to the list of threads the diff can't place, shown above the file.
     outdated: HashMap<usize, (Entity<OutdatedThreads>, CustomBlockId)>,
 }
@@ -217,10 +287,35 @@ pub struct ReviewView {
     /// Cards of threads on files the review doesn't show, listed in the header.
     unshown_thread_cards: Vec<Entity<ThreadCard>>,
     unshown_threads_expanded: bool,
+    /// Cards of the pending review's line comments, with the file's index.
+    draft_cards: Vec<(usize, Entity<DraftCard>)>,
+    /// Drafts the diff no longer has a place for (the pull request changed since they were
+    /// written). They're kept, but not submitted.
+    stranded_drafts: Vec<DraftComment>,
+    writes: Option<ThreadWrites>,
+    permissions: Arc<ReviewPermissions>,
+    language_registry: Arc<LanguageRegistry>,
+    submit: SubmitForm,
+    /// Why the last comment couldn't be started, or what just happened.
+    notice: Option<SharedString>,
+    viewed_error: Option<SharedString>,
+    viewed_in_flight: HashMap<usize, Task<()>>,
     blocks: ThreadBlocks,
     toolbar: Entity<toolbar::ReviewToolbar>,
+    save_task: Option<Task<()>>,
+    reload_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
+
+/// Where a new comment goes.
+struct CommentTarget {
+    file: usize,
+    position: CommentPosition,
+    start_line: Option<u32>,
+}
+
+/// Saving waits this long after the last keystroke, so typing doesn't write on every key.
+const SAVE_DELAY: Duration = Duration::from_millis(300);
 
 impl ReviewView {
     pub fn open(
@@ -240,6 +335,9 @@ impl ReviewView {
                 unavailable,
                 threads,
                 viewed,
+                backend,
+                permissions,
+                pending,
             } = contents;
             let mut entries = Vec::with_capacity(files.len());
             for file in files {
@@ -251,6 +349,9 @@ impl ReviewView {
                 unavailable,
                 threads,
                 viewed,
+                backend,
+                permissions,
+                pending,
             };
 
             workspace.update_in(cx, |workspace, window, cx| {
@@ -278,8 +379,16 @@ impl ReviewView {
             unavailable,
             threads,
             viewed,
+            backend,
+            permissions,
+            pending,
         } = loaded;
         let language_registry = project.read(cx).languages().clone();
+        let permissions = Arc::new(permissions);
+        let writes = backend.map(|backend| ThreadWrites {
+            backend,
+            permissions: permissions.clone(),
+        });
 
         let multibuffer = cx.new(|cx| {
             let mut multibuffer = MultiBuffer::new(Capability::ReadOnly);
@@ -372,6 +481,7 @@ impl ReviewView {
                         })
                         .collect::<Vec<_>>();
                     let ranges = excerpt_ranges(&entry, &thread_rows, cx);
+                    let path = entry.path.as_unix_str().to_string();
                     let path_key = PathKey::with_sort_prefix(position as u64, entry.path);
                     // Going through the `SplittableEditor` keeps the left-hand side in sync in
                     // split mode.
@@ -385,35 +495,23 @@ impl ReviewView {
                     );
                     ShownFile {
                         path_key,
+                        path,
+                        old_path: entry.old_path,
                         buffer: entry.buffer,
                         diff: entry.diff,
+                        commentable: entry.commentable,
                     }
                 })
                 .collect::<Vec<_>>()
         });
 
-        let thread_cards = threads_by_file
-            .into_iter()
-            .enumerate()
-            .flat_map(|(file, threads)| threads.into_iter().map(move |thread| (file, thread)))
-            .map(|(file, thread)| {
-                let language_registry = language_registry.clone();
-                let card = cx.new(|cx| ThreadCard::new(thread, None, Some(language_registry), cx));
-                (file, card)
-            })
-            .collect();
-        let unshown_thread_cards = unshown_threads
-            .into_iter()
-            .map(|thread| {
-                let location = Some(thread_location(&thread));
-                let language_registry = language_registry.clone();
-                cx.new(|cx| ThreadCard::new(thread, location, Some(language_registry), cx))
-            })
-            .collect();
-
-        let subscriptions = vec![
-            cx.subscribe(&editor, |_, _, event: &EditorEvent, cx| {
+        let submit = SubmitForm::new(&pending, &permissions, window, cx);
+        let mut subscriptions = vec![
+            cx.subscribe(&editor, |this, _, event: &EditorEvent, cx| {
                 if event == &(EditorEvent::SelectionsChanged { local: true }) {
+                    if this.notice.take().is_some() {
+                        cx.notify();
+                    }
                     cx.emit(event.clone())
                 }
             }),
@@ -424,7 +522,12 @@ impl ReviewView {
                     this.sync_thread_blocks(cx);
                 }
             }),
+            submit
+                .summary
+                .subscribe(cx, |this: &mut Self, cx| this.schedule_save(cx)),
         ];
+        // The last keystrokes are saved even when the review closes before the save delay.
+        subscriptions.push(cx.on_release(|this, cx| this.save_now(cx)));
 
         let toolbar = cx.new(|cx| toolbar::ReviewToolbar::new(&editor, cx));
         let mut this = Self {
@@ -432,15 +535,131 @@ impl ReviewView {
             header,
             files,
             file_tree,
-            thread_cards,
-            unshown_thread_cards,
+            thread_cards: Vec::new(),
+            unshown_thread_cards: Vec::new(),
             unshown_threads_expanded: false,
+            draft_cards: Vec::new(),
+            stranded_drafts: Vec::new(),
+            writes,
+            permissions,
+            language_registry,
+            submit,
+            notice: None,
+            viewed_error: None,
+            viewed_in_flight: HashMap::default(),
             blocks: ThreadBlocks::default(),
             toolbar,
+            save_task: None,
+            reload_task: None,
             _subscriptions: subscriptions,
         };
+
+        this.thread_cards = threads_by_file
+            .into_iter()
+            .enumerate()
+            .flat_map(|(file, threads)| threads.into_iter().map(move |thread| (file, thread)))
+            .map(|(file, thread)| (file, this.new_thread_card(thread, None, window, cx)))
+            .collect();
+        this.unshown_thread_cards = unshown_threads
+            .into_iter()
+            .map(|thread| {
+                let location = Some(thread_location(&thread));
+                this.new_thread_card(thread, location, window, cx)
+            })
+            .collect();
+        for card in this
+            .thread_cards
+            .iter()
+            .map(|(_, card)| card)
+            .chain(&this.unshown_thread_cards)
+        {
+            card.update(cx, |card, cx| {
+                let thread_id = card.thread().id.clone();
+                let edit = pending.edits.iter().find(|(comment_id, _)| {
+                    card.thread()
+                        .comments
+                        .iter()
+                        .any(|comment| &comment.id == *comment_id)
+                });
+                card.restore(
+                    pending.replies.get(&thread_id).map(String::as_str),
+                    edit.map(|(id, text)| (id.as_str(), text.as_str())),
+                    window,
+                    cx,
+                );
+            });
+        }
+        for draft in pending.comments {
+            let file = this.files.iter().position(|file| {
+                file.has_path(&draft.path)
+                    && file.commentable.as_ref().is_none_or(|commentable| {
+                        commentable.position(draft.position.side(), draft.position.line())
+                            == Some(draft.position)
+                    })
+            });
+            match file {
+                Some(file) => {
+                    let card = this.new_draft_card(draft, window, cx);
+                    this.draft_cards.push((file, card));
+                }
+                None => this.stranded_drafts.push(draft),
+            }
+        }
         this.sync_thread_blocks(cx);
         this
+    }
+
+    fn new_thread_card(
+        &self,
+        thread: Arc<ReviewThread>,
+        location: Option<SharedString>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<ThreadCard> {
+        let language_registry = self.language_registry.clone();
+        let writes = self.writes.clone();
+        let card =
+            cx.new(|cx| ThreadCard::new(thread, location, Some(language_registry), writes, cx));
+        cx.subscribe_in(&card, window, |this, _, event, window, cx| match event {
+            ThreadCardEvent::DraftChanged => this.schedule_save(cx),
+            ThreadCardEvent::Posted => {
+                this.save_now(cx);
+                this.reload_threads(window, cx);
+            }
+        })
+        .detach();
+        card
+    }
+
+    fn new_draft_card(
+        &self,
+        draft: DraftComment,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<DraftCard> {
+        let language_registry = self.language_registry.clone();
+        let card = cx.new(|cx| DraftCard::new(draft, Some(language_registry), window, cx));
+        cx.subscribe_in(&card, window, |this, card, event, window, cx| match event {
+            DraftCardEvent::Changed => {
+                // Adding the comment (or cancelling an edit) closes its composer; the diff gets
+                // the focus back.
+                if !card.read(cx).is_editing() {
+                    this.focus_diff(window, cx);
+                    this.save_now(cx);
+                } else {
+                    this.schedule_save(cx);
+                }
+                cx.notify();
+            }
+            DraftCardEvent::Removed => {
+                let id = card.read(cx).draft(cx).id;
+                this.remove_draft(&id, cx);
+                this.focus_diff(window, cx);
+                this.save_now(cx);
+            }
+        })
+        .detach();
+        card
     }
 
     pub fn header(&self) -> Option<&PullRequestHeader> {
@@ -524,7 +743,8 @@ impl ReviewView {
         true
     }
 
-    /// Replaces every card block, placing each thread for the current split or unified diff.
+    /// Replaces every card block, placing each thread and draft for the current split or
+    /// unified diff.
     fn sync_thread_blocks(&mut self, cx: &mut Context<Self>) {
         let (rhs_editor, lhs_editor) = {
             let editor = self.editor.read(cx);
@@ -549,25 +769,26 @@ impl ReviewView {
             });
         }
         self.blocks.placed.clear();
+        self.blocks.drafts.clear();
 
         enum BlockOwner {
             Thread(String),
+            Draft(String),
             Outdated(usize, Entity<OutdatedThreads>),
         }
         let mut rhs_blocks = Vec::new();
         let mut rhs_owners = Vec::new();
         let mut lhs_blocks = Vec::new();
-        let mut lhs_threads = Vec::new();
+        let mut lhs_owners = Vec::new();
         let mut outdated_cards: Vec<Vec<Entity<ThreadCard>>> = vec![Vec::new(); self.files.len()];
         for (file, card) in &self.thread_cards {
             let Some(shown) = self.files.get(*file) else {
                 continue;
             };
-            let (thread, expanded) = {
+            let (thread, lines) = {
                 let card = card.read(cx);
-                (card.thread().clone(), card.is_expanded())
+                (card.thread().clone(), card.estimated_lines())
             };
-            let lines = estimated_card_lines(&thread, expanded);
             match thread_anchor(
                 &thread,
                 &shown.buffer,
@@ -590,9 +811,31 @@ impl ReviewView {
                         card.clone(),
                         lines,
                     ));
-                    lhs_threads.push(thread.id.clone());
+                    lhs_owners.push(BlockOwner::Thread(thread.id.clone()));
                 }
                 None => outdated_cards[*file].push(card.clone()),
+            }
+        }
+        for (file, card) in &self.draft_cards {
+            let (draft, lines) = {
+                let card = card.read(cx);
+                (card.draft(cx), card.estimated_lines())
+            };
+            let Some((side, placement)) =
+                self.draft_placement(*file, &draft, &rhs_editor, lhs_editor.as_ref(), cx)
+            else {
+                continue;
+            };
+            let block = card_block(placement, card.clone(), lines);
+            match side {
+                EditorSide::Right => {
+                    rhs_blocks.push(block);
+                    rhs_owners.push(BlockOwner::Draft(draft.id));
+                }
+                EditorSide::Left => {
+                    lhs_blocks.push(block);
+                    lhs_owners.push(BlockOwner::Draft(draft.id));
+                }
             }
         }
 
@@ -627,6 +870,9 @@ impl ReviewView {
                 BlockOwner::Thread(thread) => {
                     self.blocks.placed.insert(thread, (EditorSide::Right, id));
                 }
+                BlockOwner::Draft(draft) => {
+                    self.blocks.drafts.insert(draft, (EditorSide::Right, id));
+                }
                 BlockOwner::Outdated(file, list) => {
                     self.blocks.outdated.insert(file, (list, id));
                 }
@@ -637,12 +883,129 @@ impl ReviewView {
         {
             let lhs_ids =
                 lhs_editor.update(cx, |editor, cx| editor.insert_blocks(lhs_blocks, None, cx));
-            for (thread, id) in lhs_threads.into_iter().zip(&lhs_ids) {
-                self.blocks.placed.insert(thread, (EditorSide::Left, *id));
+            for (owner, id) in lhs_owners.into_iter().zip(&lhs_ids) {
+                match owner {
+                    BlockOwner::Thread(thread) => {
+                        self.blocks.placed.insert(thread, (EditorSide::Left, *id));
+                    }
+                    BlockOwner::Draft(draft) => {
+                        self.blocks.drafts.insert(draft, (EditorSide::Left, *id));
+                    }
+                    BlockOwner::Outdated(..) => {}
+                }
             }
             self.blocks.lhs = Some((lhs_editor.downgrade(), lhs_ids.into_iter().collect()));
         }
         self.blocks.synced_split = Some(lhs_editor.is_some());
+        cx.notify();
+    }
+
+    /// Where a draft's card goes: below its line, or above its file when the diff doesn't show
+    /// the line (for example, a context line outside the excerpts).
+    fn draft_placement(
+        &self,
+        file: usize,
+        draft: &DraftComment,
+        rhs_editor: &Entity<Editor>,
+        lhs_editor: Option<&Entity<Editor>>,
+        cx: &App,
+    ) -> Option<(EditorSide, BlockPlacement<multi_buffer::Anchor>)> {
+        let shown = self.files.get(file)?;
+        match line_anchor(
+            draft.position.side(),
+            draft.position.line(),
+            &shown.buffer,
+            &shown.diff,
+            rhs_editor,
+            lhs_editor,
+            cx,
+        ) {
+            Some((side, anchor)) => Some((side, BlockPlacement::Below(anchor))),
+            None => {
+                let anchor = rhs_editor
+                    .read(cx)
+                    .buffer()
+                    .read(cx)
+                    .location_for_path(&shown.path_key, cx)?;
+                Some((EditorSide::Right, BlockPlacement::Above(anchor)))
+            }
+        }
+    }
+
+    /// Adds one draft's block without touching the others, which keeps the diff from jumping.
+    fn place_draft_card(&mut self, file: usize, card: &Entity<DraftCard>, cx: &mut Context<Self>) {
+        let (rhs_editor, lhs_editor) = {
+            let editor = self.editor.read(cx);
+            (editor.rhs_editor().clone(), editor.lhs_editor().cloned())
+        };
+        let (draft, lines) = {
+            let card = card.read(cx);
+            (card.draft(cx), card.estimated_lines())
+        };
+        let Some((side, placement)) =
+            self.draft_placement(file, &draft, &rhs_editor, lhs_editor.as_ref(), cx)
+        else {
+            return;
+        };
+        let block = card_block(placement, card.clone(), lines);
+        match (side, lhs_editor) {
+            (EditorSide::Left, Some(lhs_editor)) => {
+                let [id] = lhs_editor
+                    .update(cx, |editor, cx| editor.insert_blocks([block], None, cx))
+                    .try_into()
+                    .unwrap_or_else(|_| unreachable!("one block was inserted"));
+                match &mut self.blocks.lhs {
+                    Some((editor, ids)) if *editor == lhs_editor.downgrade() => {
+                        ids.insert(id);
+                    }
+                    lhs => *lhs = Some((lhs_editor.downgrade(), HashSet::from_iter([id]))),
+                }
+                self.blocks.drafts.insert(draft.id, (EditorSide::Left, id));
+            }
+            _ => {
+                let ids =
+                    rhs_editor.update(cx, |editor, cx| editor.insert_blocks([block], None, cx));
+                for id in ids {
+                    self.blocks.rhs.insert(id);
+                    self.blocks
+                        .drafts
+                        .insert(draft.id.clone(), (EditorSide::Right, id));
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn remove_draft(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.draft_cards
+            .retain(|(_, card)| card.read(cx).draft(cx).id != id);
+        self.stranded_drafts.retain(|draft| draft.id != id);
+        let Some((side, block)) = self.blocks.drafts.remove(id) else {
+            cx.notify();
+            return;
+        };
+        let editor = self.editor.read(cx);
+        match side {
+            EditorSide::Right => {
+                self.blocks.rhs.remove(&block);
+                let rhs_editor = editor.rhs_editor().clone();
+                rhs_editor.update(cx, |editor, cx| {
+                    editor.remove_blocks(HashSet::from_iter([block]), None, cx)
+                });
+            }
+            EditorSide::Left => {
+                let lhs_editor = editor.lhs_editor().cloned();
+                if let Some((editor, ids)) = &mut self.blocks.lhs
+                    && ids.remove(&block)
+                    && let Some(lhs_editor) =
+                        lhs_editor.filter(|lhs_editor| lhs_editor.downgrade() == *editor)
+                {
+                    lhs_editor.update(cx, |editor, cx| {
+                        editor.remove_blocks(HashSet::from_iter([block]), None, cx)
+                    });
+                }
+            }
+        }
         cx.notify();
     }
 
@@ -720,6 +1083,396 @@ impl ReviewView {
     }
 }
 
+/// Comments, drafts, and the other writes.
+impl ReviewView {
+    /// The pending review as it stands, including text still being written.
+    pub fn pending_review(&self, cx: &App) -> PendingReview {
+        let thread_cards = self
+            .thread_cards
+            .iter()
+            .map(|(_, card)| card)
+            .chain(&self.unshown_thread_cards)
+            .map(|card| card.read(cx));
+        let mut replies = BTreeMap::new();
+        let mut edits = BTreeMap::new();
+        for card in thread_cards {
+            if let Some(reply) = card
+                .unsent_reply(cx)
+                .filter(|reply| !reply.trim().is_empty())
+            {
+                replies.insert(card.thread().id.clone(), reply);
+            }
+            if let Some((comment_id, text)) = card.unsaved_edit(cx) {
+                edits.insert(comment_id, text);
+            }
+        }
+        PendingReview {
+            comments: self
+                .draft_cards
+                .iter()
+                .map(|(_, card)| card.read(cx).draft(cx))
+                // A composer that was opened but never written in isn't worth keeping.
+                .filter(|draft| draft.added || !draft.body.trim().is_empty())
+                .chain(self.stranded_drafts.iter().cloned())
+                .collect(),
+            summary: self.submit.summary.text(cx),
+            verdict: Some(self.submit.verdict),
+            replies,
+            edits,
+        }
+    }
+
+    /// The draft cards in the diff, in the order they were written.
+    pub fn draft_cards(&self) -> impl Iterator<Item = &Entity<DraftCard>> {
+        self.draft_cards.iter().map(|(_, card)| card)
+    }
+
+    /// The editor and block holding a draft's card.
+    pub fn draft_block(&self, draft_id: &str) -> Option<(EditorSide, CustomBlockId)> {
+        self.blocks.drafts.get(draft_id).copied()
+    }
+
+    /// Drafts the diff no longer has a place for. They're kept, but not submitted.
+    pub fn stranded_drafts(&self) -> &[DraftComment] {
+        &self.stranded_drafts
+    }
+
+    /// Why the last comment couldn't be started, or what just happened.
+    pub fn notice(&self) -> Option<&SharedString> {
+        self.notice.as_ref()
+    }
+
+    pub fn thread_card(&self, thread_id: &str, cx: &App) -> Option<Entity<ThreadCard>> {
+        self.thread_cards
+            .iter()
+            .map(|(_, card)| card)
+            .chain(&self.unshown_thread_cards)
+            .find(|card| card.read(cx).thread().id == thread_id)
+            .cloned()
+    }
+
+    pub fn permissions(&self) -> &ReviewPermissions {
+        &self.permissions
+    }
+
+    fn focus_diff(&self, window: &mut Window, cx: &mut App) {
+        let editor = self.editor.read(cx).focused_editor().clone();
+        window.focus(&editor.focus_handle(cx), cx);
+    }
+
+    fn schedule_save(&mut self, cx: &mut Context<Self>) {
+        if self.writes.is_none() {
+            return;
+        }
+        self.save_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(SAVE_DELAY).await;
+            this.update(cx, |this, cx| {
+                this.save_task = None;
+                this.save_now(cx);
+            })
+            .ok();
+        }));
+    }
+
+    fn save_now(&self, cx: &mut App) {
+        if let Some(writes) = &self.writes {
+            let pending = self.pending_review(cx);
+            writes.backend.save_pending_review(&pending, cx);
+        }
+    }
+
+    fn add_comment(&mut self, _: &AddComment, window: &mut Window, cx: &mut Context<Self>) {
+        match self.comment_target(cx) {
+            Ok(target) => {
+                self.notice = None;
+                self.open_draft(target, window, cx);
+            }
+            Err(notice) => {
+                self.notice = Some(notice);
+                cx.notify();
+            }
+        }
+    }
+
+    /// Where a comment on the selected lines goes, or why there can't be one.
+    fn comment_target(&self, cx: &mut App) -> Result<CommentTarget, SharedString> {
+        if self.writes.is_none() {
+            return Err("This review is read-only.".into());
+        }
+        if !self.permissions.line_comments {
+            return Err("This pull request doesn't take line comments from you.".into());
+        }
+        let editor = self.editor.read(cx).focused_editor().clone();
+        let (start_row, end_row) = editor.update(cx, |editor, cx| {
+            let snapshot = editor.display_snapshot(cx);
+            let selection = editor.selections.newest::<Point>(&snapshot);
+            let mut end = selection.end;
+            // A selection of whole lines ends at the start of the next one.
+            if end.column == 0 && end.row > selection.start.row {
+                end.row -= 1;
+            }
+            (selection.start.row, end.row)
+        });
+        let snapshot = editor.read(cx).buffer().read(cx).snapshot(cx);
+        let row_info = |row: u32| snapshot.row_infos(MultiBufferRow(row)).next();
+        let Some((file, side, line)) =
+            row_info(end_row).and_then(|info| self.locate_row(&info, cx))
+        else {
+            return Err("Put the cursor on a line of the diff to comment on it.".into());
+        };
+        let shown = &self.files[file];
+        let position = match &shown.commentable {
+            None => match side {
+                DiffSide::Right => CommentPosition::Added { new_line: line },
+                DiffSide::Left => CommentPosition::Deleted { old_line: line },
+            },
+            Some(commentable) => commentable
+                .position(side, line)
+                .ok_or_else(|| not_commentable_reason(shown, commentable, side, line))?,
+        };
+        let start_line = row_info(start_row)
+            .and_then(|info| self.locate_row(&info, cx))
+            .filter(|(start_file, start_side, start_line)| {
+                *start_file == file
+                    && *start_side == side
+                    && *start_line < line
+                    && shown
+                        .commentable
+                        .as_ref()
+                        .is_none_or(|commentable| commentable.position(side, *start_line).is_some())
+            })
+            .map(|(_, _, start_line)| start_line);
+        Ok(CommentTarget {
+            file,
+            position,
+            start_line,
+        })
+    }
+
+    /// The file, side, and 1-based line a row of the diff shows.
+    fn locate_row(&self, info: &RowInfo, cx: &App) -> Option<(usize, DiffSide, u32)> {
+        let buffer_id = info.buffer_id?;
+        let line = info.buffer_row? + 1;
+        self.files.iter().enumerate().find_map(|(index, file)| {
+            if file.buffer.read(cx).remote_id() == buffer_id {
+                Some((index, DiffSide::Right, line))
+            } else if file.diff.read(cx).base_text_buffer().read(cx).remote_id() == buffer_id {
+                Some((index, DiffSide::Left, line))
+            } else {
+                None
+            }
+        })
+    }
+
+    fn open_draft(&mut self, target: CommentTarget, window: &mut Window, cx: &mut Context<Self>) {
+        // A comment already being written on that line gets the focus instead of a second one.
+        if let Some((_, card)) = self.draft_cards.iter().find(|(file, card)| {
+            let card = card.read(cx);
+            *file == target.file && card.is_editing() && card.draft(cx).position == target.position
+        }) {
+            card.clone().update(cx, |card, cx| card.focus(window, cx));
+            return;
+        }
+        let shown = &self.files[target.file];
+        let draft = DraftComment {
+            id: uuid::Uuid::new_v4().to_string(),
+            path: shown.path.clone(),
+            old_path: shown.old_path.clone(),
+            position: target.position,
+            start_line: target.start_line,
+            body: String::new(),
+            added: false,
+        };
+        let card = self.new_draft_card(draft, window, cx);
+        self.draft_cards.push((target.file, card.clone()));
+        self.place_draft_card(target.file, &card, cx);
+        // The composer goes below the line, so a line near the bottom would hide it.
+        let editor = self.editor.read(cx).focused_editor().clone();
+        editor.update(cx, |editor, cx| {
+            editor.request_autoscroll(Autoscroll::center(), cx)
+        });
+        card.update(cx, |card, cx| card.focus(window, cx));
+        cx.notify();
+    }
+
+    fn reload_threads(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(writes) = &self.writes else {
+            return;
+        };
+        let task = writes.backend.reload_threads(cx);
+        self.reload_task = Some(cx.spawn_in(window, async move |this, cx| match task.await {
+            Ok(threads) => {
+                this.update_in(cx, |this, window, cx| {
+                    this.reload_task = None;
+                    this.set_threads(threads, window, cx)
+                })
+                .ok();
+            }
+            Err(error) => {
+                log::error!("couldn't load the review threads again: {error:#}");
+                this.update(cx, |this, cx| {
+                    this.reload_task = None;
+                    this.notice = Some(format!("Couldn't refresh the threads: {error:#}").into());
+                    cx.notify();
+                })
+                .ok();
+            }
+        }));
+    }
+
+    /// Shows the threads as the forge now reports them. Cards are reused by thread id, so text
+    /// being written in them is kept.
+    fn set_threads(
+        &mut self,
+        threads: Vec<ReviewThread>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut existing = self
+            .thread_cards
+            .drain(..)
+            .map(|(_, card)| card)
+            .chain(self.unshown_thread_cards.drain(..))
+            .map(|card| (card.read(cx).thread().id.clone(), card))
+            .collect::<HashMap<_, _>>();
+        for thread in threads {
+            let thread = Arc::new(thread);
+            let file = self
+                .files
+                .iter()
+                .position(|file| file.has_path(&thread.path));
+            let card = match existing.remove(&thread.id) {
+                Some(card) => {
+                    card.update(cx, |card, cx| card.set_thread(thread, cx));
+                    card
+                }
+                None => {
+                    let location = file.is_none().then(|| thread_location(&thread));
+                    self.new_thread_card(thread, location, window, cx)
+                }
+            };
+            match file {
+                Some(file) => self.thread_cards.push((file, card)),
+                None => self.unshown_thread_cards.push(card),
+            }
+        }
+        self.sync_thread_blocks(cx);
+    }
+
+    /// Marks a file viewed, or not, on the forge. The tree shows the new mark right away and
+    /// goes back to the old one if the forge refuses.
+    pub fn toggle_viewed(&mut self, file: usize, cx: &mut Context<Self>) {
+        let Some(writes) = self.writes.clone() else {
+            return;
+        };
+        if !self.can_mark_viewed() || self.viewed_in_flight.contains_key(&file) {
+            return;
+        }
+        let Some(entry) = self.file_tree.files().get(file) else {
+            return;
+        };
+        let previous = entry.viewed;
+        let viewed = previous != FileViewedState::Viewed;
+        let path = entry.path.clone();
+        self.file_tree.set_viewed(
+            file,
+            if viewed {
+                FileViewedState::Viewed
+            } else {
+                FileViewedState::Unviewed
+            },
+        );
+        self.viewed_error = None;
+        let task = writes
+            .backend
+            .set_files_viewed(vec![(path.clone(), viewed)], cx);
+        let task = cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.viewed_in_flight.remove(&file);
+                if let Err(error) = result {
+                    log::error!("couldn't mark {path} viewed: {error:#}");
+                    this.file_tree.set_viewed(file, previous);
+                    this.viewed_error = Some(
+                        format!(
+                            "Couldn't mark {path} {}: {error:#}",
+                            if viewed { "viewed" } else { "not viewed" }
+                        )
+                        .into(),
+                    );
+                }
+                cx.notify();
+            })
+            .ok();
+        });
+        self.viewed_in_flight.insert(file, task);
+        cx.notify();
+    }
+
+    /// Whether the viewed checkboxes can be clicked.
+    pub fn can_mark_viewed(&self) -> bool {
+        self.writes.is_some()
+            && self.file_tree.tracks_viewed()
+            && self.permissions.mark_viewed
+            && self.permissions.blocked.is_none()
+    }
+
+    pub fn viewed_error(&self) -> Option<&SharedString> {
+        self.viewed_error.as_ref()
+    }
+
+    pub fn is_marking_viewed(&self, file: usize) -> bool {
+        self.viewed_in_flight.contains_key(&file)
+    }
+
+    fn key_context(&self, window: &Window, cx: &App) -> KeyContext {
+        let mut context = KeyContext::new_with_defaults();
+        context.add("ReviewView");
+        // The composers live in the diff's editor, so typing in one must not count as typing
+        // in the diff.
+        let editor = self.editor.read(cx);
+        let diff_focused = editor.rhs_editor().focus_handle(cx).is_focused(window)
+            || editor
+                .lhs_editor()
+                .is_some_and(|lhs| lhs.focus_handle(cx).is_focused(window));
+        if !diff_focused {
+            context.add("editing_comment");
+        }
+        context
+    }
+}
+
+/// Why a line can't take a comment, for a line the forge's hunks don't include.
+fn not_commentable_reason(
+    shown: &ShownFile,
+    commentable: &CommentableLines,
+    side: DiffSide,
+    line: u32,
+) -> SharedString {
+    let location = match side {
+        DiffSide::Right => format!("{}:{line}", shown.path),
+        DiffSide::Left => format!("{}:{line} (base)", shown.path),
+    };
+    match commentable.distance_to_nearest(side, line) {
+        _ if commentable.is_empty() => format!(
+            "{} has no diff hunks on the forge, so it can't take line comments, and T3 can't \
+             post comments on whole files.",
+            shown.path
+        )
+        .into(),
+        Some(distance) => format!(
+            "The forge only takes comments on lines in the diff's hunks. {location} is {distance} \
+             {} from the nearest one.",
+            if distance == 1 { "line" } else { "lines" }
+        )
+        .into(),
+        None => format!(
+            "The forge only takes comments on lines in the diff's hunks, and {location} isn't in one."
+        )
+        .into(),
+    }
+}
+
 fn thread_location(thread: &ReviewThread) -> SharedString {
     match (thread.line, thread.side) {
         (Some(line), DiffSide::Right) => format!("{}:{line}", thread.path).into(),
@@ -752,6 +1505,7 @@ async fn load_entry(
         change,
         buffer,
         diff,
+        commentable: contents.commentable,
     })
 }
 
@@ -975,26 +1729,70 @@ impl Item for ReviewView {
 }
 
 impl Render for ReviewView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let unshown_threads = self.render_unshown_threads(cx);
+        let actions = self.render_review_actions(cx);
+        let submit_form = self.render_submit_form(cx);
+        let extra = (unshown_threads.is_some() || submit_form.is_some()).then(|| {
+            v_flex()
+                .gap_2()
+                .pt_1()
+                .children(unshown_threads)
+                .children(submit_form)
+                .into_any_element()
+        });
         let colors = cx.theme().colors();
+        let notice = self.notice.clone().map(|notice| {
+            h_flex()
+                .flex_none()
+                .px_3()
+                .py_1()
+                .gap_1p5()
+                .bg(colors.surface_background)
+                .border_b(tokens::BORDER_WIDTH)
+                .border_color(colors.border_variant)
+                .child(
+                    Icon::new(IconName::Info)
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Label::new(notice).size(LabelSize::Small)),
+                )
+                .child(
+                    IconButton::new("dismiss-review-notice", IconName::Close)
+                        .icon_size(IconSize::XSmall)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.notice = None;
+                            cx.notify();
+                        })),
+                )
+        });
         v_flex()
+            .key_context(self.key_context(window, cx))
+            .on_action(cx.listener(Self::add_comment))
+            .on_action(cx.listener(Self::open_submit_form))
             .size_full()
             .map(|this| match &self.header {
-                Some(header) => this.child(header::render_header(header, unshown_threads, cx)),
-                None => this.when_some(unshown_threads, |this, unshown_threads| {
-                    this.child(
-                        div()
-                            .flex_none()
-                            .px_3()
-                            .py_2()
-                            .border_b(tokens::BORDER_WIDTH)
-                            .border_color(colors.border)
-                            .child(unshown_threads),
-                    )
-                }),
+                Some(header) => this.child(header::render_header(header, actions, extra, cx)),
+                None if actions.is_some() || extra.is_some() => this.child(
+                    v_flex()
+                        .flex_none()
+                        .px_3()
+                        .py_2()
+                        .gap_1()
+                        .border_b(tokens::BORDER_WIDTH)
+                        .border_color(colors.border)
+                        .children(actions.map(|actions| h_flex().justify_end().child(actions)))
+                        .children(extra),
+                ),
+                None => this,
             })
             .child(self.toolbar.clone())
+            .children(notice)
             .child(div().flex_1().min_h_0().child(self.editor.clone()))
     }
 }
@@ -1006,6 +1804,7 @@ mod tests {
     use editor::display_map::Block;
     use gpui::{TestAppContext, VisualTestContext};
     use language::{markdown_lang, rust_lang};
+    use parking_lot::Mutex;
     use project::FakeFs;
     use settings::{DiffViewStyle, SettingsStore};
     use workspace::MultiWorkspace;
@@ -1022,12 +1821,14 @@ mod tests {
                 old_path: None,
                 base_text: Some(RUST_BASE.to_string()),
                 head_text: Some(RUST_HEAD.to_string()),
+                commentable: None,
             },
             ReviewFileContents {
                 path: rel_path("docs/README.md"),
                 old_path: None,
                 base_text: Some(MARKDOWN_BASE.to_string()),
                 head_text: Some(MARKDOWN_HEAD.to_string()),
+                commentable: None,
             },
         ]
     }
@@ -1046,12 +1847,14 @@ mod tests {
             side,
             is_resolved: false,
             is_outdated: line.is_none(),
+            can_resolve: true,
             comments: vec![ThreadComment {
                 id: format!("{id}-comment"),
                 author: Some("octocat".to_string()),
                 body: format!("A comment on thread {id}."),
                 created_at: None,
                 edited: false,
+                can_edit: false,
             }],
             comment_count: 1,
         }
@@ -1077,6 +1880,7 @@ mod tests {
                 });
             });
             theme_settings::init(theme::LoadThemes::JustBase, cx);
+            cx.bind_keys(key_bindings());
         });
 
         let fs = FakeFs::new(cx.executor());
@@ -1581,5 +2385,677 @@ mod tests {
             !scrolled,
             "files the review can't show have nothing to scroll to"
         );
+    }
+
+    /// Records what the review asks of the app, and answers every write with `fail_with` if
+    /// set, or success.
+    #[derive(Default)]
+    struct FakeBackend {
+        calls: Mutex<Vec<Call>>,
+        saved: Mutex<Vec<PendingReview>>,
+        fail_with: Mutex<Option<String>>,
+        threads: Mutex<Vec<ReviewThread>>,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum Call {
+        Reply(String, String),
+        Resolve(String, bool),
+        Update(String, String),
+        Viewed(Vec<(String, bool)>),
+        Submit(ReviewSubmission),
+        Comment(String),
+        Reload,
+    }
+
+    impl FakeBackend {
+        fn write(&self, call: Call) -> Task<Result<()>> {
+            self.calls.lock().push(call);
+            Task::ready(match self.fail_with.lock().clone() {
+                Some(error) => Err(anyhow::anyhow!(error)),
+                None => Ok(()),
+            })
+        }
+
+        fn writes(&self) -> Vec<Call> {
+            self.calls
+                .lock()
+                .iter()
+                .filter(|call| **call != Call::Reload)
+                .cloned()
+                .collect()
+        }
+
+        fn last_saved(&self) -> PendingReview {
+            self.saved
+                .lock()
+                .last()
+                .cloned()
+                .expect("the pending review should have been saved")
+        }
+    }
+
+    impl ReviewBackend for FakeBackend {
+        fn save_pending_review(&self, review: &PendingReview, _: &mut App) {
+            self.saved.lock().push(review.clone());
+        }
+
+        fn reply_to_thread(
+            &self,
+            thread_id: String,
+            body: String,
+            _: &mut App,
+        ) -> Task<Result<()>> {
+            self.write(Call::Reply(thread_id, body))
+        }
+
+        fn set_thread_resolution(
+            &self,
+            thread_id: String,
+            resolved: bool,
+            _: &mut App,
+        ) -> Task<Result<()>> {
+            self.write(Call::Resolve(thread_id, resolved))
+        }
+
+        fn update_comment(
+            &self,
+            comment_id: String,
+            body: String,
+            _: &mut App,
+        ) -> Task<Result<()>> {
+            self.write(Call::Update(comment_id, body))
+        }
+
+        fn set_files_viewed(&self, files: Vec<(String, bool)>, _: &mut App) -> Task<Result<()>> {
+            self.write(Call::Viewed(files))
+        }
+
+        fn submit_review(&self, submission: ReviewSubmission, _: &mut App) -> Task<Result<()>> {
+            self.write(Call::Submit(submission))
+        }
+
+        fn post_comment(&self, body: String, _: &mut App) -> Task<Result<()>> {
+            self.write(Call::Comment(body))
+        }
+
+        fn reload_threads(&self, _: &mut App) -> Task<Result<Vec<ReviewThread>>> {
+            self.calls.lock().push(Call::Reload);
+            Task::ready(Ok(self.threads.lock().clone()))
+        }
+    }
+
+    /// The forge's hunks for `review_files`: all of src/main.rs, and README.md's added lines
+    /// without context (as with `git diff -U0`).
+    fn commentable_review_files() -> Vec<ReviewFileContents> {
+        use HunkLine::{Added, Context, Deleted};
+        let mut files = review_files();
+        files[0].commentable = Some(CommentableLines::from_hunks([(
+            1,
+            1,
+            vec![Context, Deleted, Added, Context],
+        )]));
+        files[1].commentable = Some(CommentableLines::from_hunks([(3, 4, vec![Added, Added])]));
+        files
+    }
+
+    fn writable_contents(backend: &Arc<FakeBackend>) -> ReviewContents {
+        ReviewContents {
+            files: commentable_review_files(),
+            backend: Some(backend.clone()),
+            permissions: ReviewPermissions::all(),
+            ..ReviewContents::default()
+        }
+    }
+
+    /// Puts the cursor (or a selection) on the diff lines with these texts, in the right-hand
+    /// editor, and focuses it.
+    fn select_lines(
+        review_view: &Entity<ReviewView>,
+        first: &str,
+        last: &str,
+        cx: &mut VisualTestContext,
+    ) {
+        let editor = rhs_editor(review_view, cx);
+        editor.update_in(cx, |editor, window, cx| {
+            let text = editor.buffer().read(cx).snapshot(cx).text();
+            let row = |needle: &str| {
+                text.lines()
+                    .position(|line| line == needle)
+                    .unwrap_or_else(|| panic!("no line {needle:?} in the diff:\n{text}"))
+                    as u32
+            };
+            let (start, end) = (row(first), row(last));
+            let end = Point::new(
+                end,
+                text.lines().nth(end as usize).unwrap_or("").len() as u32,
+            );
+            editor.change_selections(SelectionEffects::no_scroll(), window, cx, |selections| {
+                selections.select_ranges([Point::new(start, 0)..end])
+            });
+            window.focus(&editor.focus_handle(cx), cx);
+        });
+        cx.run_until_parked();
+    }
+
+    fn drafts(review_view: &Entity<ReviewView>, cx: &mut VisualTestContext) -> Vec<DraftComment> {
+        review_view.read_with(cx, |review_view, cx| {
+            review_view
+                .draft_cards()
+                .map(|card| card.read(cx).draft(cx))
+                .collect()
+        })
+    }
+
+    fn only_draft_card(
+        review_view: &Entity<ReviewView>,
+        cx: &mut VisualTestContext,
+    ) -> Entity<DraftCard> {
+        review_view.read_with(cx, |review_view, _| {
+            let cards = review_view.draft_cards().cloned().collect::<Vec<_>>();
+            assert_eq!(cards.len(), 1, "expected one draft card");
+            cards[0].clone()
+        })
+    }
+
+    #[gpui::test]
+    async fn test_composing_a_line_comment(cx: &mut TestAppContext) {
+        let backend = Arc::new(FakeBackend::default());
+        let (review_view, _, cx) =
+            build_review_view(writable_contents(&backend), DiffViewStyle::Unified, cx).await;
+
+        // `c` on an added line opens a composer below it, with the focus in it.
+        select_lines(
+            &review_view,
+            "    println!(\"hello, world\");",
+            "    println!(\"hello, world\");",
+            cx,
+        );
+        cx.simulate_keystrokes("c");
+        let card = only_draft_card(&review_view, cx);
+        let composer = card.read_with(cx, |card, _| {
+            assert!(card.is_editing());
+            card.composer_editor().cloned().expect("a composer")
+        });
+        cx.update(|window, cx| assert!(composer.focus_handle(cx).is_focused(window)));
+        let draft_id = drafts(&review_view, cx)[0].id.clone();
+        let rhs_editor = rhs_editor(&review_view, cx);
+        let (side, block) = review_view
+            .read_with(cx, |review_view, _| review_view.draft_block(&draft_id))
+            .expect("the composer should be in the diff");
+        assert_eq!(side, EditorSide::Right);
+        assert_eq!(
+            line_next_to_block(&rhs_editor, block, true, cx),
+            "    println!(\"hello, world\");"
+        );
+
+        // Typing `c` in the composer types it rather than starting another comment.
+        cx.simulate_input("Say ");
+        cx.simulate_keystrokes("c");
+        cx.simulate_input("hello");
+        assert_eq!(drafts(&review_view, cx).len(), 1);
+        cx.executor().advance_clock(SAVE_DELAY * 2);
+        cx.run_until_parked();
+        let saved = backend.last_saved();
+        assert_eq!(saved.comments.len(), 1);
+        assert_eq!(saved.comments[0].body, "Say chello");
+        assert!(!saved.comments[0].added, "not added until confirmed");
+
+        // Confirming adds it to the pending review and gives the diff the focus back.
+        cx.simulate_keystrokes("ctrl-enter");
+        let saved = backend.last_saved();
+        assert_eq!(
+            saved.comments,
+            vec![DraftComment {
+                id: draft_id,
+                path: "src/main.rs".to_string(),
+                old_path: None,
+                position: CommentPosition::Added { new_line: 2 },
+                start_line: None,
+                body: "Say chello".to_string(),
+                added: true,
+            }]
+        );
+        cx.update(|window, cx| assert!(rhs_editor.focus_handle(cx).is_focused(window)));
+        review_view.read_with(cx, |review_view, cx| {
+            assert_eq!(review_view.added_draft_count(cx), 1);
+        });
+        assert!(backend.writes().is_empty(), "nothing goes to the forge yet");
+
+        // A comment on a deleted line goes on the base side; escape abandons an empty one.
+        select_lines(
+            &review_view,
+            "    println!(\"hello\");",
+            "    println!(\"hello\");",
+            cx,
+        );
+        cx.simulate_keystrokes("c");
+        let new = drafts(&review_view, cx).pop().expect("a second draft");
+        assert_eq!(new.position, CommentPosition::Deleted { old_line: 2 });
+        cx.simulate_keystrokes("escape");
+        assert_eq!(drafts(&review_view, cx).len(), 1);
+
+        // A selection of several lines is anchored on its last line.
+        select_lines(&review_view, "fn main() {", "}", cx);
+        cx.simulate_keystrokes("c");
+        let ranged = drafts(&review_view, cx).pop().expect("a ranged draft");
+        assert_eq!(
+            ranged.position,
+            CommentPosition::Context {
+                old_line: 3,
+                new_line: 3,
+                side: DiffSide::Right
+            }
+        );
+        assert_eq!(ranged.start_line, Some(1));
+        assert_eq!(ranged.line_label(), "Lines 1–3");
+    }
+
+    #[gpui::test]
+    async fn test_lines_outside_the_forges_hunks_explain_why(cx: &mut TestAppContext) {
+        let backend = Arc::new(FakeBackend::default());
+        let (review_view, _, cx) =
+            build_review_view(writable_contents(&backend), DiffViewStyle::Unified, cx).await;
+
+        select_lines(&review_view, "Intro.", "Intro.", cx);
+        cx.simulate_keystrokes("c");
+        assert!(drafts(&review_view, cx).is_empty());
+        let notice = review_view
+            .read_with(cx, |review_view, _| review_view.notice().cloned())
+            .expect("a notice should say why");
+        assert_eq!(
+            notice,
+            "The forge only takes comments on lines in the diff's hunks. docs/README.md:3 is 1 \
+             line from the nearest one."
+        );
+
+        // Moving on clears it, and a line in the hunk takes a comment.
+        select_lines(&review_view, "A new paragraph.", "A new paragraph.", cx);
+        assert_eq!(
+            review_view.read_with(cx, |review_view, _| review_view.notice().cloned()),
+            None
+        );
+        cx.simulate_keystrokes("c");
+        assert_eq!(
+            drafts(&review_view, cx)[0].position,
+            CommentPosition::Added { new_line: 5 }
+        );
+
+        // Without a backend, the review is read-only.
+        let contents = ReviewContents {
+            files: commentable_review_files(),
+            ..ReviewContents::default()
+        };
+        let (read_only, _, cx) = build_review_view(contents, DiffViewStyle::Unified, cx).await;
+        select_lines(&read_only, "A new paragraph.", "A new paragraph.", cx);
+        read_only.update_in(cx, |review_view, window, cx| {
+            review_view.add_comment(&AddComment, window, cx)
+        });
+        assert_eq!(
+            read_only.read_with(cx, |review_view, _| review_view.notice().cloned()),
+            Some("This review is read-only.".into())
+        );
+    }
+
+    #[gpui::test]
+    async fn test_drafts_and_unsent_text_are_restored(cx: &mut TestAppContext) {
+        let backend = Arc::new(FakeBackend::default());
+        let draft = |id: &str, path: &str, position, body: &str, added| DraftComment {
+            id: id.to_string(),
+            path: path.to_string(),
+            old_path: None,
+            position,
+            start_line: None,
+            body: body.to_string(),
+            added,
+        };
+        let pending = PendingReview {
+            comments: vec![
+                draft(
+                    "added",
+                    "docs/README.md",
+                    CommentPosition::Added { new_line: 4 },
+                    "Blank line?",
+                    true,
+                ),
+                draft(
+                    "unfinished",
+                    "src/main.rs",
+                    CommentPosition::Added { new_line: 2 },
+                    "Half a tho",
+                    false,
+                ),
+                // The pull request changed: line 1 isn't in a hunk any more.
+                draft(
+                    "stranded",
+                    "docs/README.md",
+                    CommentPosition::Added { new_line: 1 },
+                    "Old",
+                    true,
+                ),
+                draft(
+                    "gone",
+                    "deleted/file.rs",
+                    CommentPosition::Added { new_line: 1 },
+                    "Gone",
+                    true,
+                ),
+            ],
+            summary: "Mostly good.".to_string(),
+            verdict: Some(ReviewVerdict::RequestChanges),
+            replies: [("on-head-line".to_string(), "I'd keep it.".to_string())]
+                .into_iter()
+                .collect(),
+            edits: Default::default(),
+        };
+        let contents = ReviewContents {
+            threads: vec![thread(
+                "on-head-line",
+                "src/main.rs",
+                Some(2),
+                DiffSide::Right,
+            )],
+            pending: pending.clone(),
+            ..writable_contents(&backend)
+        };
+        let (review_view, _, cx) = build_review_view(contents, DiffViewStyle::Unified, cx).await;
+        let rhs_editor = rhs_editor(&review_view, cx);
+
+        let restored = drafts(&review_view, cx);
+        assert_eq!(
+            restored
+                .iter()
+                .map(|draft| draft.id.as_str())
+                .collect::<Vec<_>>(),
+            ["added", "unfinished"]
+        );
+        review_view.read_with(cx, |review_view, cx| {
+            assert_eq!(review_view.added_draft_count(cx), 1);
+            assert_eq!(
+                review_view
+                    .stranded_drafts()
+                    .iter()
+                    .map(|draft| draft.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["stranded", "gone"]
+            );
+            let card = review_view
+                .thread_card("on-head-line", cx)
+                .expect("the thread's card");
+            assert_eq!(
+                card.read(cx).unsent_reply(cx).as_deref(),
+                Some("I'd keep it.")
+            );
+            assert_eq!(
+                review_view.summary_editor().read(cx).text(cx),
+                "Mostly good."
+            );
+            // Nothing was lost on the way in.
+            assert_eq!(review_view.pending_review(cx), pending);
+        });
+        let (_, block) = review_view
+            .read_with(cx, |review_view, _| review_view.draft_block("added"))
+            .expect("the added draft should be in the diff");
+        assert_eq!(line_next_to_block(&rhs_editor, block, true, cx), "");
+        let unfinished = review_view.read_with(cx, |review_view, cx| {
+            review_view
+                .draft_cards()
+                .find(|card| card.read(cx).draft(cx).id == "unfinished")
+                .cloned()
+                .expect("the unfinished draft's card")
+        });
+        assert!(unfinished.read_with(cx, |card, _| card.is_editing()));
+    }
+
+    #[gpui::test]
+    async fn test_submitting_the_pending_review(cx: &mut TestAppContext) {
+        let backend = Arc::new(FakeBackend::default());
+        let added = DraftComment {
+            id: "d1".to_string(),
+            path: "docs/README.md".to_string(),
+            old_path: None,
+            position: CommentPosition::Added { new_line: 5 },
+            start_line: None,
+            body: "Nice paragraph.".to_string(),
+            added: true,
+        };
+        let unfinished = DraftComment {
+            id: "d2".to_string(),
+            body: "Not done".to_string(),
+            added: false,
+            position: CommentPosition::Added { new_line: 4 },
+            ..added.clone()
+        };
+        let contents = ReviewContents {
+            pending: PendingReview {
+                comments: vec![added.clone(), unfinished.clone()],
+                ..PendingReview::default()
+            },
+            ..writable_contents(&backend)
+        };
+        let (review_view, _, cx) = build_review_view(contents, DiffViewStyle::Unified, cx).await;
+
+        review_view.update_in(cx, |review_view, window, cx| {
+            review_view.open_submit_form(&SubmitReview, window, cx);
+            assert!(review_view.is_submit_form_open());
+            review_view.set_verdict(ReviewVerdict::RequestChanges, cx);
+        });
+        cx.simulate_input("Please fix the typo.");
+
+        // The forge refuses: the error shows, and nothing written is lost.
+        *backend.fail_with.lock() =
+            Some("GitHub: User can only have one pending review per pull request".to_string());
+        cx.simulate_keystrokes("ctrl-enter");
+        let submission = ReviewSubmission {
+            verdict: ReviewVerdict::RequestChanges,
+            body: "Please fix the typo.".to_string(),
+            comments: vec![added.clone()],
+        };
+        assert_eq!(backend.writes(), vec![Call::Submit(submission.clone())]);
+        review_view.read_with(cx, |review_view, cx| {
+            assert_eq!(
+                review_view.submit_error().map(|error| error.to_string()),
+                Some("GitHub: User can only have one pending review per pull request".to_string())
+            );
+            assert!(review_view.is_submit_form_open());
+            assert_eq!(review_view.added_draft_count(cx), 1);
+            assert_eq!(
+                review_view.summary_editor().read(cx).text(cx),
+                "Please fix the typo."
+            );
+        });
+
+        // It goes through: the submitted comment is gone, the unfinished one stays.
+        *backend.fail_with.lock() = None;
+        review_view.update_in(cx, |review_view, window, cx| review_view.submit(window, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            backend.writes(),
+            vec![Call::Submit(submission.clone()), Call::Submit(submission)]
+        );
+        assert!(backend.calls.lock().contains(&Call::Reload));
+        review_view.read_with(cx, |review_view, cx| {
+            assert!(!review_view.is_submit_form_open());
+            assert_eq!(review_view.submit_error(), None);
+            assert_eq!(
+                review_view.notice().map(|notice| notice.to_string()),
+                Some("Your review was submitted.".to_string())
+            );
+            assert_eq!(review_view.summary_editor().read(cx).text(cx), "");
+        });
+        let saved = backend.last_saved();
+        assert_eq!(saved.comments, vec![unfinished]);
+        assert_eq!(saved.summary, "");
+
+        // A comment on the conversation instead of a review.
+        review_view.update_in(cx, |review_view, window, cx| {
+            review_view.open_submit_form(&SubmitReview, window, cx);
+            review_view.set_submit_mode(SubmitMode::Comment, cx);
+        });
+        cx.simulate_input("Thanks!");
+        cx.simulate_keystrokes("ctrl-enter");
+        assert_eq!(
+            backend.writes().last(),
+            Some(&Call::Comment("Thanks!".to_string()))
+        );
+    }
+
+    #[gpui::test]
+    async fn test_replying_resolving_and_editing_threads(cx: &mut TestAppContext) {
+        let backend = Arc::new(FakeBackend::default());
+        let mut own = thread("mine", "src/main.rs", Some(2), DiffSide::Right);
+        own.comments[0].can_edit = true;
+        let contents = ReviewContents {
+            threads: vec![
+                thread("on-head-line", "src/main.rs", Some(2), DiffSide::Right),
+                own.clone(),
+            ],
+            ..writable_contents(&backend)
+        };
+        let (review_view, _, cx) = build_review_view(contents, DiffViewStyle::Unified, cx).await;
+        let card = review_view
+            .read_with(cx, |review_view, cx| {
+                review_view.thread_card("on-head-line", cx)
+            })
+            .expect("the thread's card");
+
+        // A failed reply keeps its text and shows why.
+        card.update_in(cx, |card, window, cx| card.start_reply(window, cx));
+        cx.simulate_input("Fixed in the next push.");
+        *backend.fail_with.lock() = Some("Resource not accessible by integration".into());
+        cx.simulate_keystrokes("ctrl-enter");
+        assert_eq!(
+            backend.writes(),
+            vec![Call::Reply(
+                "on-head-line".to_string(),
+                "Fixed in the next push.".to_string()
+            )]
+        );
+        card.read_with(cx, |card, cx| {
+            assert_eq!(
+                card.error().map(|error| error.to_string()),
+                Some("Resource not accessible by integration".to_string())
+            );
+            assert_eq!(
+                card.unsent_reply(cx).as_deref(),
+                Some("Fixed in the next push.")
+            );
+        });
+        cx.executor().advance_clock(SAVE_DELAY * 2);
+        cx.run_until_parked();
+        assert_eq!(
+            backend
+                .last_saved()
+                .replies
+                .get("on-head-line")
+                .map(String::as_str),
+            Some("Fixed in the next push.")
+        );
+
+        // Once it goes through, the threads are loaded again and the card shows the reply.
+        *backend.fail_with.lock() = None;
+        let mut replied = thread("on-head-line", "src/main.rs", Some(2), DiffSide::Right);
+        replied.comments.push(ThreadComment {
+            id: "reply".to_string(),
+            author: Some("me".to_string()),
+            body: "Fixed in the next push.".to_string(),
+            created_at: None,
+            edited: false,
+            can_edit: true,
+        });
+        replied.comment_count = 2;
+        *backend.threads.lock() = vec![replied, own.clone()];
+        card.update_in(cx, |card, window, cx| card.send_reply(window, cx));
+        cx.run_until_parked();
+        assert!(backend.calls.lock().contains(&Call::Reload));
+        card.read_with(cx, |card, cx| {
+            assert_eq!(card.unsent_reply(cx), None);
+            assert_eq!(card.error(), None);
+            assert_eq!(card.thread().comments.len(), 2);
+        });
+        assert!(backend.last_saved().replies.is_empty());
+
+        // Resolving.
+        card.update(cx, |card, cx| card.set_resolved(true, cx));
+        cx.run_until_parked();
+        assert_eq!(
+            backend.writes().last(),
+            Some(&Call::Resolve("on-head-line".to_string(), true))
+        );
+
+        // Editing one's own comment.
+        let own_card = review_view
+            .read_with(cx, |review_view, cx| review_view.thread_card("mine", cx))
+            .expect("the card of the viewer's thread");
+        own_card.update_in(cx, |card, window, cx| card.start_edit(0, window, cx));
+        let editor = own_card
+            .read_with(cx, |card, _| card.edit_editor().cloned())
+            .expect("an edit composer");
+        editor.update_in(cx, |editor, window, cx| {
+            editor.set_text("Reworded.", window, cx)
+        });
+        cx.simulate_keystrokes("ctrl-enter");
+        assert_eq!(
+            backend.writes().last(),
+            Some(&Call::Update(
+                "mine-comment".to_string(),
+                "Reworded.".to_string()
+            ))
+        );
+        own_card.read_with(cx, |card, _| assert!(card.edit_editor().is_none()));
+    }
+
+    #[gpui::test]
+    async fn test_marking_files_viewed(cx: &mut TestAppContext) {
+        let backend = Arc::new(FakeBackend::default());
+        let contents = ReviewContents {
+            viewed: Some(Default::default()),
+            ..writable_contents(&backend)
+        };
+        let (review_view, _, cx) = build_review_view(contents, DiffViewStyle::Unified, cx).await;
+        let main_rs = review_view.read_with(cx, |review_view, _| {
+            review_view
+                .file_tree()
+                .files()
+                .iter()
+                .position(|file| file.path == "src/main.rs")
+                .expect("src/main.rs")
+        });
+        let viewed = |cx: &mut VisualTestContext| {
+            review_view.read_with(cx, |review_view, _| {
+                review_view.file_tree().files()[main_rs].viewed
+            })
+        };
+        assert!(review_view.read_with(cx, |review_view, _| review_view.can_mark_viewed()));
+
+        review_view.update(cx, |review_view, cx| review_view.toggle_viewed(main_rs, cx));
+        cx.run_until_parked();
+        assert_eq!(viewed(cx), FileViewedState::Viewed);
+        assert_eq!(
+            backend.writes(),
+            vec![Call::Viewed(vec![("src/main.rs".to_string(), true)])]
+        );
+
+        // A refusal puts the checkbox back and says why.
+        *backend.fail_with.lock() = Some("rate limited".into());
+        review_view.update(cx, |review_view, cx| review_view.toggle_viewed(main_rs, cx));
+        cx.run_until_parked();
+        assert_eq!(viewed(cx), FileViewedState::Viewed);
+        assert_eq!(
+            review_view.read_with(cx, |review_view, _| review_view.viewed_error().cloned()),
+            Some("Couldn't mark src/main.rs not viewed: rate limited".into())
+        );
+
+        // Without the forge's permission, the checkboxes are display only.
+        let contents = ReviewContents {
+            viewed: Some(Default::default()),
+            permissions: ReviewPermissions {
+                blocked: Some("Pair again".into()),
+                ..ReviewPermissions::all()
+            },
+            ..writable_contents(&backend)
+        };
+        let (blocked, _, cx) = build_review_view(contents, DiffViewStyle::Unified, cx).await;
+        assert!(!blocked.read_with(cx, |review_view, _| review_view.can_mark_viewed()));
     }
 }

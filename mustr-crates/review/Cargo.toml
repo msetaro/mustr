@@ -4,7 +4,7 @@ version = "0.1.0"
 edition.workspace = true
 publish = false
 license = "GPL-3.0-or-later"
-description = "mustr's code review view: diffs built from in-memory base and head texts, review threads, and the file tree"
+description = "mustr's code review view: diffs built from in-memory base and head texts, review threads, comments and the pending review, and the file tree"
 
 [lints]
 workspace = true
@@ -20,22 +20,29 @@ collections.workspace = true
 editor.workspace = true
 gpui.workspace = true
 language.workspace = true
+log.workspace = true
 markdown.workspace = true
 multi_buffer.workspace = true
 mustr_ui = { path = "../mustr_ui" }
 project.workspace = true
+pulldown-cmark.workspace = true
+serde.workspace = true
 settings.workspace = true
 time.workspace = true
 time_format.workspace = true
 ui.workspace = true
 util.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 workspace.workspace = true
 
 [dev-dependencies]
 editor = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 language = { workspace = true, features = ["test-support"] }
+parking_lot.workspace = true
+pretty_assertions.workspace = true
 project = { workspace = true, features = ["test-support"] }
+serde_json.workspace = true
 settings = { workspace = true, features = ["test-support"] }
 theme.workspace = true
 theme_settings.workspace = true
