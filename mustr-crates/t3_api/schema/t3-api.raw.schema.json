@@ -2233,14 +2233,7 @@
         "permissions": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/AuthEnvironmentScope"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/AuthEnvironmentScope"
           }
         },
         "sessionMethod": {
@@ -2313,14 +2306,7 @@
         "permissions": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/AuthEnvironmentScope"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/AuthEnvironmentScope"
           }
         },
         "method": {
@@ -2964,14 +2950,7 @@
         "permissions": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/AuthEnvironmentScope"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/AuthEnvironmentScope"
           }
         },
         "subject": {
@@ -3050,14 +3029,7 @@
         "permissions": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/AuthEnvironmentScope"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/AuthEnvironmentScope"
           }
         },
         "sessionMethod": {
@@ -7385,7 +7357,9 @@
         "serverSelfUpdate": {
           "$ref": "#/definitions/ServerSelfUpdateCapability"
         },
-        "serverInstallation": {},
+        "serverInstallation": {
+          "$ref": "#/definitions/ServerInstallation"
+        },
         "serverSelfUpdateProgress": {
           "type": "boolean"
         },
@@ -7458,7 +7432,9 @@
         "arch": {
           "$ref": "#/definitions/ExecutionEnvironmentPlatformArch"
         },
-        "machine": {}
+        "machine": {
+          "$ref": "#/definitions/EnvironmentMachineKind"
+        }
       },
       "required": [
         "os",
@@ -8308,7 +8284,9 @@
             }
           ]
         },
-        "reason": {},
+        "reason": {
+          "$ref": "#/definitions/GitCommandFailureReason"
+        },
         "detail": {
           "type": "string"
         },
@@ -8329,6 +8307,20 @@
         "detail"
       ],
       "additionalProperties": true
+    },
+    "GitCommandFailureReason": {
+      "type": "string",
+      "enum": [
+        "authentication_failed",
+        "branch_already_exists",
+        "branch_checked_out_in_worktree",
+        "host_key_unverified",
+        "not_a_repository",
+        "path_already_exists",
+        "ref_not_found",
+        "remote_unreachable",
+        "tag_would_be_clobbered"
+      ]
     },
     "GitManagerError": {
       "type": "object",
@@ -47259,7 +47251,9 @@
         "newWorktreesStartFromOrigin": {
           "type": "boolean"
         },
-        "worktreeSubmodules": {},
+        "worktreeSubmodules": {
+          "$ref": "#/definitions/WorktreeSubmodules"
+        },
         "defaultAutoPull": {
           "type": "boolean"
         },
@@ -47780,6 +47774,140 @@
         }
       ]
     },
+    "ProviderAuthInteraction": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "browser"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "requiresConsent": {
+              "type": "boolean"
+            },
+            "acceptsCallback": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "url",
+            "requiresConsent"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "deviceCode"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "userCode": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "url",
+            "userCode"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "terminal"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "output": {
+              "type": "string",
+              "maxLength": 16384
+            },
+            "outputOffset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "output"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "credentials"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "fields": {
+              "type": "array",
+              "maxItems": 16,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "secret": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "label",
+                  "secret"
+                ],
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "fields"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
     "ProviderAuthLogoutRpcError": {
       "anyOf": [
         {
@@ -48017,6 +48145,23 @@
         }
       ]
     },
+    "ProviderAuthStartSuccessCredentialOwnerValue": {
+      "type": "string",
+      "enum": [
+        "provider",
+        "t3"
+      ]
+    },
+    "ProviderAuthStartSuccessInteractionValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ProviderAuthInteraction"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "ProviderAuthState": {
       "type": "object",
       "properties": {
@@ -48078,18 +48223,15 @@
         "methods": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ProviderAuthMethod"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ProviderAuthMethod"
           }
         },
-        "interaction": {},
-        "credentialOwner": {}
+        "interaction": {
+          "$ref": "#/definitions/ProviderAuthStartSuccessInteractionValue"
+        },
+        "credentialOwner": {
+          "$ref": "#/definitions/ProviderAuthStartSuccessCredentialOwnerValue"
+        }
       },
       "required": [
         "instanceId",
@@ -49068,27 +49210,13 @@
         "actions": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/PullRequestAction"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/PullRequestAction"
           }
         },
         "mergeMethods": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/PullRequestMergeMethod"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/PullRequestMergeMethod"
           }
         },
         "deleteBranch": {
@@ -49106,14 +49234,7 @@
             {
               "type": "array",
               "items": {
-                "anyOf": [
-                  {
-                    "$ref": "#/definitions/PullRequestUpdateMethod"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/PullRequestUpdateMethod"
               }
             },
             {
@@ -51020,14 +51141,7 @@
             {
               "type": "array",
               "items": {
-                "anyOf": [
-                  {
-                    "$ref": "#/definitions/PullRequestAction"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/PullRequestAction"
               }
             },
             {
@@ -51259,14 +51373,7 @@
         "verdicts": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/PullRequestReviewVerdict"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/PullRequestReviewVerdict"
           }
         }
       },
@@ -53737,14 +53844,7 @@
         "actions": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/PullRequestAction"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/PullRequestAction"
           }
         },
         "comment": {
@@ -53756,14 +53856,7 @@
         "verdicts": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/PullRequestReviewVerdict"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/PullRequestReviewVerdict"
           }
         },
         "requestReviewers": {
@@ -53774,14 +53867,7 @@
             {
               "type": "array",
               "items": {
-                "anyOf": [
-                  {
-                    "$ref": "#/definitions/PullRequestUpdateMethod"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/PullRequestUpdateMethod"
               }
             },
             {
@@ -57815,14 +57901,7 @@
         "tasks": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ScheduledTask"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ScheduledTask"
           }
         }
       },
@@ -59225,79 +59304,37 @@
         "keybindings": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ResolvedKeybindingRule"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ResolvedKeybindingRule"
           }
         },
         "issues": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ServerConfigIssue"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerConfigIssue"
           }
         },
         "providers": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ServerProvider"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerProvider"
           }
         },
         "availableEditors": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/EditorId"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/EditorId"
           }
         },
         "remoteOpenTargets": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/RemoteOpenTarget"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/RemoteOpenTarget"
           }
         },
         "directEndpoints": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ServerDirectEndpoint"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerDirectEndpoint"
           }
         },
         "observability": {
@@ -59393,14 +59430,7 @@
             {
               "type": "array",
               "items": {
-                "anyOf": [
-                  {
-                    "$ref": "#/definitions/UsageLimitSourceSnapshot"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/UsageLimitSourceSnapshot"
               }
             },
             {
@@ -59502,27 +59532,13 @@
         "keybindings": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ResolvedKeybindingRule"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ResolvedKeybindingRule"
           }
         },
         "issues": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ServerConfigIssue"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerConfigIssue"
           }
         }
       },
@@ -59538,14 +59554,7 @@
         "providers": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ServerProvider"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerProvider"
           }
         }
       },
@@ -59750,14 +59759,7 @@
         "sources": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/UsageLimitSourceSnapshot"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/UsageLimitSourceSnapshot"
           }
         }
       },
@@ -59956,6 +59958,46 @@
         },
         {
           "$ref": "#/definitions/EnvironmentAuthorizationError"
+        }
+      ]
+    },
+    "ServerInstallation": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "npx",
+                "pnpm-dlx",
+                "bunx"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "npm-global"
+              ]
+            },
+            "prefix": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "prefix"
+          ],
+          "additionalProperties": true
         }
       ]
     },
@@ -60969,14 +61011,7 @@
             {
               "type": "array",
               "items": {
-                "anyOf": [
-                  {
-                    "$ref": "#/definitions/RuntimeMode"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/RuntimeMode"
               }
             },
             {
@@ -61776,14 +61811,7 @@
         "providers": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ServerProvider"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerProvider"
           }
         }
       },
@@ -61951,14 +61979,7 @@
         "windows": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ServerProviderUsageWindow"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerProviderUsageWindow"
           }
         },
         "credentialFingerprint": {
@@ -63005,13 +63026,17 @@
         },
         "environmentIcon": {
           "anyOf": [
-            {},
+            {
+              "$ref": "#/definitions/EnvironmentMachineKind"
+            },
             {
               "type": "null"
             }
           ]
         },
-        "defaultThreadEnvMode": {},
+        "defaultThreadEnvMode": {
+          "$ref": "#/definitions/ThreadEnvMode"
+        },
         "newWorktreesStartFromOrigin": {
           "anyOf": [
             {
@@ -63024,7 +63049,9 @@
         },
         "worktreeSubmodules": {
           "anyOf": [
-            {},
+            {
+              "$ref": "#/definitions/WorktreeSubmodules"
+            },
             {
               "type": "null"
             }
@@ -63724,245 +63751,7 @@
           "additionalProperties": {
             "anyOf": [
               {
-                "type": "object",
-                "properties": {
-                  "worktreeCleanup": {
-                    "anyOf": [
-                      {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "mode": {
-                                "type": "string",
-                                "enum": [
-                                  "off"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "mode"
-                            ],
-                            "additionalProperties": true
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "mode": {
-                                "type": "string",
-                                "enum": [
-                                  "custom"
-                                ]
-                              },
-                              "rules": {
-                                "$ref": "#/definitions/WorktreeCleanupRules"
-                              }
-                            },
-                            "required": [
-                              "mode",
-                              "rules"
-                            ],
-                            "additionalProperties": true
-                          }
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "defaultModelSelection": {
-                    "anyOf": [
-                      {
-                        "$ref": "#/definitions/ModelSelection"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "defaultRuntimeMode": {
-                    "$ref": "#/definitions/RuntimeMode"
-                  },
-                  "defaultThreadEnvMode": {
-                    "$ref": "#/definitions/ThreadEnvMode"
-                  },
-                  "newWorktreesStartFromOrigin": {
-                    "type": "boolean"
-                  },
-                  "worktreeSubmodules": {},
-                  "defaultAutoPull": {
-                    "type": "boolean"
-                  },
-                  "defaultProjectScripts": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/definitions/ProjectScript"
-                    }
-                  },
-                  "enableAgentBrowserAccess": {
-                    "type": "boolean"
-                  },
-                  "enableAgentDeviceAccess": {
-                    "type": "boolean"
-                  },
-                  "textGenerationModelSelection": {
-                    "type": "object",
-                    "properties": {
-                      "provider": {
-                        "anyOf": [
-                          {},
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "instanceId": {
-                        "anyOf": [
-                          {},
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "model": {},
-                      "options": {
-                        "anyOf": [
-                          {},
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      }
-                    },
-                    "required": [
-                      "model"
-                    ],
-                    "additionalProperties": true
-                  },
-                  "sourceControlWriterModelSelection": {
-                    "anyOf": [
-                      {
-                        "$ref": "#/definitions/ModelSelection"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "reviewGuideModelSelection": {
-                    "anyOf": [
-                      {
-                        "$ref": "#/definitions/ModelSelection"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "reviewGuideInstructions": {
-                    "type": "string"
-                  },
-                  "sourceControlWritingStyle": {
-                    "type": "object",
-                    "properties": {
-                      "mode": {
-                        "anyOf": [
-                          {
-                            "$ref": "#/definitions/SourceControlWritingStyleMode"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "customInstructions": {
-                        "anyOf": [
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "followChangeRequestTemplates": {
-                        "anyOf": [
-                          {
-                            "type": "boolean"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      }
-                    },
-                    "additionalProperties": true
-                  },
-                  "removeAgentCreditsOnMerge": {
-                    "type": "boolean"
-                  },
-                  "branchNamingMode": {
-                    "$ref": "#/definitions/BranchNamingMode"
-                  },
-                  "branchNamePrefix": {
-                    "type": "string"
-                  },
-                  "branchNameInstructions": {
-                    "type": "string"
-                  },
-                  "pullRequestMergeMethod": {
-                    "anyOf": [
-                      {
-                        "$ref": "#/definitions/PullRequestMergeMethod"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "sidebarAutoSettleOnMerge": {
-                    "type": "boolean"
-                  },
-                  "sidebarAutoSettleAfterDays": {
-                    "anyOf": [
-                      {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          }
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "sidebarAutoSettleKeepPullRequests": {
-                    "type": "boolean"
-                  },
-                  "continueThreadsAfterServerUpdate": {
-                    "type": "boolean"
-                  },
-                  "responseStreamingMode": {
-                    "$ref": "#/definitions/ResponseStreamingMode"
-                  },
-                  "providerInstances": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "$ref": "#/definitions/ProjectProviderInstanceOverride"
-                    }
-                  }
-                },
-                "additionalProperties": true
+                "$ref": "#/definitions/ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue"
               },
               {
                 "type": "null"
@@ -65103,6 +64892,249 @@
       ],
       "additionalProperties": true
     },
+    "ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue": {
+      "type": "object",
+      "properties": {
+        "worktreeCleanup": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "off"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ],
+                  "additionalProperties": true
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "custom"
+                      ]
+                    },
+                    "rules": {
+                      "$ref": "#/definitions/WorktreeCleanupRules"
+                    }
+                  },
+                  "required": [
+                    "mode",
+                    "rules"
+                  ],
+                  "additionalProperties": true
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "defaultModelSelection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "defaultRuntimeMode": {
+          "$ref": "#/definitions/RuntimeMode"
+        },
+        "defaultThreadEnvMode": {
+          "$ref": "#/definitions/ThreadEnvMode"
+        },
+        "newWorktreesStartFromOrigin": {
+          "type": "boolean"
+        },
+        "worktreeSubmodules": {
+          "$ref": "#/definitions/WorktreeSubmodules"
+        },
+        "defaultAutoPull": {
+          "type": "boolean"
+        },
+        "defaultProjectScripts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ProjectScript"
+          }
+        },
+        "enableAgentBrowserAccess": {
+          "type": "boolean"
+        },
+        "enableAgentDeviceAccess": {
+          "type": "boolean"
+        },
+        "textGenerationModelSelection": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "instanceId": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "model": {},
+            "options": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "model"
+          ],
+          "additionalProperties": true
+        },
+        "sourceControlWriterModelSelection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewGuideModelSelection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewGuideInstructions": {
+          "type": "string"
+        },
+        "sourceControlWritingStyle": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SourceControlWritingStyleMode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "customInstructions": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "followChangeRequestTemplates": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "removeAgentCreditsOnMerge": {
+          "type": "boolean"
+        },
+        "branchNamingMode": {
+          "$ref": "#/definitions/BranchNamingMode"
+        },
+        "branchNamePrefix": {
+          "type": "string"
+        },
+        "branchNameInstructions": {
+          "type": "string"
+        },
+        "pullRequestMergeMethod": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PullRequestMergeMethod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sidebarAutoSettleOnMerge": {
+          "type": "boolean"
+        },
+        "sidebarAutoSettleAfterDays": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "Infinity",
+                    "-Infinity",
+                    "NaN"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sidebarAutoSettleKeepPullRequests": {
+          "type": "boolean"
+        },
+        "continueThreadsAfterServerUpdate": {
+          "type": "boolean"
+        },
+        "responseStreamingMode": {
+          "$ref": "#/definitions/ResponseStreamingMode"
+        },
+        "providerInstances": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ProjectProviderInstanceOverride"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
     "ServerUpdateSettingsRpcError": {
       "anyOf": [
         {
@@ -65162,27 +65194,13 @@
         "keybindings": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ResolvedKeybindingRule"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ResolvedKeybindingRule"
           }
         },
         "issues": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/ServerConfigIssue"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerConfigIssue"
           }
         }
       },
@@ -70201,14 +70219,7 @@
         "accounts": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/UsageLimitSourceAccount"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/UsageLimitSourceAccount"
           }
         },
         "error": {
@@ -70481,27 +70492,13 @@
         "buckets": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/UsageBucket"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/UsageBucket"
           }
         },
         "sources": {
           "type": "array",
           "items": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/UsageSource"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/UsageSource"
           }
         },
         "pricing": {

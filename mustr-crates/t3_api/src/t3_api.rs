@@ -1,10 +1,10 @@
 //! Wire types for T3 Code's WebSocket RPC and HTTP API.
 //!
 //! `types`, `tagged`, `rpc`, `http` and `named` are generated from T3's Effect Schema
-//! contracts by `codegen/regen.sh` (Effect `toJsonSchemaDocument`, then typify; see
-//! `codegen/README.md`). Never edit `src/generated/` by hand. Everything in this file and
-//! `envelope.rs` is hand-written and depends only on the *Effect* RPC protocol, not on
-//! T3's contracts.
+//! contracts by `codegen/regen.sh` (Effect `toJsonSchemaDocument`, then typify plus a
+//! post-processing pass; see `codegen/README.md`). Never edit `src/generated/` by hand.
+//! Everything in this file, `envelope.rs` and `forward_compat.rs` is hand-written and
+//! depends only on the *Effect* RPC protocol, not on T3's contracts.
 //!
 //! All types model the **encoded (JSON wire) side** exactly as Effect's
 //! `Schema.toCodecJson` produces it, which is what `RpcSerialization.layerJson` sends.
@@ -26,6 +26,9 @@ mod methods;
 pub use methods::{http, named, rpc};
 
 pub mod envelope;
+pub mod forward_compat;
+
+pub use forward_compat::ForwardCompatible;
 
 /// One T3 WebSocket RPC method (`WsRpcGroup` entry).
 pub trait RpcMethod {
@@ -132,17 +135,117 @@ impl<'de> Deserialize<'de> for JsNumber {
     }
 }
 
+/// A string-literal enum (`Schema.Literals`) with a fallback for values this build
+/// doesn't know. Generated code invokes this instead of deriving serde, so a newer T3
+/// adding a value doesn't break decoding. Single-value enums (constants such as `_tag`)
+/// stay strict and are emitted by typify directly.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! string_enum {
+    (
+        $(#[$meta:meta])*
+        pub enum $name:ident { $($(#[$variant_meta:meta])* $value:literal => $variant:ident),+ $(,)? }
+    ) => {
+        $(#[$meta])*
+        #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+        pub enum $name {
+            $($(#[$variant_meta])* $variant,)+
+            /// A value this build doesn't know (e.g. from a newer T3 server). It is sent
+            /// back verbatim.
+            Unrecognized(::std::string::String),
+        }
+
+        impl $name {
+            /// Every value known at generation time.
+            pub const KNOWN_VALUES: &'static [&'static str] = &[$($value),+];
+
+            /// The value as it appears on the wire.
+            pub fn as_str(&self) -> &str {
+                match self {
+                    $(Self::$variant => $value,)+
+                    Self::Unrecognized(value) => value,
+                }
+            }
+
+            fn from_known(value: &str) -> ::std::option::Option<Self> {
+                match value {
+                    $($value => ::std::option::Option::Some(Self::$variant),)+
+                    _ => ::std::option::Option::None,
+                }
+            }
+        }
+
+        impl $crate::forward_compat::ForwardCompatible for $name {
+            fn is_unrecognized(&self) -> bool {
+                matches!(self, Self::Unrecognized(_))
+            }
+        }
+
+        impl ::std::convert::From<&str> for $name {
+            fn from(value: &str) -> Self {
+                Self::from_known(value).unwrap_or_else(|| Self::Unrecognized(value.to_owned()))
+            }
+        }
+
+        impl ::std::convert::From<::std::string::String> for $name {
+            fn from(value: ::std::string::String) -> Self {
+                Self::from_known(&value).unwrap_or(Self::Unrecognized(value))
+            }
+        }
+
+        /// Unknown values parse as `Unrecognized`, except inside the strict pass of an
+        /// untagged union (see `forward_compat`).
+        impl ::std::str::FromStr for $name {
+            type Err = $crate::forward_compat::UnrecognizedValue;
+
+            fn from_str(value: &str) -> ::std::result::Result<Self, Self::Err> {
+                match Self::from_known(value) {
+                    ::std::option::Option::Some(known) => Ok(known),
+                    ::std::option::Option::None if $crate::forward_compat::is_strict() => {
+                        Err($crate::forward_compat::UnrecognizedValue(value.to_owned()))
+                    }
+                    ::std::option::Option::None => Ok(Self::Unrecognized(value.to_owned())),
+                }
+            }
+        }
+
+        impl ::std::fmt::Display for $name {
+            fn fmt(&self, formatter: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                formatter.write_str(self.as_str())
+            }
+        }
+
+        impl ::serde::Serialize for $name {
+            fn serialize<S: ::serde::Serializer>(&self, serializer: S) -> ::std::result::Result<S::Ok, S::Error> {
+                serializer.serialize_str(self.as_str())
+            }
+        }
+
+        impl<'de> ::serde::Deserialize<'de> for $name {
+            fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> ::std::result::Result<Self, D::Error> {
+                $crate::forward_compat::string_enum(
+                    deserializer,
+                    Self::from_known,
+                    Self::Unrecognized,
+                    Self::KNOWN_VALUES,
+                )
+            }
+        }
+    };
+}
+
 /// Discriminated union whose variants are named structs that *keep* their discriminator
 /// field (Effect TaggedError / TaggedStruct style). Deserialization dispatches on the tag;
-/// an unknown tag (newer T3 server) becomes `Unrecognized(raw)` instead of an error.
-/// Serialization writes the inner value as-is (it carries its own tag), so round-trips
-/// are lossless.
+/// an unknown tag (newer T3 server) becomes `Unrecognized(raw)` instead of an error,
+/// except while decoding strictly (see `forward_compat`) unless the union is `open`
+/// (T3's `ForwardCompatibleUnion`, which has its own catch-all member). Serialization
+/// writes the inner value as-is (it carries its own tag), so round-trips are lossless.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! tagged_union {
     (
         $(#[$meta:meta])*
-        pub enum $name:ident : $tag:literal { $($value:literal => $variant:ident($ty:ty)),* $(,)? }
+        pub enum $name:ident : $tag:literal, open = $open:literal { $($value:literal => $variant:ident($ty:ty)),* $(,)? }
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, PartialEq)]
@@ -167,6 +270,12 @@ macro_rules! tagged_union {
             }
         }
 
+        impl $crate::forward_compat::ForwardCompatible for $name {
+            fn is_unrecognized(&self) -> bool {
+                matches!(self, Self::Unrecognized(_))
+            }
+        }
+
         impl ::serde::Serialize for $name {
             fn serialize<S: ::serde::Serializer>(&self, serializer: S) -> ::std::result::Result<S::Ok, S::Error> {
                 match self {
@@ -178,24 +287,42 @@ macro_rules! tagged_union {
 
         impl<'de> ::serde::Deserialize<'de> for $name {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> ::std::result::Result<Self, D::Error> {
+                use ::serde::de::Error as _;
                 let value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
                 let tag = match value.get($tag) {
-                    Some(::serde_json::Value::String(tag)) => tag.clone(),
+                    Some(::serde_json::Value::String(tag)) if Self::KNOWN_TAGS.contains(&tag.as_str()) => tag.clone(),
+                    // T3's `ForwardCompatibleUnion` (`open`) accepts unknown tags itself.
+                    _ if $crate::forward_compat::is_strict() && !$open => {
+                        return Err(D::Error::custom(format!(
+                            "{}: no known {:?} in {}",
+                            stringify!($name),
+                            $tag,
+                            value
+                        )));
+                    }
                     _ => return Ok(Self::Unrecognized(value)),
                 };
-                // A tag value may map to several variants (tried in order); a known tag whose
-                // body fails to decode is an error, an unknown tag is `Unrecognized`.
-                let mut error: ::std::option::Option<::std::string::String> = None;
-                $(if tag == $value {
-                    match <$ty as ::serde::Deserialize>::deserialize(&value) {
-                        Ok(variant) => return Ok(Self::$variant(variant)),
-                        Err(e) => error = Some(format!("{}::{} ({}={:?}): {}", stringify!($name), stringify!($variant), $tag, $value, e)),
-                    }
-                })*
-                match error {
-                    Some(e) => Err(<D::Error as ::serde::de::Error>::custom(e)),
-                    None => Ok(Self::Unrecognized(value)),
-                }
+                // A tag value may map to several variants, tried in order; a known tag whose
+                // body fails to decode is an error. With several candidates, all are tried
+                // strictly first, so a lenient early candidate can't capture a later one's
+                // value.
+                let candidates = Self::KNOWN_TAGS.iter().filter(|known| **known == tag).count();
+                let decode = || -> ::std::result::Result<Self, ::std::string::String> {
+                    let mut error = ::std::string::String::new();
+                    $(if tag == $value {
+                        match <$ty as ::serde::Deserialize>::deserialize(&value) {
+                            Ok(variant) => return Ok(Self::$variant(variant)),
+                            Err(e) => error = format!("{}::{} ({}={:?}): {}", stringify!($name), stringify!($variant), $tag, $value, e),
+                        }
+                    })*
+                    Err(error)
+                };
+                let result = if candidates > 1 {
+                    $crate::forward_compat::strict_first(decode)
+                } else {
+                    decode()
+                };
+                result.map_err(D::Error::custom)
             }
         }
 

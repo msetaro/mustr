@@ -134,7 +134,7 @@ rm -rf "$FIXTURES_OUT/samples" "$FIXTURES_OUT/t3-tests-canonical"
 [ -d "$WORK/out/fixtures-canonical" ] && cp -R "$WORK/out/fixtures-canonical" "$FIXTURES_OUT/t3-tests-canonical"
 step "published schema/ and test corpus"
 
-# 7. JSON Schema -> Rust (typify + our tagged-union/method-table emitter).
+# 7. JSON Schema -> Rust (typify + our tagged-union/forward-compat/method-table emitter).
 #    typify-gen is its own workspace (empty [workspace] table), pinned by its Cargo.lock.
 CARGO_TARGET_DIR="$GEN_TARGET" "$CARGO" build --quiet --release --locked --manifest-path "$GEN/Cargo.toml"
 step "built typify-gen"

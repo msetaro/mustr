@@ -6,7 +6,8 @@
 //!   integer-vs-float spelling).
 //! * `fixtures/t3-tests/<Def>[.label].json`: values copied from T3's contract tests;
 //!   regen.sh checks they still decode with T3's codec and writes T3's own re-encoding to
-//!   `fixtures/t3-tests-canonical/`, which is the expected Rust output.
+//!   `fixtures/t3-tests-canonical/`, which is the expected Rust output. `*.newer-server`
+//!   and `*.future-*` fixtures hold values only a newer T3 sends.
 
 use std::{collections::BTreeMap, fs, path::Path};
 
@@ -67,6 +68,50 @@ fn diff(a: &Value, b: &Value, path: &str) -> Option<String> {
     }
 }
 
+/// Like [`diff`], against T3's own decode -> encode of `input`. T3 also writes its decoding
+/// defaults (`withDecodingDefault`), which aren't on the wire: a key T3 added that `input`
+/// doesn't have may be missing from `out`. `input` is `None` where it can't be aligned
+/// (T3 dropped array elements).
+fn diff_t3(expected: &Value, out: &Value, input: Option<&Value>, path: &str) -> Option<String> {
+    match (expected, out) {
+        (Value::Object(x), Value::Object(y)) => {
+            for k in x.keys().chain(y.keys()) {
+                let sub = format!("{path}.{k}");
+                match (x.get(k), y.get(k)) {
+                    (Some(p), Some(q)) => {
+                        if let Some(d) = diff_t3(p, q, input.and_then(|i| i.get(k)), &sub) {
+                            return Some(d);
+                        }
+                    }
+                    (Some(_), None) if input.is_none_or(|i| i.get(k).is_none()) => {}
+                    (p, q) => return Some(format!("{sub}: {p:?} vs {q:?}")),
+                }
+            }
+            None
+        }
+        (Value::Array(x), Value::Array(y)) if x.len() == y.len() => {
+            let input = input
+                .and_then(Value::as_array)
+                .filter(|i| i.len() == x.len());
+            x.iter().zip(y).enumerate().find_map(|(i, (p, q))| {
+                diff_t3(p, q, input.map(|a| &a[i]), &format!("{path}[{i}]"))
+            })
+        }
+        _ if expected == out => None,
+        _ => Some(format!("{path}: {} vs {}", trunc(expected), trunc(out))),
+    }
+}
+
+/// Round-trips `input` and compares the result with T3's re-encoding of it.
+fn check_against_t3(def: &str, input: Value, expected: &Value) -> Result<(), String> {
+    let out = dispatch::roundtrip(def, input.clone())
+        .ok_or_else(|| format!("no Rust type for {def}"))??;
+    match diff_t3(&norm(expected), &norm(&out), Some(&norm(&input)), "$") {
+        None => Ok(()),
+        Some(d) => Err(format!("differs from T3's re-encoding: {d}")),
+    }
+}
+
 fn trunc(v: &Value) -> String {
     let s = v.to_string();
     if s.len() > 120 {
@@ -91,6 +136,7 @@ fn samples_roundtrip() {
     let mut files: Vec<_> = fs::read_dir(&dir)
         .expect("samples dir")
         .map(|e| e.unwrap().path())
+        .filter(|p| !p.to_string_lossy().ends_with(".expected.json"))
         .collect();
     files.sort();
     let (mut types, mut values) = (0, 0);
@@ -99,10 +145,20 @@ fn samples_roundtrip() {
         let def = path.file_stem().unwrap().to_str().unwrap().to_string();
         let samples: Vec<Value> =
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        // Where T3's own decode -> encode changes a sample (it drops forward-compat junk),
+        // that is the expected output.
+        let expected: BTreeMap<String, Value> =
+            fs::read_to_string(dir.join(format!("{def}.expected.json")))
+                .map(|s| serde_json::from_str(&s).unwrap())
+                .unwrap_or_default();
         types += 1;
         for (i, v) in samples.into_iter().enumerate() {
             values += 1;
-            if let Err(e) = check(&def, v) {
+            let result = match expected.get(&i.to_string()) {
+                None => check(&def, v),
+                Some(exp) => check_against_t3(&def, v, exp),
+            };
+            if let Err(e) = result {
                 failures
                     .entry(def.clone())
                     .or_insert(format!("sample {i}: {e}"));
@@ -144,12 +200,7 @@ fn t3_test_fixtures() {
             .map(|s| serde_json::from_str::<Value>(&s).unwrap());
         let r = match expected {
             None => check(&def, v),
-            Some(exp) => dispatch::roundtrip(&def, v).unwrap().and_then(|out| {
-                match diff(&norm(&exp), &norm(&out), "$") {
-                    None => Ok(()),
-                    Some(d) => Err(format!("differs from T3's re-encoding: {d}")),
-                }
-            }),
+            Some(exp) => check_against_t3(&def, v, &exp),
         };
         results.insert(name, r);
     }
@@ -162,13 +213,10 @@ fn t3_test_fixtures() {
             }
         );
     }
-    // Forward-compat fixtures (values a *newer* server may send) are reported, not asserted:
-    // T3 decodes them leniently via catchDecoding, which JSON Schema cannot express.
-    let hard: Vec<_> = results
-        .iter()
-        .filter(|(n, r)| r.is_err() && !n.contains("newer-server") && !n.contains("future-"))
-        .collect();
-    assert!(hard.is_empty(), "current-shape fixtures failed: {hard:?}");
+    // Includes the forward-compat fixtures (values a *newer* server may send, which T3
+    // decodes leniently): the Rust types must drop exactly what T3 drops.
+    let failed: Vec<_> = results.iter().filter(|(_, r)| r.is_err()).collect();
+    assert!(failed.is_empty(), "fixtures failed: {failed:?}");
 }
 
 #[test]

@@ -8,17 +8,20 @@
 //
 // Steps: 1 import every contracts module; 2 map encoded AST nodes -> TS export names;
 // 3 collect roots (every WsRpcGroup RPC via `group.requests`, every HttpApi endpoint via
-// `HttpApi.reflect`, plus EXTRA_ROOTS); 4 one shared `SchemaRepresentation` for all roots
-// (on `Schema.toCodecJson`, i.e. exactly what RpcSerialization.layerJson sends) ->
-// JSON Schema 2020-12 -> draft-07; 5 normalize for typify (see README.md); 6 write
-// artifacts; 7 optional Arbitrary sample corpus + fixture validation.
+// `HttpApi.reflect`, plus EXTRA_ROOTS); 3b detect T3's forward-compatible fields; 4 one
+// shared `SchemaRepresentation` for all roots (on `Schema.toCodecJson`, i.e. exactly what
+// RpcSerialization.layerJson sends) -> JSON Schema 2020-12 -> draft-07; 5 normalize for
+// typify (see README.md); 6 write artifacts; 7 optional Arbitrary sample
+// corpus + fixture validation.
 //
 // Outputs (in <out-dir>):
-//   t3-api.raw.schema.json  draft-07 bundle as Effect emits it (defs renamed/merged only)
+//   t3-api.raw.schema.json  draft-07 bundle as Effect emits it (defs renamed/merged, and
+//                           forward-compat fields typed, see step 3b)
 //   t3-api.schema.json      normalized for typify
-//   manifest.json           RPC + HTTP method tables, tagged unions -> definition names
+//   manifest.json           RPC + HTTP method tables, tagged unions -> definition names,
+//                           forward-compatible fields (step 3b)
 //   openapi.json            Effect's own OpenAPI 3.1 for the HTTP API (reference only)
-//   stats.json              counts of every workaround applied (used by README.md)
+//   stats.json              counts of every workaround applied (see README.md)
 //   samples/, fixtures-canonical/, fixtures-check.json, samples-failures.json (optional)
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -215,14 +218,26 @@ let policyHits = 0;
 // Export names win over Effect identifiers: identifiers can be inherited from a shared
 // refinement (e.g. checkpointDiff.ts's `OrchestrationTurnDiffRange` filter is carried by
 // three different structs via mapFields), which would yield `X`, `X_1`, `X_2`.
+// Structs with forward-compatible fields (step 3b) must become definitions so the Rust
+// emitter can address their fields; unnamed ones get a name derived from their path.
 const referencePolicy = (input: { ast: SchemaAST.AST; identifier: string | undefined }) => {
-  const n = nameByOwner.get(bodyKey(input.ast));
+  const key = bodyKey(input.ast);
+  let n = nameByOwner.get(key);
+  const fc = fcByOwnerKey.get(key);
+  if (n === undefined && fc !== undefined) {
+    n = uniqueName(fc.hint, (x) => takenNames.has(x));
+    takenNames.add(n);
+    nameByOwner.set(key, n);
+    bump("forwardCompat.namedOwners");
+  }
+  if (fc !== undefined) fc.names.add(n!);
   if (n !== undefined) {
     policyHits++;
     return n;
   }
   return input.identifier;
 };
+const takenNames = new Set<string>([...nameByOwner.values(), ...schemaExports.map((e) => e.name)]);
 
 // ---------------------------------------------------------------------------
 // 3. Collect roots: every RPC (payload / success-or-chunk / error) and every HTTP endpoint.
@@ -330,10 +345,141 @@ for (const name of EXTRA_ROOTS) {
   }
   extraRootIdx[name] = addRoot(name, hit.value);
 }
-bump("roots", roots.length);
 bump("rpcMethods", rpcEntries.length);
 bump("rpcStreams", rpcEntries.filter((r) => r.stream).length);
 bump("httpEndpoints", httpEntries.length);
+
+// ---------------------------------------------------------------------------
+// 3b. Forward-compatible fields.
+//
+// T3 decodes some fields leniently with `catchDecoding`-style helpers from
+// baseSchemas.ts: `ForwardCompatibleArray` / `ForwardCompatibleUnionArray` drop elements
+// that fail to decode (unknown literals, unknown union tags), and
+// `ForwardCompatibleOptional` / `ForwardCompatibleNullable` / `OmittedWhenNull` turn an
+// undecodable value into `undefined` / `null`. JSON Schema can't express that, and the
+// optional ones even encode as `Unknown` (`{}`). We detect them *behaviourally* (decode a
+// probe value with T3's own schema and see what comes back), so this doesn't depend on
+// Effect internals or on T3's helper names, and record them in the manifest. The Rust
+// emitter then gives those fields lenient decoders; for the optional ones we also splice
+// the real inner type into the JSON Schema in place of `{}`.
+// ---------------------------------------------------------------------------
+type FcKind = "array" | "option";
+type FcProp = { kind: FcKind; nullable: boolean; inner: number | null; how: string };
+type FcOwner = { hint: string; props: Map<string, FcProp>; names: Set<string> };
+const fcByOwnerKey = new Map<object, FcOwner>();
+const fcInnerRoots = new Set<number>();
+const PROBE = Symbol("t3-codegen-probe");
+const PROBE_TAG = "\u0000t3-codegen-unknown-tag";
+const probeDecode = (ast: SchemaAST.AST, input: unknown): { ok: true; value: any } | { ok: false } => {
+  try {
+    const exit: any = Schema.decodeUnknownExit(Schema.make(ast) as any)(input);
+    return exit._tag === "Success" ? { ok: true, value: exit.value } : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+};
+const classifyProperty = (ps: any): { kind: FcKind; nullable: boolean; how: string } | undefined => {
+  if (typeof ps.name !== "string") return undefined;
+  const k: string = ps.name;
+  const obj = new (SchemaAST as any).Objects([ps], []);
+  const emptied = (r: any) => r.ok && Array.isArray(r.value[k]) && r.value[k].length === 0;
+  // An array that drops an element no schema accepts (ForwardCompatibleArray).
+  if (emptied(probeDecode(obj, { [k]: [PROBE] }))) return { kind: "array", nullable: false, how: "drops undecodable elements" };
+  // An array that drops union members with an unknown tag (ForwardCompatibleUnionArray).
+  for (const tag of ["_tag", "type", "kind"])
+    if (emptied(probeDecode(obj, { [k]: [{ [tag]: PROBE_TAG }] })))
+      return { kind: "array", nullable: false, how: `drops unknown ${tag}` };
+  // A value no schema accepts becomes undefined/null (ForwardCompatibleOptional/Nullable).
+  const r: any = probeDecode(obj, { [k]: PROBE });
+  if (r.ok && r.value[k] !== PROBE)
+    return r.value[k] === null
+      ? { kind: "option", nullable: true, how: "undecodable -> null" }
+      : { kind: "option", nullable: false, how: "undecodable -> absent" };
+  return undefined;
+};
+// The decoded side of the optional helpers is `UndefinedOr(X)` / `NullOr(X)`: X is the
+// schema whose encoded form actually crosses the wire.
+const innerOfOptional = (ast: any): SchemaAST.AST | undefined => {
+  if (ast?._tag !== "Union") return undefined;
+  const real = ast.types.filter((t: any) => t._tag !== "Undefined" && t._tag !== "Null");
+  if (real.length === 1) return real[0];
+  return real.length > 1 ? Schema.Union(real.map((t: any) => Schema.make(t))).ast : undefined;
+};
+// The same keys the naming pass (step 2) claims for an export: its own encoded owner and
+// those of its `toType` / `toEncoded` derivations (which `catchDecoding` re-encodes).
+const ownerKeys = (ast: SchemaAST.AST): Array<object> => {
+  const keys: Array<object> = [];
+  for (const derive of [(a: SchemaAST.AST) => a, SchemaAST.toType, SchemaAST.toEncoded]) {
+    try {
+      keys.push(bodyKey(encodedOwner(Schema.toCodecJson(Schema.make(derive(ast))).ast)));
+    } catch {
+      /* no JSON codec on this side */
+    }
+  }
+  return [...new Set(keys)];
+};
+{
+  const seen = new Set<SchemaAST.AST>();
+  const fcRootCount = roots.length;
+  // `owners`: keys of the nodes that will own an Objects node's JSON definition (itself,
+  // or the class/declaration whose encoding it is).
+  const walk = (ast: any, hint: string, owners: Array<object>) => {
+    if (!ast || typeof ast !== "object" || seen.has(ast)) return;
+    seen.add(ast);
+    const mine = ast._tag === "Objects" || ast._tag === "Declaration" ? [...owners, ...ownerKeys(ast)] : [];
+    for (const link of ast.encoding ?? []) walk(link.to, hint, mine);
+    switch (ast._tag) {
+      case "Objects": {
+        for (const ps of ast.propertySignatures) {
+          const propHint = hint + pascal(String(ps.name));
+          const c = classifyProperty(ps);
+          if (c) {
+            const prop: FcProp = { ...c, inner: null };
+            if (c.kind === "option") {
+              const inner = innerOfOptional(ps.type);
+              if (!inner) throw new Error(`forward-compat: can't find the inner type of ${hint}.${String(ps.name)}`);
+              prop.inner = addRoot(`${propHint}Value`, Schema.make(inner));
+              fcInnerRoots.add(prop.inner);
+            }
+            const owner = mine.map((key) => fcByOwnerKey.get(key)).find((o) => o !== undefined) ?? {
+              hint,
+              props: new Map(),
+              names: new Set<string>(),
+            };
+            owner.props.set(ps.name, prop);
+            for (const key of mine) fcByOwnerKey.set(key, owner);
+            bump(`forwardCompat.detected.${c.kind}${c.nullable ? "Nullable" : ""}`);
+          }
+          walk(ps.type, propHint, []);
+        }
+        for (const is of ast.indexSignatures) walk(is.type, hint + "Value", []);
+        break;
+      }
+      case "Arrays":
+        ast.elements.forEach((e: any) => walk(e, hint + "Item", []));
+        ast.rest.forEach((e: any) => walk(e, hint + "Item", []));
+        break;
+      case "Union":
+        ast.types.forEach((t: any) => walk(t, hint, []));
+        break;
+      case "Suspend":
+        walk(ast.thunk(), hint, []);
+        break;
+      case "Declaration":
+        ast.typeParameters.forEach((t: any) => walk(t, hint, []));
+        break;
+    }
+  };
+  for (let i = 0; i < fcRootCount; i++) walk(roots[i]!.schema.ast, roots[i]!.name, []);
+  // Root-level lenient arrays (an RPC returning `ForwardCompatibleArray(X)` directly)
+  // have no field to put a decoder on; fail loudly so the emitter gets taught.
+  for (let i = 0; i < fcRootCount; i++) {
+    const r: any = probeDecode(roots[i]!.schema.ast, [PROBE]);
+    if (r.ok && Array.isArray(r.value) && r.value.length === 0)
+      throw new Error(`forward-compat: root ${roots[i]!.name} is a lenient array; teach typify-gen about root-level lenient arrays`);
+  }
+}
+bump("roots", roots.length);
 
 // ---------------------------------------------------------------------------
 // 4. One shared representation for all roots -> JSON Schema 2020-12 -> draft-07.
@@ -437,6 +583,75 @@ for (const k of Object.keys(rawDefs)) rawDefs[k] = rewriteMerged(rawDefs[k]);
 bump("mergedDuplicateDefs", merged.size);
 bump("unresolvedNumberedDefs", Object.keys(rawDefs).filter((k) => /_\d+$/.test(k)).length);
 
+// Apply the forward-compat records (step 3b) to the definitions that own those fields.
+type FcField = { def: string; property: string; kind: FcKind; how: string };
+const fcFields: Array<FcField> = [];
+{
+  const finalDefsOf = (policyName: string): Array<string> => {
+    const out = new Set<string>();
+    for (const [raw, final] of renames)
+      if ((raw === policyName || new RegExp(`^${policyName}_\\d+$`).test(raw)) && final in rawDefs) out.add(final);
+    return [...out].sort();
+  };
+  const innerRef = (idx: number) => {
+    const t = rootTarget[idx]!;
+    if (t.kind !== "ref") throw new Error(`forward-compat: inner root ${roots[idx]!.name} is ${t.kind}`);
+    return { $ref: DEF07 + encodePointer(renames.get(t.def) ?? t.def) };
+  };
+  const owners = new Set(fcByOwnerKey.values());
+  for (const owner of owners) {
+    const defNames = [...owner.names].flatMap(finalDefsOf);
+    if (defNames.length === 0) {
+      console.warn(`warn: forward-compat fields of ${owner.hint} (${[...owner.props.keys()]}) have no JSON definition`);
+      bump("forwardCompat.unappliedOwners");
+      continue;
+    }
+    for (const def of new Set(defNames)) {
+      const d = rawDefs[def];
+      for (const [property, info] of owner.props) {
+        const p = d?.properties?.[property];
+        if (p === undefined) {
+          bump("forwardCompat.missingProperty");
+          continue;
+        }
+        if (info.kind === "array") {
+          // The encoded element is `X | null` (the holes left by dropped elements, which T3
+          // never sends); the wire element is X.
+          const arrays = [p, ...(Array.isArray(p.anyOf) ? p.anyOf : [])].filter((s: any) => s?.type === "array");
+          for (const a of arrays) {
+            const alts = a.items?.anyOf;
+            if (Array.isArray(alts) && alts.some(isNullJson)) {
+              const rest = alts.filter((m: any) => !isNullJson(m));
+              a.items = rest.length === 1 ? rest[0] : { anyOf: rest };
+              bump("forwardCompat.holesRemoved");
+            }
+          }
+        } else if (info.inner !== null) {
+          // Encoded as `Unknown` (`{}`, or `{} | null`); the value on the wire is the inner
+          // type's encoding.
+          const ref = innerRef(info.inner);
+          const isAny = (x: any) => x && typeof x === "object" && Object.keys(x).length === 0;
+          const required = Array.isArray(d.required) && d.required.includes(property);
+          if (isAny(p)) {
+            d.properties[property] = info.nullable && required ? { anyOf: [ref, { type: "null" }] } : ref;
+            bump("forwardCompat.typedUnknowns");
+          } else if (Array.isArray(p.anyOf) && p.anyOf.some(isAny)) {
+            p.anyOf = p.anyOf.map((m: any) => (isAny(m) ? ref : m));
+            bump("forwardCompat.typedUnknowns");
+          } else {
+            // A plain `catchDecoding` (`NullOr(X).pipe(Schema.catchDecoding(...))`) keeps
+            // X's encoding, so the field is already typed; only its decoder changes.
+            bump("forwardCompat.alreadyTyped");
+          }
+        }
+        fcFields.push({ def, property, kind: info.kind, how: info.how });
+      }
+    }
+  }
+  fcFields.sort((a, b) => a.def.localeCompare(b.def) || a.property.localeCompare(b.property));
+  bump("forwardCompat.fields", fcFields.length);
+}
+
 // (`nullableDefs` is filled by the normalization pass below; read lazily at manifest time.)
 const typeOf = (i: number | null): any => {
   if (i === null) return { kind: "never" };
@@ -448,7 +663,7 @@ const typeOf = (i: number | null): any => {
 bump("definitions", Object.keys(rawDefs).length);
 
 // ---------------------------------------------------------------------------
-// 5. Normalize for typify (and for a lenient client): see README.md "workarounds".
+// 5. Normalize for typify (and for a lenient client): see README.md, "Workarounds".
 // ---------------------------------------------------------------------------
 const JS_NUMBER = "JsNumber";
 const VALIDATION_KEYS = [
@@ -561,6 +776,13 @@ const flattenMembers = (members: Array<any>, depth = 0): Array<any> =>
       bump("norm.flattenRefUnion");
       return flattenMembers(target.oneOf, depth + 1);
     }
+    // Inline unions nest too, e.g. `NullOr(Union([A, B]))` is `oneOf [oneOf [A, B], null]`.
+    // Flattened, the discriminated part gets hoisted into a tagged union (with its
+    // `Unrecognized` fallback) instead of reaching typify as a strict serde-tagged enum.
+    if (isPureUnion(m) && depth < 16) {
+      bump("norm.flattenInlineUnion");
+      return flattenMembers(m.oneOf, depth + 1);
+    }
     return [m];
   });
 const unionPass = (node: any): any => {
@@ -609,7 +831,7 @@ bump("norm.nullableDefsInlined", nullableDefs.size);
 // object (it does not follow `$ref`), and it has no unknown-variant fallback. For these
 // defs the Rust generator emits a tag-dispatching enum (newtype variants + `Unrecognized`)
 // instead. Inline object members are hoisted into their own definitions first.
-type TaggedUnion = { tag: string; variants: Array<{ value: string; def: string }> };
+type TaggedUnion = { tag: string; variants: Array<{ value: string; def: string }>; open: boolean };
 const taggedUnions: Record<string, TaggedUnion> = {};
 const resolveDef = (x: any, depth = 0): any =>
   x && typeof x.$ref === "string" && depth < 16 ? resolveDef(normDefs[refName(x.$ref)], depth + 1) : x;
@@ -712,7 +934,8 @@ for (const [name, def] of Object.entries(normDefs)) {
     return [{ value, def: hoisted }];
   });
   def.oneOf = variants.map((v: { def: string }) => ({ $ref: DEF07 + encodePointer(v.def) }));
-  taggedUnions[name] = { tag, variants };
+  // `open`: T3's ForwardCompatibleUnion, whose catch-all member accepts unknown tags.
+  taggedUnions[name] = { tag, variants, open: catchAll.size > 0 };
 }
 bump("tagged.unions", Object.keys(taggedUnions).length);
 // Recursive tagged unions need boxed variants (typify can't see through our replacement).
@@ -843,6 +1066,7 @@ write("manifest.json", {
   })),
   named: Object.fromEntries(Object.entries(extraRootIdx).map(([n, i]) => [n, typeOf(i)])),
   taggedUnions,
+  forwardCompat: fcFields,
 });
 for (const { value: api } of httpApis) write("openapi.json", OpenApi.fromApi(api));
 
@@ -851,6 +1075,7 @@ for (const { value: api } of httpApis) write("openapi.json", OpenApi.fromApi(api
 // ---------------------------------------------------------------------------
 const schemaByDef = new Map<string, Schema.Top>();
 roots.forEach((r, i) => {
+  if (fcInnerRoots.has(i)) return; // only reachable through their (sampled) owners
   const t = typeOf(i);
   if (t.kind === "ref" && !schemaByDef.has((t as any).def)) schemaByDef.set((t as any).def, r.schema);
 });
@@ -883,7 +1108,25 @@ if (SAMPLES > 0) {
         continue;
       }
     }
-    writeFileSync(join(dir, `${def}.json`), JSON.stringify(values.map(wellFormed)) + "\n");
+    // Expected Rust output: T3's own decode -> encode of each sample. Values generated on
+    // the encoded side can hold things T3 drops (forward-compat holes, undecodable
+    // optionals); the Rust types must drop them too. Samples T3 can't decode are skipped.
+    const kept: Array<unknown> = [];
+    const expected: Record<number, unknown> = {};
+    for (const v of values.map(wellFormed)) {
+      const c = canonicalOf(schema, v);
+      if (c === undefined) {
+        bump("samples.undecodableByT3");
+        continue;
+      }
+      if (stableStringify(c) !== stableStringify(v)) expected[kept.length] = c;
+      kept.push(v);
+    }
+    writeFileSync(join(dir, `${def}.json`), JSON.stringify(kept) + "\n");
+    if (Object.keys(expected).length > 0) {
+      writeFileSync(join(dir, `${def}.expected.json`), JSON.stringify(expected) + "\n");
+      bump("samples.normalizedByT3");
+    }
   }
   bump("samples.typeSide", ok);
   bump("samples.encodedSide", viaEncoded);
@@ -894,24 +1137,38 @@ if (FIXTURES) {
   const results: Record<string, string> = {};
   for (const f of readdirSync(FIXTURES).filter((f) => f.endsWith(".json")).sort()) {
     const def = f.split(".")[0]!;
-    const schema = schemaByDef.get(def) ?? schemaExports.find((e) => e.name === def)?.value;
+    // Prefer the TS export: a root of the same name may be an HTTP payload that HttpApi
+    // already wrapped in its own JSON codec.
+    const exported = schemaExports.find((e) => e.name === def)?.value;
+    const schema = exported ? unwrapOpaqueJson(exported) : schemaByDef.get(def);
     if (!schema) {
       results[f] = "no such type";
       continue;
     }
+    const input = JSON.parse(readFileSync(join(FIXTURES, f), "utf8"));
+    const canonical = (codec: any) => Schema.encodeSync(codec)(Schema.decodeUnknownSync(codec)(input));
+    let out: unknown;
     try {
-      // Decode with T3's codec, then re-encode: the canonical wire form T3 itself would send.
-      const codec = Schema.toCodecJson(schema) as any;
-      const decoded = Schema.decodeUnknownSync(codec)(JSON.parse(readFileSync(join(FIXTURES, f), "utf8")));
-      mkdirSync(join(outDir, "fixtures-canonical"), { recursive: true });
-      writeFileSync(join(outDir, "fixtures-canonical", f), JSON.stringify(Schema.encodeSync(codec)(decoded), null, 2) + "\n");
+      // Decode with T3's JSON codec, then re-encode: the canonical wire form T3 itself sends.
+      out = canonical(Schema.toCodecJson(schema));
       results[f] = "ok";
     } catch (e) {
-      results[f] = "INVALID: " + String(e).split("\n").slice(0, 3).join(" ").slice(0, 300);
+      // T3's JSON codec rejects some values its forward-compat helpers are meant to absorb
+      // (`ForwardCompatibleOptional` decodes an unknown value to `undefined`, which the JSON
+      // codec can't represent). T3's type-level codec accepts them; use that as the oracle.
+      try {
+        out = JSON.parse(JSON.stringify(canonical(schema)));
+        results[f] = "ok (type-level codec; T3's JSON codec rejects it: " + String(e).split("\n")[0]!.slice(0, 160) + ")";
+      } catch (e2) {
+        results[f] = "INVALID: " + String(e2).split("\n").slice(0, 3).join(" ").slice(0, 300);
+        continue;
+      }
     }
+    mkdirSync(join(outDir, "fixtures-canonical"), { recursive: true });
+    writeFileSync(join(outDir, "fixtures-canonical", f), JSON.stringify(out, null, 2) + "\n");
   }
   write("fixtures-check.json", results);
-  const bad = Object.entries(results).filter(([, v]) => v !== "ok");
+  const bad = Object.entries(results).filter(([, v]) => !v.startsWith("ok"));
   console.log(`fixtures: ${Object.keys(results).length - bad.length}/${Object.keys(results).length} decode with T3's codec`);
   for (const [f, v] of bad) console.log(`  ${f}: ${v}`);
 }
@@ -942,6 +1199,29 @@ function wellFormed(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(wellFormed);
   if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [wellFormed(k) as string, wellFormed(x)]));
   return v;
+}
+// T3's canonical wire form of `value`: decode then encode with its JSON codec, or with the
+// type-level codec where the JSON codec rejects a forward-compat value (see fixtures).
+function canonicalOf(schema: Schema.Top, value: unknown): unknown {
+  for (const codec of [Schema.toCodecJson(schema), schema]) {
+    try {
+      const c: any = codec;
+      return JSON.parse(JSON.stringify(Schema.encodeSync(c)(Schema.decodeUnknownSync(c)(value))));
+    } catch {
+      /* try the next codec */
+    }
+  }
+  return undefined;
+}
+function stableStringify(v: unknown): string {
+  return JSON.stringify(v, (_k, x) =>
+    x && typeof x === "object" && !Array.isArray(x)
+      ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, x[k]]))
+      : x,
+  );
+}
+function isNullJson(m: any): boolean {
+  return !!m && m.type === "null" && Object.keys(m).length === 1;
 }
 function uniqBy<T>(xs: Array<T>, key: (x: T) => unknown): Array<T> {
   const seen = new Set();

@@ -15,6 +15,6 @@ quote = "1"
 proc-macro2 = "1"
 prettyplease = "0.3"
 heck = "0.5"
-syn = { version = "3", default-features = false, features = ["full", "parsing", "printing"] }
+syn = { version = "3", default-features = false, features = ["full", "parsing", "printing", "visit-mut"] }
 
 [workspace]

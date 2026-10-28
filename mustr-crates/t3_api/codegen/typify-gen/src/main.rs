@@ -2,10 +2,21 @@
 //!
 //! Usage: t3-typify-gen <schema-dir> <out-dir>
 //!
-//! Writes `types.rs` (all wire types, via typify) and `methods.rs` (RPC + HTTP method
-//! tables implementing the hand-written `RpcMethod` / `HttpEndpoint` traits).
+//! Writes into <out-dir> (the crate's `src/generated/`):
+//! - `types.rs`: every wire type, via typify, then the forward-compat pass in
+//!   `postprocess.rs`;
+//! - `tagged.rs`: discriminated unions (`crate::tagged_union!`);
+//! - `methods.rs`: RPC + HTTP method tables implementing `RpcMethod` / `HttpEndpoint`;
+//! - `dispatch.rs`: definition name -> round-trip function, for the tests only.
 
-use std::{collections::BTreeMap, fmt::Write as _, fs, path::PathBuf};
+mod postprocess;
+
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Write as _,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, bail};
 use schemars::schema::{RootSchema, Schema};
@@ -75,6 +86,17 @@ struct TaggedUnion {
     variants: Vec<TaggedVariant>,
     #[serde(default)]
     recursive: bool,
+    /// T3's `ForwardCompatibleUnion`: has its own catch-all member for unknown tags.
+    #[serde(default)]
+    open: bool,
+}
+
+/// A field T3 decodes leniently (`ForwardCompatibleArray`, `ForwardCompatibleOptional`, ...).
+#[derive(Deserialize)]
+struct ForwardCompatField {
+    def: String,
+    property: String,
+    kind: String,
 }
 
 #[derive(Deserialize)]
@@ -84,6 +106,8 @@ struct Manifest {
     named: BTreeMap<String, TypeRef>,
     #[serde(rename = "taggedUnions")]
     tagged_unions: BTreeMap<String, TaggedUnion>,
+    #[serde(rename = "forwardCompat")]
+    forward_compat: Vec<ForwardCompatField>,
 }
 
 /// Same name mangling typify applies to definition keys (util.rs `sanitize`, Pascal case).
@@ -167,9 +191,9 @@ fn main() -> Result<()> {
         Ok(path)
     }
 
-    // ---- tagged.rs --------------------------------------------------------------
+    // ---- tagged.rs (formatted by hand: prettyplease flows macro bodies) --------------
     let mut t = String::from(HEADER);
-    t.push_str("#![allow(clippy::all)]\nuse crate::types;\n\n");
+    t.push_str("use crate::types;\n");
     for (name, u) in &manifest.tagged_unions {
         let n = typify_name(name);
         // Self-check: typify must resolve this def to our replacement.
@@ -180,12 +204,12 @@ fn main() -> Result<()> {
         if resolved != format!("crate::tagged::{n}") {
             bail!("tagged union {name} resolved to {resolved}; replacement key mismatch");
         }
-        let mut used = BTreeMap::new();
-        used.insert("Unrecognized".to_string(), ());
+        let mut used = BTreeSet::from(["Unrecognized".to_string()]);
         writeln!(
             t,
-            "crate::tagged_union! {{\n    /// `{name}`, discriminated by `{tag}`.\n    pub enum {n}: {tag:?} {{",
-            tag = u.tag
+            "\ncrate::tagged_union! {{\n    /// `{name}`, discriminated by `{tag}`.\n    pub enum {n}: {tag:?}, open = {open} {{",
+            tag = u.tag,
+            open = u.open,
         )?;
         for v in &u.variants {
             let mut vn = typify_name(&v.value);
@@ -194,7 +218,7 @@ fn main() -> Result<()> {
             }
             let base = vn.clone();
             let mut i = 2;
-            while used.insert(vn.clone(), ()).is_some() {
+            while !used.insert(vn.clone()) {
                 vn = format!("{base}{i}");
                 i += 1;
             }
@@ -214,12 +238,12 @@ fn main() -> Result<()> {
 
     // ---- methods.rs -------------------------------------------------------------
     let mut m = String::from(HEADER);
-    m.push_str("#![allow(clippy::all)]\nuse crate::{types, HttpEndpoint, RpcMethod};\n\n");
+    m.push_str("use crate::{types, HttpEndpoint, RpcMethod};\n\n");
     m.push_str("/// WebSocket RPC methods (Effect RPC over `RpcSerialization.layerJson`).\npub mod rpc {\n    use super::*;\n");
-    let mut seen = BTreeMap::new();
+    let mut seen = BTreeSet::new();
     for r in &manifest.rpc {
         let name = pascal(&r.tag);
-        if seen.insert(name.clone(), ()).is_some() {
+        if !seen.insert(name.clone()) {
             bail!("duplicate rpc struct name {name}");
         }
         let (p, s, e) = (rust(&r.payload)?, rust(&r.success)?, rust(&r.error)?);
@@ -287,8 +311,28 @@ fn main() -> Result<()> {
     }
     m.push_str("}\n");
 
+    // ---- forward-compat fields: definition -> Rust struct ident ------------------
+    let mut lenient = Vec::new();
+    for f in &manifest.forward_compat {
+        let path = rust(&TypeRef::Ref {
+            def: f.def.clone(),
+            nullable: false,
+        })?;
+        let Some(owner) = path.strip_prefix("types::") else {
+            bail!(
+                "forward-compat field {}.{} is owned by {path}, not a plain struct",
+                f.def,
+                f.property
+            );
+        };
+        lenient.push(postprocess::LenientField {
+            owner: owner.to_string(),
+            property: f.property.clone(),
+            kind: f.kind.clone(),
+        });
+    }
+
     // ---- types.rs ---------------------------------------------------------------
-    // Generate after resolving manifest refs (resolution can't add types, but be safe).
     // typify does not de-duplicate derived names against definition names; fail early
     // with a readable message instead of a wall of E0428s.
     let mut names: BTreeMap<String, usize> = BTreeMap::new();
@@ -310,15 +354,18 @@ fn main() -> Result<()> {
         );
     }
 
-    let tokens = space.to_stream();
-    let types =
-        format!("{HEADER}#![allow(clippy::all, non_camel_case_types, unused_imports)]\n{tokens}");
+    let processed = postprocess::run(space.to_stream(), &lenient)?;
+    let types = format!(
+        "{HEADER}\n{}\n// String enums with an `Unrecognized` fallback (see `crate::string_enum!`).\n\n{}",
+        prettyplease::unparse(&processed.file),
+        processed.string_enums
+    );
 
     // ---- dispatch.rs (tests only): definition name -> JSON round-trip through the Rust type.
     let mut d = String::from(HEADER);
     d.push_str("/// Deserialize `v` as the Rust type generated for definition `def`, then serialize it back.\n");
     d.push_str("pub fn roundtrip(def: &str, v: serde_json::Value) -> Option<Result<serde_json::Value, String>> {\n    Some(match def {\n");
-    let mut nullable = std::collections::BTreeSet::new();
+    let mut nullable = BTreeSet::new();
     let mut note = |t: &TypeRef| {
         if let TypeRef::Ref {
             def,
@@ -359,30 +406,37 @@ fn main() -> Result<()> {
     }
     d.push_str("        _ => return None,\n    })\n}\n");
 
-    for (file, src) in [
-        ("types.rs", types),
-        ("tagged.rs", t),
-        ("methods.rs", m),
-        ("dispatch.rs", d),
-    ] {
+    fs::write(out_dir.join("types.rs"), types)?;
+    fs::write(out_dir.join("tagged.rs"), t)?;
+    for (file, src) in [("methods.rs", m), ("dispatch.rs", d)] {
         let path = out_dir.join(file);
         fs::write(&path, src)?;
         format_rust(&path)?;
     }
+    let stats: Vec<String> = processed
+        .stats
+        .iter()
+        .map(|(k, v)| format!("{k} {v}"))
+        .collect();
     eprintln!(
-        "typify-gen: {} types ({} tagged unions), {} rpc methods, {} http endpoints -> {}",
+        "typify-gen: {} types ({} tagged unions; {}), {} rpc methods, {} http endpoints -> {}",
         space.iter_types().count(),
         manifest.tagged_unions.len(),
+        stats.join(", "),
         manifest.rpc.len(),
         manifest.http.len(),
         out_dir.display()
     );
+    fs::write(
+        schema_dir.join("rust-stats.json"),
+        serde_json::to_string_pretty(&processed.stats)? + "\n",
+    )?;
     Ok(())
 }
 
 /// Pretty-print with prettyplease (no dependency on a rustfmt toolchain component, and
 /// output is byte-stable across machines).
-fn format_rust(path: &PathBuf) -> Result<()> {
+fn format_rust(path: &Path) -> Result<()> {
     let src = fs::read_to_string(path)?;
     let (header, body): (Vec<&str>, Vec<&str>) = src
         .lines()

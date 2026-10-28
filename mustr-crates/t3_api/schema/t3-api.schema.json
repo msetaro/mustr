@@ -1866,14 +1866,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/AuthEnvironmentScope"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/AuthEnvironmentScope"
               }
             },
             {
@@ -1951,14 +1944,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/AuthEnvironmentScope"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/AuthEnvironmentScope"
               }
             },
             {
@@ -2536,14 +2522,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/AuthEnvironmentScope"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/AuthEnvironmentScope"
               }
             },
             {
@@ -2632,14 +2611,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/AuthEnvironmentScope"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/AuthEnvironmentScope"
               }
             },
             {
@@ -6037,7 +6009,9 @@
         "serverSelfUpdate": {
           "$ref": "#/definitions/ServerSelfUpdateCapability"
         },
-        "serverInstallation": {},
+        "serverInstallation": {
+          "$ref": "#/definitions/ServerInstallation"
+        },
         "serverSelfUpdateProgress": {
           "type": "boolean"
         },
@@ -6106,7 +6080,9 @@
         "arch": {
           "$ref": "#/definitions/ExecutionEnvironmentPlatformArch"
         },
-        "machine": {}
+        "machine": {
+          "$ref": "#/definitions/EnvironmentMachineKind"
+        }
       },
       "required": [
         "os",
@@ -6656,7 +6632,9 @@
             }
           ]
         },
-        "reason": {},
+        "reason": {
+          "$ref": "#/definitions/GitCommandFailureReason"
+        },
         "detail": {
           "type": "string"
         },
@@ -6675,6 +6653,20 @@
         "command",
         "cwd",
         "detail"
+      ]
+    },
+    "GitCommandFailureReason": {
+      "type": "string",
+      "enum": [
+        "authentication_failed",
+        "branch_already_exists",
+        "branch_checked_out_in_worktree",
+        "host_key_unverified",
+        "not_a_repository",
+        "path_already_exists",
+        "ref_not_found",
+        "remote_unreachable",
+        "tag_would_be_clobbered"
       ]
     },
     "GitManagerError": {
@@ -9246,101 +9238,7 @@
         "projectIcon": {
           "oneOf": [
             {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "lucide"
-                      ]
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "color": {
-                      "$ref": "#/definitions/ProjectIconColor"
-                    },
-                    "monogramText": {
-                      "oneOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "monogram": {
-                      "oneOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "name",
-                    "color"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "emoji"
-                      ]
-                    },
-                    "emoji": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "emoji"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "monogram"
-                      ]
-                    },
-                    "text": {
-                      "type": "string"
-                    },
-                    "color": {
-                      "$ref": "#/definitions/ProjectIconColor"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "text",
-                    "color"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind"
-                  ]
-                }
-              ]
+              "$ref": "#/definitions/OrchestrationProjectShellProjectIcon"
             },
             {
               "type": "null"
@@ -14887,14 +14785,7 @@
         "contextUsage": {
           "oneOf": [
             {
-              "oneOf": [
-                {
-                  "$ref": "#/definitions/ThreadTokenUsageSnapshot"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "$ref": "#/definitions/ThreadTokenUsageSnapshot"
             },
             {
               "type": "null"
@@ -14902,19 +14793,19 @@
           ]
         },
         "nativeMetadata": {
-          "$ref": "#/definitions/OrchestrationV2ProviderThreadNativeMetadata2"
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OrchestrationV2ProviderThreadNativeMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "goal": {
           "oneOf": [
             {
-              "oneOf": [
-                {
-                  "$ref": "#/definitions/OrchestrationV2ProviderGoal"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "$ref": "#/definitions/OrchestrationV2ProviderGoal"
             },
             {
               "type": "null"
@@ -17212,76 +17103,7 @@
         "forkedFrom": {
           "oneOf": [
             {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": {
-                      "type": "string",
-                      "enum": [
-                        "run"
-                      ]
-                    },
-                    "threadId": {
-                      "type": "string"
-                    },
-                    "runId": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "type",
-                    "threadId",
-                    "runId"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": {
-                      "type": "string",
-                      "enum": [
-                        "node"
-                      ]
-                    },
-                    "nodeId": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "type",
-                    "nodeId"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "type": {
-                      "type": "string",
-                      "enum": [
-                        "provider_thread"
-                      ]
-                    },
-                    "providerThreadId": {
-                      "type": "string"
-                    },
-                    "providerTurnId": {
-                      "oneOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": [
-                    "type",
-                    "providerThreadId"
-                  ]
-                }
-              ]
+              "$ref": "#/definitions/OrchestrationV2ThreadShellForkedFrom"
             },
             {
               "type": "null"
@@ -19163,101 +18985,7 @@
         "projectIcon": {
           "oneOf": [
             {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "lucide"
-                      ]
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "color": {
-                      "$ref": "#/definitions/ProjectIconColor"
-                    },
-                    "monogramText": {
-                      "oneOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "monogram": {
-                      "oneOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "name",
-                    "color"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "emoji"
-                      ]
-                    },
-                    "emoji": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "emoji"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "monogram"
-                      ]
-                    },
-                    "text": {
-                      "type": "string"
-                    },
-                    "color": {
-                      "$ref": "#/definitions/ProjectIconColor"
-                    }
-                  },
-                  "required": [
-                    "kind",
-                    "text",
-                    "color"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "kind": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "kind"
-                  ]
-                }
-              ]
+              "$ref": "#/definitions/ProjectProjectIcon"
             },
             {
               "type": "null"
@@ -20570,7 +20298,9 @@
         "newWorktreesStartFromOrigin": {
           "type": "boolean"
         },
-        "worktreeSubmodules": {},
+        "worktreeSubmodules": {
+          "$ref": "#/definitions/WorktreeSubmodules"
+        },
         "defaultAutoPull": {
           "type": "boolean"
         },
@@ -21029,6 +20759,22 @@
         }
       ]
     },
+    "ProviderAuthInteraction": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ProviderAuthInteractionBrowser"
+        },
+        {
+          "$ref": "#/definitions/ProviderAuthInteractionDeviceCode"
+        },
+        {
+          "$ref": "#/definitions/ProviderAuthInteractionTerminal"
+        },
+        {
+          "$ref": "#/definitions/ProviderAuthInteractionCredentials"
+        }
+      ]
+    },
     "ProviderAuthLogoutRpcError": {
       "oneOf": [
         {
@@ -21164,6 +20910,141 @@
         }
       ]
     },
+    "ProviderAuthStartSuccessCredentialOwnerValue": {
+      "type": "string",
+      "enum": [
+        "provider",
+        "t3"
+      ]
+    },
+    "ProviderAuthStartSuccessInteractionValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "browser"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "requiresConsent": {
+              "type": "boolean"
+            },
+            "acceptsCallback": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "url",
+            "requiresConsent"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "deviceCode"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "userCode": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "url",
+            "userCode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "terminal"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "output": {
+              "type": "string"
+            },
+            "outputOffset": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "output"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "credentials"
+              ]
+            },
+            "id": {
+              "type": "string"
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "secret": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "label",
+                  "secret"
+                ]
+              }
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "fields"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "ProviderAuthState": {
       "type": "object",
       "properties": {
@@ -21227,14 +21108,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/ProviderAuthMethod"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/ProviderAuthMethod"
               }
             },
             {
@@ -21242,8 +21116,12 @@
             }
           ]
         },
-        "interaction": {},
-        "credentialOwner": {}
+        "interaction": {
+          "$ref": "#/definitions/ProviderAuthStartSuccessInteractionValue"
+        },
+        "credentialOwner": {
+          "$ref": "#/definitions/ProviderAuthStartSuccessCredentialOwnerValue"
+        }
       },
       "required": [
         "instanceId",
@@ -22110,27 +21988,13 @@
         "actions": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/PullRequestAction"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/PullRequestAction"
           }
         },
         "mergeMethods": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/PullRequestMergeMethod"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/PullRequestMergeMethod"
           }
         },
         "deleteBranch": {
@@ -22148,14 +22012,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/PullRequestUpdateMethod"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/PullRequestUpdateMethod"
               }
             },
             {
@@ -23935,14 +23792,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/PullRequestAction"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/PullRequestAction"
               }
             },
             {
@@ -24161,14 +24011,7 @@
         "verdicts": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/PullRequestReviewVerdict"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/PullRequestReviewVerdict"
           }
         }
       },
@@ -26120,14 +25963,7 @@
         "actions": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/PullRequestAction"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/PullRequestAction"
           }
         },
         "comment": {
@@ -26139,14 +25975,7 @@
         "verdicts": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/PullRequestReviewVerdict"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/PullRequestReviewVerdict"
           }
         },
         "requestReviewers": {
@@ -26157,14 +25986,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/PullRequestUpdateMethod"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/PullRequestUpdateMethod"
               }
             },
             {
@@ -29543,14 +29365,7 @@
         "tasks": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ScheduledTask"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ScheduledTask"
           }
         }
       },
@@ -30420,53 +30235,25 @@
         "keybindings": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ResolvedKeybindingRule"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ResolvedKeybindingRule"
           }
         },
         "issues": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ServerConfigIssuesItem"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerConfigIssue"
           }
         },
         "providers": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ServerProvider"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerProvider"
           }
         },
         "availableEditors": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/EditorId"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/EditorId"
           }
         },
         "remoteOpenTargets": {
@@ -30474,14 +30261,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/RemoteOpenTarget"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/RemoteOpenTarget"
               }
             },
             {
@@ -30494,14 +30274,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/ServerDirectEndpoint"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/ServerDirectEndpoint"
               }
             },
             {
@@ -30585,14 +30358,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/UsageLimitSourceSnapshot"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/UsageLimitSourceSnapshot"
               }
             },
             {
@@ -30644,27 +30410,13 @@
         "keybindings": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ResolvedKeybindingRule"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ResolvedKeybindingRule"
           }
         },
         "issues": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ServerConfigKeybindingsUpdatedPayloadIssuesItem"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerConfigIssue"
           }
         }
       },
@@ -30679,14 +30431,7 @@
         "providers": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ServerProvider"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerProvider"
           }
         }
       },
@@ -30883,14 +30628,7 @@
         "sources": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/UsageLimitSourceSnapshot"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/UsageLimitSourceSnapshot"
           }
         }
       },
@@ -31022,6 +30760,44 @@
         },
         {
           "$ref": "#/definitions/EnvironmentAuthorizationError"
+        }
+      ]
+    },
+    "ServerInstallation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "npx",
+                "pnpm-dlx",
+                "bunx"
+              ]
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "npm-global"
+              ]
+            },
+            "prefix": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "prefix"
+          ]
         }
       ]
     },
@@ -31701,14 +31477,7 @@
             {
               "type": "array",
               "items": {
-                "oneOf": [
-                  {
-                    "$ref": "#/definitions/RuntimeMode"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "$ref": "#/definitions/RuntimeMode"
               }
             },
             {
@@ -32507,14 +32276,7 @@
         "providers": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ServerProvider"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerProvider"
           }
         }
       },
@@ -32676,14 +32438,7 @@
         "windows": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ServerProviderUsageWindow"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerProviderUsageWindow"
           }
         },
         "credentialFingerprint": {
@@ -33161,40 +32916,7 @@
         "worktreeCleanup": {
           "oneOf": [
             {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "mode": {
-                      "type": "string",
-                      "enum": [
-                        "off"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "mode"
-                  ]
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "mode": {
-                      "type": "string",
-                      "enum": [
-                        "custom"
-                      ]
-                    },
-                    "rules": {
-                      "$ref": "#/definitions/WorktreeCleanupRules"
-                    }
-                  },
-                  "required": [
-                    "mode",
-                    "rules"
-                  ]
-                }
-              ]
+              "$ref": "#/definitions/ServerSettingsWorktreeCleanup"
             },
             {
               "type": "null"
@@ -33583,13 +33305,17 @@
         },
         "environmentIcon": {
           "oneOf": [
-            {},
+            {
+              "$ref": "#/definitions/EnvironmentMachineKind"
+            },
             {
               "type": "null"
             }
           ]
         },
-        "defaultThreadEnvMode": {},
+        "defaultThreadEnvMode": {
+          "$ref": "#/definitions/ThreadEnvMode"
+        },
         "newWorktreesStartFromOrigin": {
           "oneOf": [
             {
@@ -33602,7 +33328,9 @@
         },
         "worktreeSubmodules": {
           "oneOf": [
-            {},
+            {
+              "$ref": "#/definitions/WorktreeSubmodules"
+            },
             {
               "type": "null"
             }
@@ -34258,217 +33986,7 @@
               "additionalProperties": {
                 "oneOf": [
                   {
-                    "type": "object",
-                    "properties": {
-                      "worktreeCleanup": {
-                        "oneOf": [
-                          {
-                            "$ref": "#/definitions/ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanup"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "defaultModelSelection": {
-                        "oneOf": [
-                          {
-                            "$ref": "#/definitions/ModelSelection"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "defaultRuntimeMode": {
-                        "$ref": "#/definitions/RuntimeMode"
-                      },
-                      "defaultThreadEnvMode": {
-                        "$ref": "#/definitions/ThreadEnvMode"
-                      },
-                      "newWorktreesStartFromOrigin": {
-                        "type": "boolean"
-                      },
-                      "worktreeSubmodules": {},
-                      "defaultAutoPull": {
-                        "type": "boolean"
-                      },
-                      "defaultProjectScripts": {
-                        "oneOf": [
-                          {
-                            "type": "array",
-                            "items": {
-                              "$ref": "#/definitions/ProjectScript"
-                            }
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "enableAgentBrowserAccess": {
-                        "type": "boolean"
-                      },
-                      "enableAgentDeviceAccess": {
-                        "type": "boolean"
-                      },
-                      "textGenerationModelSelection": {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "oneOf": [
-                              {},
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "instanceId": {
-                            "oneOf": [
-                              {},
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "model": {},
-                          "options": {
-                            "oneOf": [
-                              {},
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": [
-                          "model"
-                        ]
-                      },
-                      "sourceControlWriterModelSelection": {
-                        "oneOf": [
-                          {
-                            "$ref": "#/definitions/ModelSelection"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "reviewGuideModelSelection": {
-                        "oneOf": [
-                          {
-                            "$ref": "#/definitions/ModelSelection"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "reviewGuideInstructions": {
-                        "type": "string"
-                      },
-                      "sourceControlWritingStyle": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "oneOf": [
-                              {
-                                "$ref": "#/definitions/SourceControlWritingStyleMode"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "customInstructions": {
-                            "oneOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "followChangeRequestTemplates": {
-                            "oneOf": [
-                              {
-                                "type": "boolean"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        }
-                      },
-                      "removeAgentCreditsOnMerge": {
-                        "type": "boolean"
-                      },
-                      "branchNamingMode": {
-                        "$ref": "#/definitions/BranchNamingMode"
-                      },
-                      "branchNamePrefix": {
-                        "type": "string"
-                      },
-                      "branchNameInstructions": {
-                        "type": "string"
-                      },
-                      "pullRequestMergeMethod": {
-                        "oneOf": [
-                          {
-                            "$ref": "#/definitions/PullRequestMergeMethod"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "sidebarAutoSettleOnMerge": {
-                        "type": "boolean"
-                      },
-                      "sidebarAutoSettleAfterDays": {
-                        "oneOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "Infinity",
-                              "-Infinity",
-                              "NaN"
-                            ]
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "sidebarAutoSettleKeepPullRequests": {
-                        "type": "boolean"
-                      },
-                      "continueThreadsAfterServerUpdate": {
-                        "type": "boolean"
-                      },
-                      "responseStreamingMode": {
-                        "$ref": "#/definitions/ResponseStreamingMode"
-                      },
-                      "providerInstances": {
-                        "oneOf": [
-                          {
-                            "type": "object",
-                            "additionalProperties": {
-                              "$ref": "#/definitions/ProjectProviderInstanceOverride"
-                            }
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      }
-                    }
+                    "$ref": "#/definitions/ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue"
                   },
                   {
                     "type": "null"
@@ -35192,6 +34710,221 @@
         "patch"
       ]
     },
+    "ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue": {
+      "type": "object",
+      "properties": {
+        "worktreeCleanup": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanup"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "defaultModelSelection": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "defaultRuntimeMode": {
+          "$ref": "#/definitions/RuntimeMode"
+        },
+        "defaultThreadEnvMode": {
+          "$ref": "#/definitions/ThreadEnvMode"
+        },
+        "newWorktreesStartFromOrigin": {
+          "type": "boolean"
+        },
+        "worktreeSubmodules": {
+          "$ref": "#/definitions/WorktreeSubmodules"
+        },
+        "defaultAutoPull": {
+          "type": "boolean"
+        },
+        "defaultProjectScripts": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ProjectScript"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enableAgentBrowserAccess": {
+          "type": "boolean"
+        },
+        "enableAgentDeviceAccess": {
+          "type": "boolean"
+        },
+        "textGenerationModelSelection": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "oneOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "instanceId": {
+              "oneOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "model": {},
+            "options": {
+              "oneOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "model"
+          ]
+        },
+        "sourceControlWriterModelSelection": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewGuideModelSelection": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewGuideInstructions": {
+          "type": "string"
+        },
+        "sourceControlWritingStyle": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "oneOf": [
+                {
+                  "$ref": "#/definitions/SourceControlWritingStyleMode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "customInstructions": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "followChangeRequestTemplates": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "removeAgentCreditsOnMerge": {
+          "type": "boolean"
+        },
+        "branchNamingMode": {
+          "$ref": "#/definitions/BranchNamingMode"
+        },
+        "branchNamePrefix": {
+          "type": "string"
+        },
+        "branchNameInstructions": {
+          "type": "string"
+        },
+        "pullRequestMergeMethod": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/PullRequestMergeMethod"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sidebarAutoSettleOnMerge": {
+          "type": "boolean"
+        },
+        "sidebarAutoSettleAfterDays": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "Infinity",
+                "-Infinity",
+                "NaN"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sidebarAutoSettleKeepPullRequests": {
+          "type": "boolean"
+        },
+        "continueThreadsAfterServerUpdate": {
+          "type": "boolean"
+        },
+        "responseStreamingMode": {
+          "$ref": "#/definitions/ResponseStreamingMode"
+        },
+        "providerInstances": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/definitions/ProjectProviderInstanceOverride"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "ServerUpdateSettingsRpcError": {
       "oneOf": [
         {
@@ -35243,27 +34976,13 @@
         "keybindings": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ResolvedKeybindingRule"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ResolvedKeybindingRule"
           }
         },
         "issues": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/ServerUpsertKeybindingResultIssuesItem"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/ServerConfigIssue"
           }
         }
       },
@@ -38980,14 +38699,7 @@
         "accounts": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/UsageLimitSourceAccount"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/UsageLimitSourceAccount"
           }
         },
         "error": {
@@ -39228,27 +38940,13 @@
         "buckets": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/UsageBucket"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/UsageBucket"
           }
         },
         "sources": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "$ref": "#/definitions/UsageSource"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/definitions/UsageSource"
           }
         },
         "pricing": {
@@ -41216,6 +40914,19 @@
         }
       ]
     },
+    "OrchestrationProjectShellProjectIcon": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/OrchestrationProjectShellProjectIconLucide"
+        },
+        {
+          "$ref": "#/definitions/OrchestrationProjectShellProjectIconEmoji"
+        },
+        {
+          "$ref": "#/definitions/OrchestrationProjectShellProjectIconMonogram"
+        }
+      ]
+    },
     "OrchestrationV2AppThreadForkedFrom": {
       "oneOf": [
         {
@@ -41610,6 +41321,19 @@
         }
       ]
     },
+    "OrchestrationV2ThreadShellForkedFrom": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/OrchestrationV2ThreadShellForkedFromRun"
+        },
+        {
+          "$ref": "#/definitions/OrchestrationV2ThreadShellForkedFromNode"
+        },
+        {
+          "$ref": "#/definitions/OrchestrationV2ThreadShellForkedFromProviderThread"
+        }
+      ]
+    },
     "OrchestrationV2TurnItemToolIcon": {
       "oneOf": [
         {
@@ -41961,6 +41685,19 @@
         }
       ]
     },
+    "ProjectProjectIcon": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ProjectProjectIconLucide"
+        },
+        {
+          "$ref": "#/definitions/ProjectProjectIconEmoji"
+        },
+        {
+          "$ref": "#/definitions/ProjectProjectIconMonogram"
+        }
+      ]
+    },
     "ProjectMutationProjectIcon": {
       "oneOf": [
         {
@@ -42070,26 +41807,6 @@
         }
       ]
     },
-    "ServerConfigIssuesItem": {
-      "oneOf": [
-        {
-          "$ref": "#/definitions/ServerConfigIssuesItemKeybindingsMalformedConfig"
-        },
-        {
-          "$ref": "#/definitions/ServerConfigIssuesItemKeybindingsInvalidEntry"
-        }
-      ]
-    },
-    "ServerConfigKeybindingsUpdatedPayloadIssuesItem": {
-      "oneOf": [
-        {
-          "$ref": "#/definitions/ServerConfigKeybindingsUpdatedPayloadIssuesItemKeybindingsMalformedConfig"
-        },
-        {
-          "$ref": "#/definitions/ServerConfigKeybindingsUpdatedPayloadIssuesItemKeybindingsInvalidEntry"
-        }
-      ]
-    },
     "ServerProcessDiagnosticsEntryPgid": {
       "oneOf": [
         {
@@ -42120,6 +41837,16 @@
         }
       ]
     },
+    "ServerSettingsWorktreeCleanup": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ServerSettingsWorktreeCleanupOff"
+        },
+        {
+          "$ref": "#/definitions/ServerSettingsWorktreeCleanupCustom"
+        }
+      ]
+    },
     "ServerSettingsPatchWorktreeCleanup": {
       "oneOf": [
         {
@@ -42127,16 +41854,6 @@
         },
         {
           "$ref": "#/definitions/ServerSettingsPatchWorktreeCleanupCustom"
-        }
-      ]
-    },
-    "ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanup": {
-      "oneOf": [
-        {
-          "$ref": "#/definitions/ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanupOff"
-        },
-        {
-          "$ref": "#/definitions/ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanupCustom"
         }
       ]
     },
@@ -42203,13 +41920,13 @@
         }
       ]
     },
-    "ServerUpsertKeybindingResultIssuesItem": {
+    "ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanup": {
       "oneOf": [
         {
-          "$ref": "#/definitions/ServerUpsertKeybindingResultIssuesItemKeybindingsMalformedConfig"
+          "$ref": "#/definitions/ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanupOff"
         },
         {
-          "$ref": "#/definitions/ServerUpsertKeybindingResultIssuesItemKeybindingsInvalidEntry"
+          "$ref": "#/definitions/ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanupCustom"
         }
       ]
     },
@@ -53490,6 +53207,127 @@
         "projectId"
       ]
     },
+    "ProviderAuthInteractionBrowser": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "browser"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "requiresConsent": {
+          "type": "boolean"
+        },
+        "acceptsCallback": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "url",
+        "requiresConsent"
+      ]
+    },
+    "ProviderAuthInteractionDeviceCode": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "deviceCode"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "userCode": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "url",
+        "userCode"
+      ]
+    },
+    "ProviderAuthInteractionTerminal": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "terminal"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "outputOffset": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "output"
+      ]
+    },
+    "ProviderAuthInteractionCredentials": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "credentials"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "secret": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "label",
+              "secret"
+            ]
+          }
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "fields"
+      ]
+    },
     "ProviderAuthResponseBrowser": {
       "type": "object",
       "properties": {
@@ -55190,6 +55028,88 @@
         "kind",
         "label",
         "action"
+      ]
+    },
+    "OrchestrationProjectShellProjectIconLucide": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "lucide"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "$ref": "#/definitions/ProjectIconColor"
+        },
+        "monogramText": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "monogram": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "color"
+      ]
+    },
+    "OrchestrationProjectShellProjectIconEmoji": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "emoji"
+          ]
+        },
+        "emoji": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "emoji"
+      ]
+    },
+    "OrchestrationProjectShellProjectIconMonogram": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "monogram"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "color": {
+          "$ref": "#/definitions/ProjectIconColor"
+        }
+      },
+      "required": [
+        "kind",
+        "text",
+        "color"
       ]
     },
     "OrchestrationV2AppThreadForkedFromRun": {
@@ -75028,6 +74948,74 @@
         "input"
       ]
     },
+    "OrchestrationV2ThreadShellForkedFromRun": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "run"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "threadId",
+        "runId"
+      ]
+    },
+    "OrchestrationV2ThreadShellForkedFromNode": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "node"
+          ]
+        },
+        "nodeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "nodeId"
+      ]
+    },
+    "OrchestrationV2ThreadShellForkedFromProviderThread": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "provider_thread"
+          ]
+        },
+        "providerThreadId": {
+          "type": "string"
+        },
+        "providerTurnId": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "providerThreadId"
+      ]
+    },
     "OrchestrationV2TurnItemToolIconWebsite": {
       "type": "object",
       "properties": {
@@ -77290,6 +77278,88 @@
         "presetId"
       ]
     },
+    "ProjectProjectIconLucide": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "lucide"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "$ref": "#/definitions/ProjectIconColor"
+        },
+        "monogramText": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "monogram": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "color"
+      ]
+    },
+    "ProjectProjectIconEmoji": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "emoji"
+          ]
+        },
+        "emoji": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "emoji"
+      ]
+    },
+    "ProjectProjectIconMonogram": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "monogram"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "color": {
+          "$ref": "#/definitions/ProjectIconColor"
+        }
+      },
+      "required": [
+        "kind",
+        "text",
+        "color"
+      ]
+    },
     "ProjectMutationProjectIconLucide": {
       "type": "object",
       "properties": {
@@ -77704,86 +77774,6 @@
         "type"
       ]
     },
-    "ServerConfigIssuesItemKeybindingsMalformedConfig": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "keybindings.malformed-config"
-          ]
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "message"
-      ]
-    },
-    "ServerConfigIssuesItemKeybindingsInvalidEntry": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "keybindings.invalid-entry"
-          ]
-        },
-        "message": {
-          "type": "string"
-        },
-        "index": {
-          "$ref": "#/definitions/JsNumber"
-        }
-      },
-      "required": [
-        "kind",
-        "message",
-        "index"
-      ]
-    },
-    "ServerConfigKeybindingsUpdatedPayloadIssuesItemKeybindingsMalformedConfig": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "keybindings.malformed-config"
-          ]
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "message"
-      ]
-    },
-    "ServerConfigKeybindingsUpdatedPayloadIssuesItemKeybindingsInvalidEntry": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "keybindings.invalid-entry"
-          ]
-        },
-        "message": {
-          "type": "string"
-        },
-        "index": {
-          "$ref": "#/definitions/JsNumber"
-        }
-      },
-      "required": [
-        "kind",
-        "message",
-        "index"
-      ]
-    },
     "ServerProcessDiagnosticsEntryPgidSome": {
       "type": "object",
       "properties": {
@@ -77900,6 +77890,38 @@
         "_tag"
       ]
     },
+    "ServerSettingsWorktreeCleanupOff": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off"
+          ]
+        }
+      },
+      "required": [
+        "mode"
+      ]
+    },
+    "ServerSettingsWorktreeCleanupCustom": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "custom"
+          ]
+        },
+        "rules": {
+          "$ref": "#/definitions/WorktreeCleanupRules"
+        }
+      },
+      "required": [
+        "mode",
+        "rules"
+      ]
+    },
     "ServerSettingsPatchWorktreeCleanupOff": {
       "type": "object",
       "properties": {
@@ -77959,38 +77981,6 @@
               "type": "boolean"
             }
           }
-        }
-      },
-      "required": [
-        "mode",
-        "rules"
-      ]
-    },
-    "ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanupOff": {
-      "type": "object",
-      "properties": {
-        "mode": {
-          "type": "string",
-          "enum": [
-            "off"
-          ]
-        }
-      },
-      "required": [
-        "mode"
-      ]
-    },
-    "ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanupCustom": {
-      "type": "object",
-      "properties": {
-        "mode": {
-          "type": "string",
-          "enum": [
-            "custom"
-          ]
-        },
-        "rules": {
-          "$ref": "#/definitions/WorktreeCleanupRules"
         }
       },
       "required": [
@@ -78232,44 +78222,36 @@
         "instanceId"
       ]
     },
-    "ServerUpsertKeybindingResultIssuesItemKeybindingsMalformedConfig": {
+    "ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanupOff": {
       "type": "object",
       "properties": {
-        "kind": {
+        "mode": {
           "type": "string",
           "enum": [
-            "keybindings.malformed-config"
+            "off"
           ]
-        },
-        "message": {
-          "type": "string"
         }
       },
       "required": [
-        "kind",
-        "message"
+        "mode"
       ]
     },
-    "ServerUpsertKeybindingResultIssuesItemKeybindingsInvalidEntry": {
+    "ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanupCustom": {
       "type": "object",
       "properties": {
-        "kind": {
+        "mode": {
           "type": "string",
           "enum": [
-            "keybindings.invalid-entry"
+            "custom"
           ]
         },
-        "message": {
-          "type": "string"
-        },
-        "index": {
-          "$ref": "#/definitions/JsNumber"
+        "rules": {
+          "$ref": "#/definitions/WorktreeCleanupRules"
         }
       },
       "required": [
-        "kind",
-        "message",
-        "index"
+        "mode",
+        "rules"
       ]
     },
     "SourceControlProviderAuthAccountSome": {
@@ -87004,23 +86986,6 @@
       "required": [
         "_tag",
         "logoUrl"
-      ]
-    },
-    "OrchestrationV2ProviderThreadNativeMetadata2": {
-      "oneOf": [
-        {
-          "oneOf": [
-            {
-              "$ref": "#/definitions/OrchestrationV2ProviderThreadNativeMetadata"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        {
-          "type": "null"
-        }
       ]
     },
     "ScheduledTaskWebhookDeliveryOutcome2": {

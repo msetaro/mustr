@@ -192,6 +192,7 @@ pub fn roundtrip(
             "AuthBrowserSessionResult" => {
                 rt::<t3_api::types::AuthBrowserSessionResult>(v)
             }
+            "AuthClientSession" => rt::<t3_api::types::AuthClientSession>(v),
             "AuthClientSessionRevokeResult" => {
                 rt::<t3_api::types::AuthClientSessionRevokeResult>(v)
             }
@@ -238,6 +239,7 @@ pub fn roundtrip(
             "AuthPairingCredentialResult" => {
                 rt::<t3_api::types::AuthPairingCredentialResult>(v)
             }
+            "AuthPairingLink" => rt::<t3_api::types::AuthPairingLink>(v),
             "AuthPairingLinkRevokeResult" => {
                 rt::<t3_api::types::AuthPairingLinkRevokeResult>(v)
             }
@@ -464,8 +466,14 @@ pub fn roundtrip(
             "EnvironmentScopeRequiredError" => {
                 rt::<t3_api::types::EnvironmentScopeRequiredError>(v)
             }
+            "ExecutionEnvironmentCapabilities" => {
+                rt::<t3_api::types::ExecutionEnvironmentCapabilities>(v)
+            }
             "ExecutionEnvironmentDescriptor" => {
                 rt::<t3_api::types::ExecutionEnvironmentDescriptor>(v)
+            }
+            "ExecutionEnvironmentPlatform" => {
+                rt::<t3_api::types::ExecutionEnvironmentPlatform>(v)
             }
             "ExternalLauncherBrowserSpawnError" => {
                 rt::<t3_api::types::ExternalLauncherBrowserSpawnError>(v)
@@ -858,6 +866,21 @@ pub fn roundtrip(
             }
             "OrchestrationLaunchThreadRpcError" => {
                 rt::<t3_api::tagged::OrchestrationLaunchThreadRpcError>(v)
+            }
+            "OrchestrationMessageContext" => {
+                rt::<t3_api::types::OrchestrationMessageContext>(v)
+            }
+            "OrchestrationProjectShellProjectIcon" => {
+                rt::<t3_api::tagged::OrchestrationProjectShellProjectIcon>(v)
+            }
+            "OrchestrationProjectShellProjectIconEmoji" => {
+                rt::<t3_api::types::OrchestrationProjectShellProjectIconEmoji>(v)
+            }
+            "OrchestrationProjectShellProjectIconLucide" => {
+                rt::<t3_api::types::OrchestrationProjectShellProjectIconLucide>(v)
+            }
+            "OrchestrationProjectShellProjectIconMonogram" => {
+                rt::<t3_api::types::OrchestrationProjectShellProjectIconMonogram>(v)
             }
             "OrchestrationSearchThreadRpcError" => {
                 rt::<t3_api::tagged::OrchestrationSearchThreadRpcError>(v)
@@ -3770,6 +3793,20 @@ pub fn roundtrip(
                     t3_api::types::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemWebSearch,
                 >(v)
             }
+            "OrchestrationV2ThreadShellForkedFrom" => {
+                rt::<t3_api::tagged::OrchestrationV2ThreadShellForkedFrom>(v)
+            }
+            "OrchestrationV2ThreadShellForkedFromNode" => {
+                rt::<t3_api::types::OrchestrationV2ThreadShellForkedFromNode>(v)
+            }
+            "OrchestrationV2ThreadShellForkedFromProviderThread" => {
+                rt::<
+                    t3_api::types::OrchestrationV2ThreadShellForkedFromProviderThread,
+                >(v)
+            }
+            "OrchestrationV2ThreadShellForkedFromRun" => {
+                rt::<t3_api::types::OrchestrationV2ThreadShellForkedFromRun>(v)
+            }
             "OrchestrationV2ThreadStreamItem" => {
                 rt::<t3_api::tagged::OrchestrationV2ThreadStreamItem>(v)
             }
@@ -4334,6 +4371,14 @@ pub fn roundtrip(
             "ProjectMutationProjectUpdate" => {
                 rt::<t3_api::types::ProjectMutationProjectUpdate>(v)
             }
+            "ProjectProjectIcon" => rt::<t3_api::tagged::ProjectProjectIcon>(v),
+            "ProjectProjectIconEmoji" => rt::<t3_api::types::ProjectProjectIconEmoji>(v),
+            "ProjectProjectIconLucide" => {
+                rt::<t3_api::types::ProjectProjectIconLucide>(v)
+            }
+            "ProjectProjectIconMonogram" => {
+                rt::<t3_api::types::ProjectProjectIconMonogram>(v)
+            }
             "ProjectReadFileError" => rt::<t3_api::types::ProjectReadFileError>(v),
             "ProjectReadFileInput" => rt::<t3_api::types::ProjectReadFileInput>(v),
             "ProjectReadFileResult" => rt::<t3_api::types::ProjectReadFileResult>(v),
@@ -4354,6 +4399,9 @@ pub fn roundtrip(
             }
             "ProjectSearchEntriesResult" => {
                 rt::<t3_api::types::ProjectSearchEntriesResult>(v)
+            }
+            "ProjectSettingsOverrides" => {
+                rt::<t3_api::types::ProjectSettingsOverrides>(v)
             }
             "ProjectSettingsOverridesWorktreeCleanup" => {
                 rt::<t3_api::tagged::ProjectSettingsOverridesWorktreeCleanup>(v)
@@ -4405,6 +4453,19 @@ pub fn roundtrip(
             }
             "ProviderAuthCompleteRpcError" => {
                 rt::<t3_api::tagged::ProviderAuthCompleteRpcError>(v)
+            }
+            "ProviderAuthInteraction" => rt::<t3_api::tagged::ProviderAuthInteraction>(v),
+            "ProviderAuthInteractionBrowser" => {
+                rt::<t3_api::types::ProviderAuthInteractionBrowser>(v)
+            }
+            "ProviderAuthInteractionCredentials" => {
+                rt::<t3_api::types::ProviderAuthInteractionCredentials>(v)
+            }
+            "ProviderAuthInteractionDeviceCode" => {
+                rt::<t3_api::types::ProviderAuthInteractionDeviceCode>(v)
+            }
+            "ProviderAuthInteractionTerminal" => {
+                rt::<t3_api::types::ProviderAuthInteractionTerminal>(v)
             }
             "ProviderAuthLogoutRpcError" => {
                 rt::<t3_api::tagged::ProviderAuthLogoutRpcError>(v)
@@ -4492,6 +4553,7 @@ pub fn roundtrip(
             }
             "PullRequestActionInput" => rt::<t3_api::types::PullRequestActionInput>(v),
             "PullRequestActivity" => rt::<t3_api::types::PullRequestActivity>(v),
+            "PullRequestCapabilities" => rt::<t3_api::types::PullRequestCapabilities>(v),
             "PullRequestCommentInput" => rt::<t3_api::types::PullRequestCommentInput>(v),
             "PullRequestCommentUpdateInput" => {
                 rt::<t3_api::types::PullRequestCommentUpdateInput>(v)
@@ -4532,12 +4594,18 @@ pub fn roundtrip(
                 rt::<t3_api::types::PullRequestOperationError>(v)
             }
             "PullRequestPreview" => rt::<t3_api::types::PullRequestPreview>(v),
+            "PullRequestProviderSummary" => {
+                rt::<t3_api::types::PullRequestProviderSummary>(v)
+            }
             "PullRequestReactionInput" => {
                 rt::<t3_api::types::PullRequestReactionInput>(v)
             }
             "PullRequestRef" => rt::<t3_api::types::PullRequestRef>(v),
             "PullRequestReportStateInput" => {
                 rt::<t3_api::types::PullRequestReportStateInput>(v)
+            }
+            "PullRequestReviewCapabilities" => {
+                rt::<t3_api::types::PullRequestReviewCapabilities>(v)
             }
             "PullRequestReviewGuideResult" => {
                 rt::<t3_api::types::PullRequestReviewGuideResult>(v)
@@ -4610,6 +4678,9 @@ pub fn roundtrip(
                 rt::<t3_api::types::PullRequestUnavailableError>(v)
             }
             "PullRequestUpdateInput" => rt::<t3_api::types::PullRequestUpdateInput>(v),
+            "PullRequestViewerPermissions" => {
+                rt::<t3_api::types::PullRequestViewerPermissions>(v)
+            }
             "PullRequestsActivityRpcError" => {
                 rt::<t3_api::tagged::PullRequestsActivityRpcError>(v)
             }
@@ -5084,25 +5155,11 @@ pub fn roundtrip(
             "ServerConfigIssueKeybindingsMalformedConfig" => {
                 rt::<t3_api::types::ServerConfigIssueKeybindingsMalformedConfig>(v)
             }
-            "ServerConfigIssuesItem" => rt::<t3_api::tagged::ServerConfigIssuesItem>(v),
-            "ServerConfigIssuesItemKeybindingsInvalidEntry" => {
-                rt::<t3_api::types::ServerConfigIssuesItemKeybindingsInvalidEntry>(v)
+            "ServerConfigKeybindingsUpdatedPayload" => {
+                rt::<t3_api::types::ServerConfigKeybindingsUpdatedPayload>(v)
             }
-            "ServerConfigIssuesItemKeybindingsMalformedConfig" => {
-                rt::<t3_api::types::ServerConfigIssuesItemKeybindingsMalformedConfig>(v)
-            }
-            "ServerConfigKeybindingsUpdatedPayloadIssuesItem" => {
-                rt::<t3_api::tagged::ServerConfigKeybindingsUpdatedPayloadIssuesItem>(v)
-            }
-            "ServerConfigKeybindingsUpdatedPayloadIssuesItemKeybindingsInvalidEntry" => {
-                rt::<
-                    t3_api::types::ServerConfigKeybindingsUpdatedPayloadIssuesItemKeybindingsInvalidEntry,
-                >(v)
-            }
-            "ServerConfigKeybindingsUpdatedPayloadIssuesItemKeybindingsMalformedConfig" => {
-                rt::<
-                    t3_api::types::ServerConfigKeybindingsUpdatedPayloadIssuesItemKeybindingsMalformedConfig,
-                >(v)
+            "ServerConfigProviderStatusesPayload" => {
+                rt::<t3_api::types::ServerConfigProviderStatusesPayload>(v)
             }
             "ServerConfigStreamEnvironmentThemesUpdatedEvent" => {
                 rt::<t3_api::types::ServerConfigStreamEnvironmentThemesUpdatedEvent>(v)
@@ -5122,6 +5179,9 @@ pub fn roundtrip(
             }
             "ServerConfigStreamUsageLimitSourcesUpdatedEvent" => {
                 rt::<t3_api::types::ServerConfigStreamUsageLimitSourcesUpdatedEvent>(v)
+            }
+            "ServerConfigUsageLimitSourcesUpdatedPayload" => {
+                rt::<t3_api::types::ServerConfigUsageLimitSourcesUpdatedPayload>(v)
             }
             "ServerDeleteAcpRegistrySessionRpcError" => {
                 rt::<t3_api::tagged::ServerDeleteAcpRegistrySessionRpcError>(v)
@@ -5232,6 +5292,7 @@ pub fn roundtrip(
             "ServerProcessResourceHistoryResultErrorSome" => {
                 rt::<t3_api::types::ServerProcessResourceHistoryResultErrorSome>(v)
             }
+            "ServerProvider" => rt::<t3_api::types::ServerProvider>(v),
             "ServerProviderUpdateError" => {
                 rt::<t3_api::types::ServerProviderUpdateError>(v)
             }
@@ -5240,6 +5301,9 @@ pub fn roundtrip(
             }
             "ServerProviderUpdatedPayload" => {
                 rt::<t3_api::types::ServerProviderUpdatedPayload>(v)
+            }
+            "ServerProviderUsageLimits" => {
+                rt::<t3_api::types::ServerProviderUsageLimits>(v)
             }
             "ServerRefreshProvidersPayload" => {
                 rt::<t3_api::types::ServerRefreshProvidersPayload>(v)
@@ -5285,21 +5349,6 @@ pub fn roundtrip(
             }
             "ServerSettings" => rt::<t3_api::types::ServerSettings>(v),
             "ServerSettingsError" => rt::<t3_api::types::ServerSettingsError>(v),
-            "ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanup" => {
-                rt::<
-                    t3_api::tagged::ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanup,
-                >(v)
-            }
-            "ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanupCustom" => {
-                rt::<
-                    t3_api::types::ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanupCustom,
-                >(v)
-            }
-            "ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanupOff" => {
-                rt::<
-                    t3_api::types::ServerSettingsPatchProjectSettingsOverridesValueWorktreeCleanupOff,
-                >(v)
-            }
             "ServerSettingsPatchWorktreeCleanup" => {
                 rt::<t3_api::tagged::ServerSettingsPatchWorktreeCleanup>(v)
             }
@@ -5308,6 +5357,15 @@ pub fn roundtrip(
             }
             "ServerSettingsPatchWorktreeCleanupOff" => {
                 rt::<t3_api::types::ServerSettingsPatchWorktreeCleanupOff>(v)
+            }
+            "ServerSettingsWorktreeCleanup" => {
+                rt::<t3_api::tagged::ServerSettingsWorktreeCleanup>(v)
+            }
+            "ServerSettingsWorktreeCleanupCustom" => {
+                rt::<t3_api::types::ServerSettingsWorktreeCleanupCustom>(v)
+            }
+            "ServerSettingsWorktreeCleanupOff" => {
+                rt::<t3_api::types::ServerSettingsWorktreeCleanupOff>(v)
             }
             "ServerSignalProcessInput" => {
                 rt::<t3_api::types::ServerSignalProcessInput>(v)
@@ -5378,6 +5436,26 @@ pub fn roundtrip(
             "ServerUpdateSettingsPayload" => {
                 rt::<t3_api::types::ServerUpdateSettingsPayload>(v)
             }
+            "ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue" => {
+                rt::<
+                    t3_api::types::ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue,
+                >(v)
+            }
+            "ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanup" => {
+                rt::<
+                    t3_api::tagged::ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanup,
+                >(v)
+            }
+            "ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanupCustom" => {
+                rt::<
+                    t3_api::types::ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanupCustom,
+                >(v)
+            }
+            "ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanupOff" => {
+                rt::<
+                    t3_api::types::ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanupOff,
+                >(v)
+            }
             "ServerUpdateSettingsPayloadProviderInstanceMutation" => {
                 rt::<
                     t3_api::tagged::ServerUpdateSettingsPayloadProviderInstanceMutation,
@@ -5406,19 +5484,6 @@ pub fn roundtrip(
             }
             "ServerUpsertKeybindingResult" => {
                 rt::<t3_api::types::ServerUpsertKeybindingResult>(v)
-            }
-            "ServerUpsertKeybindingResultIssuesItem" => {
-                rt::<t3_api::tagged::ServerUpsertKeybindingResultIssuesItem>(v)
-            }
-            "ServerUpsertKeybindingResultIssuesItemKeybindingsInvalidEntry" => {
-                rt::<
-                    t3_api::types::ServerUpsertKeybindingResultIssuesItemKeybindingsInvalidEntry,
-                >(v)
-            }
-            "ServerUpsertKeybindingResultIssuesItemKeybindingsMalformedConfig" => {
-                rt::<
-                    t3_api::types::ServerUpsertKeybindingResultIssuesItemKeybindingsMalformedConfig,
-                >(v)
             }
             "ServerUpsertKeybindingRpcError" => {
                 rt::<t3_api::tagged::ServerUpsertKeybindingRpcError>(v)
@@ -5670,6 +5735,9 @@ pub fn roundtrip(
                 rt::<t3_api::types::ToolActivitySourceIconWebsite>(v)
             }
             "UsageLimitSourceError" => rt::<t3_api::types::UsageLimitSourceError>(v),
+            "UsageLimitSourceSnapshot" => {
+                rt::<t3_api::types::UsageLimitSourceSnapshot>(v)
+            }
             "UsagePricing" => rt::<t3_api::types::UsagePricing>(v),
             "UsageReadError" => rt::<t3_api::types::UsageReadError>(v),
             "UsageSummary" => rt::<t3_api::types::UsageSummary>(v),
