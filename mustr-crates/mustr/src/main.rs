@@ -7,6 +7,7 @@ mod agent_review_store;
 mod agent_threads;
 mod app_settings;
 mod data_dir;
+mod hidden_actions;
 mod home;
 mod inbox;
 mod keymap;
@@ -398,6 +399,7 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     git_ui::init(cx);
     inspector_ui::init(app_state.clone(), cx);
     which_key::init(cx);
+    hidden_actions::init(cx);
     app_settings::observe_app_settings(cx);
     title_bar::init(cx);
     status_bar::init(cx);

@@ -20,6 +20,7 @@ assets.workspace = true
 clap.workspace = true
 client.workspace = true
 command_palette.workspace = true
+command_palette_hooks.workspace = true
 db.workspace = true
 diagnostics.workspace = true
 dirs.workspace = true
