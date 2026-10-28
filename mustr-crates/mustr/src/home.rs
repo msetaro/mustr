@@ -39,7 +39,7 @@ pub struct HomeOptions {
     /// Opens the first open pull request once the list loads. For smoke tests.
     pub open_first_pull_request: bool,
     /// Opens a review of this agent thread once the threads load. For smoke tests.
-    pub open_thread: Option<(String, ReviewScope)>,
+    pub review_thread: Option<(String, ReviewScope)>,
 }
 
 impl Global for HomeOptions {}
@@ -121,7 +121,7 @@ pub struct HomeView {
     opening: Option<Opening>,
     open_error: Option<SharedString>,
     open_first_pull_request: bool,
-    open_thread: Option<(String, ReviewScope)>,
+    review_thread: Option<(String, ReviewScope)>,
     _load_tasks: Vec<Task<()>>,
     _subscription: Subscription,
 }
@@ -158,7 +158,7 @@ impl HomeView {
             opening: None,
             open_error: None,
             open_first_pull_request: options.open_first_pull_request,
-            open_thread: options.open_thread,
+            review_thread: options.review_thread,
             _load_tasks: Vec::new(),
             _subscription: subscription,
         };
@@ -229,7 +229,7 @@ impl HomeView {
                         this.agent_work = Loadable::Failed(error);
                     }
                 }
-                if let Some((thread_id, scope)) = this.open_thread.take() {
+                if let Some((thread_id, scope)) = this.review_thread.take() {
                     match this
                         .all_threads
                         .iter()
@@ -855,24 +855,22 @@ impl HomeView {
             Loadable::Loaded(threads) => Some(threads.len()),
             _ => None,
         };
-        let body = match &self.threads {
-            Loadable::NotLoaded => None,
-            Loadable::Loading => Some(muted_line("Loading agent threads…").into_any_element()),
-            Loadable::Failed(error) => Some(error_line(error.clone()).into_any_element()),
-            Loadable::Loaded(threads) if threads.is_empty() => {
-                Some(muted_line("No agent threads yet.").into_any_element())
-            }
-            Loadable::Loaded(threads) => Some(
-                v_flex()
-                    .children(
-                        threads
-                            .iter()
-                            .enumerate()
-                            .map(|(index, thread)| render_thread(index, thread).into_any_element()),
-                    )
-                    .into_any_element(),
-            ),
-        };
+        let body =
+            match &self.threads {
+                Loadable::NotLoaded => None,
+                Loadable::Loading => Some(muted_line("Loading agent threads…").into_any_element()),
+                Loadable::Failed(error) => Some(error_line(error.clone()).into_any_element()),
+                Loadable::Loaded(threads) if threads.is_empty() => {
+                    Some(muted_line("No agent threads yet.").into_any_element())
+                }
+                Loadable::Loaded(threads) => Some(
+                    v_flex()
+                        .children(threads.iter().enumerate().map(|(index, thread)| {
+                            render_thread(index, thread, cx).into_any_element()
+                        }))
+                        .into_any_element(),
+                ),
+            };
         section("Recent agent threads", count, body, cx)
     }
 }
@@ -954,18 +952,32 @@ fn thread_status(status: &ThreadStatus) -> impl IntoElement {
         )
 }
 
-fn render_thread(index: usize, thread: &ThreadRow) -> impl IntoElement {
+fn render_thread(index: usize, thread: &ThreadRow, cx: &mut Context<HomeView>) -> impl IntoElement {
     let details = [thread.branch.as_deref(), thread.project.as_deref()]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
         .join(" · ");
+    let thread_id = thread.id.clone();
+    let title = SharedString::from(thread.title.clone());
     h_flex()
         .id(("agent-thread", index))
         .w_full()
         .gap_3()
         .px_2()
         .py_1p5()
+        .rounded(tokens::CORNER_RADIUS / 2.)
+        .cursor_pointer()
+        .hover(|style| style.bg(cx.theme().colors().element_hover))
+        .on_click(cx.listener(move |this, _, window, cx| {
+            thread_chat::open_thread(
+                thread_id.clone(),
+                title.clone(),
+                this.workspace.clone(),
+                window,
+                cx,
+            )
+        }))
         .child(
             v_flex()
                 .flex_1()

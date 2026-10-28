@@ -1,7 +1,7 @@
 use crate::{app_settings::INITIAL_SETTINGS, home::HomeView, nav_panel::NavPanel};
 use gpui::{
-    App, AppContext as _, Context, Entity, Menu, MenuItem, OsAction, PromptLevel, TaskExt as _,
-    TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions, point, px,
+    App, AppContext as _, Context, Entity, Global, Menu, MenuItem, OsAction, PromptLevel,
+    TaskExt as _, TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions, point, px,
 };
 use review::{OpenThreadChat, ToggleFileTree};
 use settings::{Settings as _, SettingsStore};
@@ -132,8 +132,19 @@ pub fn init(cx: &mut App) {
     cx.set_menus(app_menus());
 }
 
+/// Agent threads to open in the first window. For smoke tests and screenshots.
+#[derive(Clone, Debug, Default)]
+pub struct StartupThreads {
+    pub open_thread: Option<String>,
+    pub new_thread: bool,
+}
+
+impl Global for StartupThreads {}
+
 /// Opens a window with an empty workspace showing mustr's home view.
 pub fn open_home_window(app_state: Arc<AppState>, cx: &mut App) {
+    let startup_threads = cx.try_global::<StartupThreads>().cloned();
+    cx.remove_global::<StartupThreads>();
     let open_window = workspace::open_new(
         OpenOptions::default(),
         app_state,
@@ -142,6 +153,21 @@ pub fn open_home_window(app_state: Arc<AppState>, cx: &mut App) {
             let workspace_handle = workspace.weak_handle();
             let home = cx.new(|cx| HomeView::new(workspace_handle, window, cx));
             workspace.add_item_to_active_pane(Box::new(home), None, true, window, cx);
+            let Some(startup_threads) = startup_threads else {
+                return;
+            };
+            if let Some(thread_id) = startup_threads.open_thread {
+                thread_chat::open_thread(
+                    thread_id,
+                    "Agent thread".into(),
+                    workspace.weak_handle(),
+                    window,
+                    cx,
+                );
+            }
+            if startup_threads.new_thread {
+                thread_chat::ThreadView::open_new(workspace, window, cx);
+            }
         },
     );
     cx.spawn(async move |cx| {
