@@ -809,7 +809,6 @@ impl ThreadView {
                 let preview = image.clone();
                 frame
                     .cursor_pointer()
-                    .tooltip(ui::Tooltip::text(name.clone()))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_image_preview(name.clone(), preview.clone(), window, cx)
                     }))
@@ -851,7 +850,10 @@ impl ThreadView {
             return div().into_any_element();
         };
         let key = first.id.clone();
-        let expanded = self.expanded.contains(&key);
+        // Runs of work and tool calls share `expanded`, so a run's key mustn't be its first
+        // item's id, or expanding the run would expand that item too.
+        let expanded_key = format!("work:{key}");
+        let expanded = self.expanded.contains(&expanded_key);
         let item_refs = items.iter().collect::<Vec<_>>();
         let in_progress = items.iter().any(|item| item.status.is_in_progress());
         let failed = items
@@ -864,7 +866,9 @@ impl ThreadView {
             .debug_selector(|| selector)
             .gap_1p5()
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_expanded(key.clone(), cx)))
+            .on_click(
+                cx.listener(move |this, _, _, cx| this.toggle_expanded(expanded_key.clone(), cx)),
+            )
             .child(
                 Icon::new(if expanded {
                     IconName::ChevronDown

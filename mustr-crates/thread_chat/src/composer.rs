@@ -931,10 +931,10 @@ impl ThreadView {
             })
             .bg(palette.surface_2.hsla())
             .cursor_pointer()
-            .tooltip(Tooltip::text(match &failed {
-                Some(reason) => format!("{name}: {reason}"),
-                None => name.to_string(),
-            }))
+            // The name shows in the preview; a failed upload says why.
+            .when_some(failed.clone(), |this, reason| {
+                this.tooltip(Tooltip::text(format!("{name}: {reason}")))
+            })
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.open_image_preview(name.clone(), thumbnail.clone(), window, cx)
             }))

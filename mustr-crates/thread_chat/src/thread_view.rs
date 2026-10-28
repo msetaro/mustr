@@ -69,7 +69,8 @@ pub struct ThreadView {
     pub(crate) row_revisions: Vec<u64>,
     pub(crate) list_state: ListState,
     pub(crate) markdown: HashMap<String, Entity<Markdown>>,
-    /// Expanded runs of work (by their first item's id) and expanded tool calls (by id).
+    /// Expanded runs of work (by `work:` and their first item's id) and expanded tool calls (by
+    /// id).
     pub(crate) expanded: HashSet<String>,
     pub(crate) loading_outputs: HashSet<String>,
     pub(crate) composer: Entity<Editor>,

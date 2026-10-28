@@ -593,6 +593,19 @@ async fn messages_and_tools_show_their_images(cx: &mut TestAppContext) {
     let work = cx.debug_bounds("thread-work-header-i2").unwrap();
     cx.simulate_click(work.center(), gpui::Modifiers::none());
     cx.run_until_parked();
+    // Expanding the run doesn't expand its first call.
+    let view = workspace.read_with(cx, |workspace, cx| {
+        workspace
+            .active_pane()
+            .read(cx)
+            .active_item()
+            .and_then(|item| item.downcast::<ThreadView>())
+            .unwrap()
+    });
+    view.read_with(cx, |view, _| {
+        assert!(view.expanded.contains("work:i2"));
+        assert!(!view.expanded.contains("i2"));
+    });
     let tool = cx.debug_bounds("thread-work-item-i4b").unwrap();
     cx.simulate_click(tool.center(), gpui::Modifiers::none());
     cx.run_until_parked();
