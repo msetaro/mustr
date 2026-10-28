@@ -33,6 +33,9 @@ mod zed_services;
 // WP4, ship the work:
 // WP5, scheduled tasks:
 // WP6, terminals and worktrees:
+// WP7, macOS:
+#[cfg(target_os = "macos")]
+mod macos;
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
@@ -441,4 +444,7 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     // WP4, ship the work:
     // WP5, scheduled tasks:
     // WP6, terminals and worktrees:
+    // WP7, macOS:
+    #[cfg(target_os = "macos")]
+    macos::init(cx);
 }

@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# mustr-check-macos: type-check mustr's crates for Apple silicon macOS from Linux.
+#
+# Runs `cargo clippy --all-targets --target aarch64-apple-darwin -- -D warnings`
+# for each crate in mustr-crates/ (or the crates given), so code behind
+# `cfg(target_os = "macos")` is checked without a Mac. See mustr-docs/MACOS.md.
+#
+# There's no macOS SDK on Linux, so nothing is built or linked:
+#   - C code from build scripts goes to a stand-in compiler and archiver that
+#     write empty files. `cargo check` never links them.
+#   - gpui_apple's build script does nothing on a non-Apple host, so its shader
+#     outputs (`shaders.metallib`, `stitched_shaders.metal`) are stubbed with
+#     empty files. A check never runs them.
+#
+# Usage: script/mustr-check-macos [crate...]
+# Environment: MUSTR_MACOS_CHECK_TARGET_DIR (default target/macos-check).
+# Exit codes: 0 clean, 1 a crate failed.
+set -euo pipefail
+
+TARGET=aarch64-apple-darwin
+REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
+cd "$REPO"
+rustup target add "$TARGET" >/dev/null 2>&1
+export CARGO_TARGET_DIR="${MUSTR_MACOS_CHECK_TARGET_DIR:-$REPO/target/macos-check}"
+
+# A fixed place, so build scripts that watch CC_<target> don't rerun each time.
+TOOLS="$CARGO_TARGET_DIR/stand-in-toolchain"
+mkdir -p "$TOOLS"
+cat > "$TOOLS/cc" <<'EOF'
+#!/bin/sh
+out=""; prev=""
+for arg in "$@"; do
+  [ "$prev" = "-o" ] && out="$arg"
+  prev="$arg"
+done
+[ -n "$out" ] && : > "$out"
+exit 0
+EOF
+cat > "$TOOLS/ar" <<'EOF'
+#!/bin/sh
+[ -n "${2:-}" ] && : > "$2"
+exit 0
+EOF
+chmod +x "$TOOLS/cc" "$TOOLS/ar"
+export CC_aarch64_apple_darwin="$TOOLS/cc" CXX_aarch64_apple_darwin="$TOOLS/cc"
+export AR_aarch64_apple_darwin="$TOOLS/ar"
+
+stub_shaders() {
+  local dir
+  for dir in "$CARGO_TARGET_DIR/$TARGET"/debug/build/gpui_apple-*/out; do
+    [ -d "$dir" ] || continue
+    [ -f "$dir/shaders.metallib" ] || : > "$dir/shaders.metallib"
+    [ -f "$dir/stitched_shaders.metal" ] || : > "$dir/stitched_shaders.metal"
+  done
+}
+
+if [ $# -gt 0 ]; then
+  CRATES=("$@")
+else
+  mapfile -t CRATES < <(sed -n 's/^name = "\(.*\)"$/\1/p' mustr-crates/*/Cargo.toml | sort -u)
+fi
+
+failed=()
+for crate in "${CRATES[@]}"; do
+  echo "== $crate"
+  for attempt in 1 2 3; do
+    if output="$(cargo clippy -p "$crate" --all-targets --target "$TARGET" \
+      --message-format short -- -D warnings 2>&1)"; then
+      echo "ok"
+      break
+    fi
+    if [ "$attempt" -lt 3 ] && grep -q "gpui_apple.*shaders\.metal.*No such file" <<< "$output"; then
+      stub_shaders
+      continue
+    fi
+    grep -v '^ *\(Checking\|Compiling\|Blocking\)\|^warning: [a-z0-9_-]*@' <<< "$output" || true
+    failed+=("$crate")
+    break
+  done
+done
+
+if [ ${#failed[@]} -gt 0 ]; then
+  echo "failed for $TARGET: ${failed[*]}"
+  exit 1
+fi
+echo "all clean for $TARGET"

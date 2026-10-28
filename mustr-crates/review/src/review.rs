@@ -2864,7 +2864,7 @@ pub(crate) mod tests {
         assert!(!saved.comments[0].added, "not added until confirmed");
 
         // Confirming adds it to the pending review and gives the diff the focus back.
-        cx.simulate_keystrokes("ctrl-enter");
+        cx.simulate_keystrokes("secondary-enter");
         let saved = backend.last_saved();
         assert_eq!(
             saved.comments,
@@ -3107,7 +3107,7 @@ pub(crate) mod tests {
         // The forge refuses: the error shows, and nothing written is lost.
         *backend.fail_with.lock() =
             Some("GitHub: User can only have one pending review per pull request".to_string());
-        cx.simulate_keystrokes("ctrl-enter");
+        cx.simulate_keystrokes("secondary-enter");
         let submission = ReviewSubmission {
             verdict: ReviewVerdict::RequestChanges,
             body: "Please fix the typo.".to_string(),
@@ -3164,7 +3164,7 @@ pub(crate) mod tests {
             review_view.set_submit_mode(SubmitMode::Comment, cx);
         });
         cx.simulate_input("Thanks!");
-        cx.simulate_keystrokes("ctrl-enter");
+        cx.simulate_keystrokes("secondary-enter");
         assert_eq!(
             backend.writes().last(),
             Some(&Call::Comment("Thanks!".to_string()))
@@ -3194,7 +3194,7 @@ pub(crate) mod tests {
         card.update_in(cx, |card, window, cx| card.start_reply(window, cx));
         cx.simulate_input("Fixed in the next push.");
         *backend.fail_with.lock() = Some("Resource not accessible by integration".into());
-        cx.simulate_keystrokes("ctrl-enter");
+        cx.simulate_keystrokes("secondary-enter");
         assert_eq!(
             backend.writes(),
             vec![Call::Reply(
@@ -3265,7 +3265,7 @@ pub(crate) mod tests {
         editor.update_in(cx, |editor, window, cx| {
             editor.set_text("Reworded.", window, cx)
         });
-        cx.simulate_keystrokes("ctrl-enter");
+        cx.simulate_keystrokes("secondary-enter");
         assert_eq!(
             backend.writes().last(),
             Some(&Call::Update(

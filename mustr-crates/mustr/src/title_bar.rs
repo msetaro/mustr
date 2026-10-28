@@ -3,8 +3,15 @@
 //!
 //! Zed's `title_bar` crate is collab-centric (sign-in, calls, project and branch pickers), so
 //! mustr wraps `PlatformTitleBar` directly, the way `TitleBar` does in
-//! `crates/title_bar/src/title_bar.rs`. `PlatformTitleBar` draws the Linux client-side window
-//! controls, handles dragging and double-click to maximize, and the window menu.
+//! `crates/title_bar/src/title_bar.rs`. `PlatformTitleBar`
+//! (`crates/platform_title_bar/src/platform_title_bar.rs`) handles each platform:
+//! - On Linux, it draws the client-side window controls and the window menu, and double-click
+//!   maximizes.
+//! - On macOS, it draws no controls and leaves room on the left for the traffic lights, which
+//!   `build_window_options` places at (9, 9). Double-click does what the user chose in System
+//!   Settings (zoom, minimize, or nothing).
+//! - Everywhere, dragging the empty parts of the bar moves the window. mustr's window options set
+//!   `app_owns_titlebar_drag`, so on macOS this drag is the app's, not AppKit's.
 //!
 //! The tabs replace Zed's pane tab bar, which mustr's default settings hide
 //! (`tab_bar.show: false`). They show the items of the workspace's active pane, and switch and
@@ -316,12 +323,16 @@ impl MustrTitleBar {
 
 impl Render for MustrTitleBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A press on a tab or a button mustn't start moving the window, or a click with a little
+        // mouse movement would be lost to the move. Copied from Zed's `TitleBar`, which stops
+        // the same way around its buttons.
         let children = [
             h_flex()
                 .id("title-bar-tabs")
                 .min_w_0()
                 .gap(px(4.))
                 .overflow_x_scroll()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .children(self.render_tabs(cx))
                 .child(self.render_new_tab_button(cx))
                 .into_any_element(),
@@ -330,6 +341,7 @@ impl Render for MustrTitleBar {
                 .pl_2()
                 .pr_1()
                 .gap(px(8.))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(self.render_search_box(window, cx))
                 .child(self.render_connection_status(cx))
                 .into_any_element(),
