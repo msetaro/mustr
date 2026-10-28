@@ -416,8 +416,7 @@ impl PullRequestStatus {
         };
         let summary =
             backend.call::<rpc::PullRequestsSummary>(pull_request.reference.clone(), Access::Read);
-        let checks =
-            backend.call::<rpc::PullRequestsChecks>(pull_request.reference, Access::Read);
+        let checks = backend.call::<rpc::PullRequestsChecks>(pull_request.reference, Access::Read);
         self._load = Some(cx.spawn(async move |this, cx| {
             let (summary, checks) = futures::join!(summary, checks);
             this.update(cx, |this, cx| {
@@ -824,21 +823,49 @@ pub struct ThreadToolbar {
     /// The thread view it's over, which may be a draft that becomes a thread.
     view: Option<WeakEntity<ThreadView>>,
     menu: MenuSlot,
+    location: ToolbarItemLocation,
     _view: Option<Subscription>,
+    _activation: Subscription,
 }
 
 impl ThreadToolbar {
-    pub fn new(workspace: WeakEntity<Workspace>) -> Self {
+    pub fn new(
+        workspace: WeakEntity<Workspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        // T3 doesn't watch checkouts; like T3's app, look again when the window comes back.
+        let activation = cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                this.refresh_status(cx);
+            }
+        });
         Self {
             workspace,
             thread: None,
             view: None,
             menu: MenuSlot::default(),
+            location: ToolbarItemLocation::Hidden,
             _view: None,
+            _activation: activation,
         }
     }
 
+    fn refresh_status(&self, cx: &mut Context<Self>) {
+        if self.location == ToolbarItemLocation::Hidden {
+            return;
+        }
+        if let Some(thread) = &self.thread {
+            thread.git.update(cx, |git, cx| git.refresh(cx));
+        }
+    }
+
+    /// The thread the toolbar shows, while it shows one.
+    #[cfg(test)]
     pub fn thread_id(&self) -> Option<&str> {
+        if self.location == ToolbarItemLocation::Hidden {
+            return None;
+        }
         self.thread.as_ref().map(|thread| thread.thread_id.as_str())
     }
 
@@ -849,11 +876,14 @@ impl ThreadToolbar {
             .as_ref()
             .and_then(WeakEntity::upgrade)
             .and_then(|view| view.read(cx).thread_id().map(str::to_string));
+        // The last thread's parts stay while something else shows, so its git keeps going
+        // while, say, the review of its changes opens.
         let Some(thread_id) = thread_id else {
-            self.thread = None;
-            return ToolbarItemLocation::Hidden;
+            self.location = ToolbarItemLocation::Hidden;
+            return self.location;
         };
-        if self.thread_id() != Some(thread_id.as_str()) {
+        let kept = self.thread.as_ref().map(|thread| thread.thread_id.as_str());
+        if kept != Some(thread_id.as_str()) {
             let git = ThreadGit::for_thread(&thread_id, cx);
             let workspace = self.workspace.clone();
             let controls = cx.new(|cx| {
@@ -904,7 +934,8 @@ impl ThreadToolbar {
                 pull_request,
             });
         }
-        ToolbarItemLocation::PrimaryLeft
+        self.location = ToolbarItemLocation::PrimaryLeft;
+        self.location
     }
 
     fn open_branch_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1013,6 +1044,16 @@ impl ThreadToolbar {
 
     fn render_branch(&self, thread: &ToolbarThread, cx: &mut Context<Self>) -> AnyElement {
         let git = thread.git.read(cx);
+        if git.checkout().is_none() {
+            let waiting = git
+                .status_error()
+                .cloned()
+                .unwrap_or_else(|| "Waiting for T3…".into());
+            return Label::new(waiting)
+                .size(LabelSize::Small)
+                .color(Color::Muted)
+                .into_any_element();
+        }
         let palette = palette(cx);
         let status = git.status();
         let branch = status
@@ -1034,13 +1075,12 @@ impl ThreadToolbar {
             .checkout()
             .map(|checkout| format!("{} · switch or create a branch", checkout.cwd))
             .unwrap_or_else(|| "Switch or create a branch".to_string());
-        let has_checkout = git.checkout().is_some();
         h_flex()
             .gap(px(8.))
             .child(
                 Chip::new("thread-branch", branch)
                     .dot(dot)
-                    .menu_indicator(has_checkout)
+                    .menu_indicator(true)
                     .tooltip(tooltip)
                     .on_click(
                         cx.listener(|this, _, window, cx| this.open_branch_picker(window, cx)),
@@ -1062,6 +1102,10 @@ impl ThreadToolbar {
             .on_click(cx.listener(|this, event, window, cx| {
                 this.deploy_pull_request_menu(event, window, cx)
             }));
+        if status.project_id.is_none() {
+            // T3 hasn't listed the thread yet.
+            return div().into_any_element();
+        }
         let Some(pull_request) = status.pull_request().cloned() else {
             return h_flex()
                 .child(
@@ -1212,16 +1256,16 @@ impl ToolbarItemView for ThreadToolbar {
         self._view = view.as_ref().map(|view| {
             // A draft becomes a thread once it launches.
             cx.observe(view, |this, _, cx| {
-                let had_thread = this.thread.is_some();
-                let location = this.sync_thread(cx);
-                if this.thread.is_some() != had_thread {
-                    cx.emit(ToolbarItemEvent::ChangeLocation(location));
+                let location = this.location;
+                if this.sync_thread(cx) != location {
+                    cx.emit(ToolbarItemEvent::ChangeLocation(this.location));
                 }
                 cx.notify();
             })
         });
         self.view = view.map(|view| view.downgrade());
         let location = self.sync_thread(cx);
+        self.refresh_status(cx);
         cx.notify();
         location
     }
@@ -1229,7 +1273,11 @@ impl ToolbarItemView for ThreadToolbar {
 
 impl Render for ThreadToolbar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(thread) = &self.thread else {
+        let Some(thread) = self
+            .thread
+            .as_ref()
+            .filter(|_| self.location != ToolbarItemLocation::Hidden)
+        else {
             return div().into_any_element();
         };
         let thread_id = thread.thread_id.clone();

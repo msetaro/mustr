@@ -932,6 +932,8 @@ pub struct ThreadGit {
     /// A branch switch, a new branch, or a pull in flight, by what it says.
     busy: Option<SharedString>,
     notice: Option<Notice>,
+    /// When the agent last finished working in the checkout.
+    run_completed_at: Option<String>,
     _shells: Option<Subscription>,
     _status: Option<Task<()>>,
     _run: Option<Task<()>>,
@@ -940,7 +942,12 @@ pub struct ThreadGit {
 }
 
 #[derive(Default)]
-struct ThreadGits(HashMap<String, WeakEntity<ThreadGit>>);
+struct ThreadGits {
+    gits: HashMap<String, WeakEntity<ThreadGit>>,
+    /// Threads with an action running, or a result still to show, are kept even while no view
+    /// shows them, such as while the review that started from the toolbar opens.
+    pinned: HashMap<String, Entity<ThreadGit>>,
+}
 
 impl Global for ThreadGits {}
 
@@ -949,16 +956,33 @@ impl ThreadGit {
     pub fn for_thread(thread_id: &str, cx: &mut App) -> Entity<Self> {
         if let Some(existing) = cx
             .try_global::<ThreadGits>()
-            .and_then(|gits| gits.0.get(thread_id))
+            .and_then(|gits| gits.gits.get(thread_id))
             .and_then(WeakEntity::upgrade)
         {
             return existing;
         }
         let git = cx.new(|cx| Self::new(thread_id.to_string(), cx));
         let gits = cx.default_global::<ThreadGits>();
-        gits.0.retain(|_, git| git.upgrade().is_some());
-        gits.0.insert(thread_id.to_string(), git.downgrade());
+        gits.gits.retain(|_, git| git.upgrade().is_some());
+        gits.gits.insert(thread_id.to_string(), git.downgrade());
         git
+    }
+
+    fn pin(&self, cx: &mut Context<Self>) {
+        let entity = cx.entity();
+        cx.default_global::<ThreadGits>()
+            .pinned
+            .insert(self.thread_id.clone(), entity);
+    }
+
+    /// Lets the thread's git go with its last view once there's nothing left to show.
+    fn unpin_if_idle(&self, cx: &mut Context<Self>) {
+        if self.is_busy() || self.notice.is_some() || self.run.is_some() {
+            return;
+        }
+        cx.default_global::<ThreadGits>()
+            .pinned
+            .remove(&self.thread_id);
     }
 
     fn new(thread_id: String, cx: &mut Context<Self>) -> Self {
@@ -972,6 +996,7 @@ impl ThreadGit {
             run: None,
             busy: None,
             notice: None,
+            run_completed_at: None,
             _shells: None,
             _status: None,
             _run: None,
@@ -1039,10 +1064,21 @@ impl ThreadGit {
     }
 
     fn update_checkout(&mut self, shells: &Entity<ThreadShells>, cx: &mut Context<Self>) {
+        let shells = shells.read(cx);
         let checkout = shells
-            .read(cx)
             .shell()
             .and_then(|shell| Checkout::of_thread(shell, &self.thread_id));
+        // T3 doesn't watch the checkout, so look again once the agent has worked in it.
+        let run_completed_at = shells
+            .thread(&self.thread_id)
+            .and_then(|thread| thread.latest_run_completed_at.clone());
+        if run_completed_at != self.run_completed_at {
+            let first = self.run_completed_at.is_none();
+            self.run_completed_at = run_completed_at;
+            if !first && checkout == self.checkout {
+                self.refresh(cx);
+            }
+        }
         if checkout == self.checkout {
             return;
         }
@@ -1118,6 +1154,7 @@ impl ThreadGit {
         };
         let action_id = thread_chat::commands::new_id();
         let input = stacked_action_input(&checkout, action.clone(), options, action_id.clone());
+        self.pin(cx);
         self.notice = None;
         self.run = Some(ActionRun::new(action_id, action));
         cx.notify();
@@ -1188,6 +1225,8 @@ impl ThreadGit {
         cx.notify();
     }
 
+    /// Shows what happened. Successes go away on their own, as T3's toasts do; failures stay
+    /// until they're dismissed.
     fn set_notice(&mut self, notice: Notice, cx: &mut Context<Self>) {
         let clears = matches!(notice, Notice::Done(_));
         self.notice = Some(notice.clone());
@@ -1196,8 +1235,7 @@ impl ThreadGit {
                 cx.background_executor().timer(RESULT_VISIBLE).await;
                 this.update(cx, |this, cx| {
                     if this.notice.as_ref() == Some(&notice) {
-                        this.notice = None;
-                        cx.notify();
+                        this.dismiss(cx);
                     }
                 })
                 .ok();
@@ -1211,6 +1249,7 @@ impl ThreadGit {
         if self.run.as_ref().is_some_and(|run| !run.is_running()) {
             self.run = None;
         }
+        self.unpin_if_idle(cx);
         cx.notify();
     }
 
@@ -1333,6 +1372,7 @@ impl ThreadGit {
         self.busy = Some(label.into());
         self.notice = None;
         self.run = None;
+        self.pin(cx);
         cx.notify();
         Some((backend, checkout))
     }
@@ -1650,14 +1690,12 @@ impl ThreadGitControls {
         let git = self.git.read(cx);
         let palette = palette(cx);
         let error_color = cx.theme().status().error;
+        if self.placement == ControlsPlacement::Toolbar && git.run().is_some() {
+            // The progress row says how the action went.
+            return None;
+        }
         let (label, color, tooltip) = match git.notice()? {
-            Notice::Error(error) => {
-                if self.placement == ControlsPlacement::Toolbar && git.run().is_some() {
-                    // The progress row says which step failed.
-                    return None;
-                }
-                ("Failed".to_string(), error_color, error.clone())
-            }
+            Notice::Error(error) => ("Failed".to_string(), error_color, error.clone()),
             Notice::Done(done) => (done.to_string(), palette.ok.hsla(), done.clone()),
         };
         let git = self.git.clone();
@@ -1693,14 +1731,15 @@ impl Render for ThreadGitControls {
             None => "Open in".to_string(),
         };
         let main_disabled = quick.kind == QuickKind::Unavailable || blocked.is_some();
-        let main_tooltip = blocked
-            .or_else(|| quick.hint.clone())
-            .unwrap_or_else(|| match &quick.kind {
-                QuickKind::Run(action) if commits(action) => {
-                    "T3 writes the commit message and the pull request".to_string()
-                }
-                _ => quick.label.clone(),
-            });
+        let main_tooltip =
+            blocked
+                .or_else(|| quick.hint.clone())
+                .unwrap_or_else(|| match &quick.kind {
+                    QuickKind::Run(action) if commits(action) => {
+                        "T3 writes the commit message and the pull request".to_string()
+                    }
+                    _ => quick.label.clone(),
+                });
         let notice = self.render_notice(cx);
         let this = cx.weak_entity();
         let menu_this = this.clone();
@@ -1880,8 +1919,12 @@ impl Render for GitProgressRow {
             .child(steps)
             .child(
                 div()
+                    .id("thread-git-progress-detail")
                     .flex_1()
                     .min_w_0()
+                    .when_some(detail.clone(), |this, (text, _)| {
+                        this.tooltip(Tooltip::text(text))
+                    })
                     .children(detail.map(|(text, color)| {
                         Label::new(text)
                             .size(LabelSize::Small)
@@ -1987,7 +2030,7 @@ impl GitActionDialog {
         let label = action_label(&self.action, pr);
         match &self.default_branch {
             Some(branch) => format!("{label} on {branch}?"),
-            None if self.message.is_some() => "Commit changes".to_string(),
+            None if self.action == GitStackedAction::Commit => "Commit changes".to_string(),
             None => label,
         }
     }

@@ -398,7 +398,8 @@ async fn the_toolbar_shows_over_threads_and_opens_their_editor(cx: &mut TestAppC
     init_test(backend.clone(), cx);
     cx.update(init);
     let (workspace, cx) = workspace(cx).await;
-    let toolbar = cx.new(|_| ThreadToolbar::new(workspace.downgrade()));
+    let toolbar =
+        cx.new_window_entity(|window, cx| ThreadToolbar::new(workspace.downgrade(), window, cx));
     let view = cx.new_window_entity(|window, cx| {
         ThreadView::new(
             backend.clone(),

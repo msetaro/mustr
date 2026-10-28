@@ -1083,3 +1083,41 @@ async fn the_checkout_opens_in_the_last_editor_used(cx: &mut TestAppContext) {
         ]
     );
 }
+
+#[gpui::test]
+async fn running_actions_outlive_their_views(cx: &mut TestAppContext) {
+    let backend = RecordingBackend::with_shell(shell(vec![shell_thread(json!({}))]));
+    let git = thread_git(&backend, cx).await;
+    let id = git.entity_id();
+    git.update(cx, |git, cx| {
+        git.run_action(GitStackedAction::Push, ActionOptions::default(), cx)
+    });
+    // The toolbar lets go of the thread while the review it opened takes its place.
+    drop(git);
+    cx.run_until_parked();
+    let git = cx.update(|cx| ThreadGit::for_thread(THREAD, cx));
+    assert_eq!(git.entity_id(), id);
+    git.read_with(cx, |git, _| {
+        assert!(git.run().is_some_and(ActionRun::is_running))
+    });
+
+    // Once there's nothing to show, the thread's git goes with its last view.
+    let action_id = backend.calls_to("git.runStackedAction")[0].payload["actionId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    backend.push(
+        "git.runStackedAction",
+        progress(
+            "action_failed",
+            &action_id,
+            json!({ "phase": null, "message": "No." }),
+        ),
+    );
+    cx.run_until_parked();
+    git.update(cx, |git, cx| git.dismiss(cx));
+    drop(git);
+    cx.run_until_parked();
+    let git = cx.update(|cx| ThreadGit::for_thread(THREAD, cx));
+    assert_ne!(git.entity_id(), id);
+}
