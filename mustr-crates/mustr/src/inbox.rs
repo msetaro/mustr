@@ -18,7 +18,7 @@ pub struct PullRequestEntry {
     #[serde(default)]
     pub host: Option<String>,
     pub repository: String,
-    pub number: u64,
+    pub number: i64,
     pub title: String,
     #[serde(default)]
     pub author: Option<PullRequestActor>,
@@ -39,6 +39,8 @@ pub struct PullRequestActor {
 impl PullRequestEntry {
     pub fn reference(&self) -> PullRequestRef {
         PullRequestRef {
+            allow_stale: None,
+            expected_account_id: None,
             project_id: self.project_id.clone(),
             host: self.host.clone(),
             repository: self.repository.clone(),
@@ -457,6 +459,8 @@ mod tests {
         assert_eq!(
             first.reference(),
             PullRequestRef {
+                allow_stale: None,
+                expected_account_id: None,
                 project_id: "p1".into(),
                 host: Some("github.com".into()),
                 repository: "msetaro/mustr".into(),
