@@ -11121,6 +11121,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "paths",
+ "picker",
  "platform_title_bar",
  "pretty_assertions",
  "project",

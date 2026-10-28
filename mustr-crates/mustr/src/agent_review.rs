@@ -8,6 +8,9 @@
 //!   T3's diff panel asks for it). Full texts come from T3's checkpoint commits when their
 //!   repository is on this machine, and from the patch otherwise.
 //!
+//! The review's header has the thread's Open in ▾ and Commit ▾ (`thread_git.rs`), so the work
+//! can ship from where it's reviewed.
+//!
 //! Comments stay local ([`AgentReviewStore`]). "Send to agent" batches them, each with its file,
 //! line, and the code it's on, into one message to the thread: a `message.dispatch` command
 //! through `orchestration.dispatchCommand`, queued after any active run, as T3's composer queues
@@ -21,6 +24,7 @@ use crate::{
     nav_panel::NavPanel,
     review_backend::{self, DryRunRpc, PullRequestRpc, write_error},
     t3_connection::{CurrentRpc, T3Connection, T3Session},
+    thread_git::{ControlsPlacement, ThreadGit, ThreadGitControls},
     worktree_git::{ChangeKind, FileText, LocalGit},
 };
 use anyhow::{Context as _, Result, anyhow};
@@ -728,6 +732,14 @@ pub fn open_agent_review(
                     pane.remove_item(replacing.entity_id(), false, false, window, cx)
                 });
             }
+            let git = ThreadGit::for_thread(&target.thread.id, cx);
+            let workspace_handle = workspace.weak_handle();
+            let controls = cx.new(|cx| {
+                ThreadGitControls::new(git, workspace_handle, ControlsPlacement::ReviewHeader, cx)
+            });
+            review.update(cx, |review, cx| {
+                review.set_header_actions(Some(controls.into()), cx)
+            });
             cx.subscribe_in(&review, window, {
                 let thread = target.thread.clone();
                 move |workspace, review, event: &ReviewViewEvent, window, cx| match event {
@@ -759,6 +771,68 @@ pub fn open_agent_review(
             }
         })?;
         Ok(review)
+    })
+}
+
+/// The latest turn T3 can diff, for a thread whose branch has no changes left to review.
+async fn latest_turn(session: &T3Session, thread_id: &str) -> Result<u32> {
+    let snapshot = session
+        .thread_snapshot(thread_id)
+        .await
+        .context("loading the thread's turns")?;
+    turn_checkpoints(&snapshot)
+        .last()
+        .map(|checkpoint| checkpoint.turn)
+        .context("T3 has no finished turns of this thread to review")
+}
+
+/// Opens the review of a thread's work, as the thread toolbar's Review changes does: its whole
+/// changes, or its latest turn when the branch has none (for example, once they're merged).
+pub fn review_thread_work(
+    workspace: &mut Workspace,
+    thread: AgentThread,
+    window: &mut Window,
+    cx: &mut gpui::Context<Workspace>,
+) -> Task<Result<()>> {
+    let changes = open_agent_review(
+        workspace,
+        AgentReviewTarget {
+            thread: thread.clone(),
+            scope: ReviewScope::Changes,
+        },
+        None,
+        window,
+        cx,
+    );
+    let session = T3Connection::global(cx).read(cx).session();
+    cx.spawn_in(window, async move |workspace, cx| {
+        let error = match changes.await {
+            Ok(_) => return Ok(()),
+            Err(error) => error,
+        };
+        let session = session.context("mustr isn't connected to T3")?;
+        let Ok(turn) = latest_turn(&session, &thread.id).await else {
+            return Err(error);
+        };
+        log::info!(
+            "{} has nothing to review in Changes ({error:#}); opening turn {turn}",
+            thread.id
+        );
+        workspace
+            .update_in(cx, |workspace, window, cx| {
+                open_agent_review(
+                    workspace,
+                    AgentReviewTarget {
+                        thread,
+                        scope: ReviewScope::Turn(turn),
+                    },
+                    None,
+                    window,
+                    cx,
+                )
+            })?
+            .await?;
+        Ok(())
     })
 }
 
