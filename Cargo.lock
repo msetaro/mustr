@@ -18363,6 +18363,7 @@ dependencies = [
  "markdown",
  "mustr_ui",
  "parking_lot",
+ "picker",
  "pretty_assertions",
  "project",
  "schemars 1.0.4",

@@ -1,8 +1,35 @@
-//! Tests of thread settings: agents, model options, permission modes, defaults, and commands.
+//! Tests of thread settings and new threads: the pure logic, then the settings bar and the
+//! new-thread form against a recording backend that asserts the exact payloads T3 would get.
 
 use super::*;
+use crate::{
+    SendMessage, ThreadView,
+    actions::NewThreadInWorktree,
+    backend::{Access, AttachmentUpload, ReadOnlyBackend, ThreadBackend},
+    new_thread::form_of,
+};
+use anyhow::{Result, anyhow};
+use collections::HashMap;
+use futures::{
+    FutureExt as _, StreamExt as _, channel::mpsc, future::BoxFuture, stream::BoxStream,
+};
+use gpui::{Entity, TestAppContext, VisualContext as _, VisualTestContext, Window};
+use parking_lot::Mutex;
 use pretty_assertions::assert_eq;
-use t3_api::{tagged::OrchestrationV2Command, types::OrchestrationV2ShellSnapshot};
+use settings::SettingsStore;
+use std::sync::Arc;
+use t3_api::{
+    tagged::{
+        OrchestrationV2Command, OrchestrationV2ShellStreamItem, OrchestrationV2ThreadStreamItem,
+    },
+    types::{
+        OrchestrationV2DispatchCommandResult, OrchestrationV2GetTurnItemInput,
+        OrchestrationV2GetTurnItemResult, OrchestrationV2ShellSnapshot,
+        OrchestrationV2SubscribeShellInput, OrchestrationV2SubscribeThreadInput,
+        OrchestrationV2ThreadDetailSnapshot, OrchestrationV2ThreadLaunchInput,
+        OrchestrationV2ThreadLaunchResult,
+    },
+};
 
 const NOW: &str = "2026-10-27T12:00:00.000Z";
 const THREAD: &str = "thread-1";
@@ -147,6 +174,55 @@ fn settings_json() -> Value {
         "projectSettingsOverrides": {
             "project-web": { "defaultRuntimeMode": "approval-required", "defaultThreadEnvMode": "local" }
         }
+    })
+}
+
+fn thread_json(model_selection: Value) -> Value {
+    json!({
+        "id": THREAD, "projectId": "project-api", "title": "Add retries",
+        "createdAt": NOW, "updatedAt": NOW, "createdBy": "user", "creationSource": "web",
+        "interactionMode": "default", "runtimeMode": "full-access",
+        "modelSelection": model_selection, "providerInstanceId": "claudeAgent",
+        "activeProviderThreadId": null, "archivedAt": null, "deletedAt": null,
+        "forkedFrom": null, "branch": "t3/retries", "worktreePath": "/src/api-worktrees/retries",
+        "lineage": { "rootThreadId": THREAD, "parentThreadId": null, "relationshipToParent": null }
+    })
+}
+
+fn user_message(id: &str, run_id: &str) -> Value {
+    json!({
+        "type": "user_message", "id": id, "threadId": THREAD, "runId": run_id, "nodeId": null,
+        "providerThreadId": null, "providerTurnId": null, "parentItemId": null,
+        "nativeItemRef": null, "ordinal": 1, "status": "completed", "title": null,
+        "startedAt": null, "completedAt": null, "updatedAt": NOW,
+        "messageId": format!("message-{id}"), "text": "Add retries", "attachments": [],
+        "createdBy": "user", "creationSource": "web", "inputIntent": "turn_start"
+    })
+}
+
+fn run_json(id: &str, status: &str) -> Value {
+    json!({
+        "id": id, "threadId": THREAD, "ordinal": 1, "status": status, "userMessageId": "m1",
+        "modelSelection": { "instanceId": "claudeAgent", "model": "claude-opus-4-7" },
+        "providerInstanceId": "claudeAgent", "providerThreadId": null, "activeAttemptId": null,
+        "checkpointId": null, "completedAt": null, "contextHandoffId": null,
+        "requestedAt": NOW, "rootNodeId": null, "startedAt": null
+    })
+}
+
+fn projection_json(model_selection: Value, run_status: &str) -> Value {
+    let item = user_message("i1", "run-1");
+    json!({
+        "thread": thread_json(model_selection),
+        "attempts": [], "checkpointScopes": [], "checkpoints": [], "contextHandoffs": [],
+        "contextTransfers": [], "messages": [], "nodes": [], "plans": [], "providerSessions": [],
+        "providerThreads": [], "providerTurns": [], "runs": [run_json("run-1", run_status)],
+        "runtimeRequests": [], "subagents": [], "turnItems": [item],
+        "visibleTurnItems": [{
+            "position": 0, "visibility": "local", "sourceThreadId": THREAD,
+            "sourceItemId": "i1", "item": item
+        }],
+        "updatedAt": NOW
     })
 }
 
@@ -463,4 +539,647 @@ fn refs_give_the_base_branch_and_the_worktrees() {
             .collect::<Vec<_>>(),
         [Some("/src/api-worktrees/fix-flaky-test")]
     );
+}
+
+// A recording backend.
+
+#[derive(Clone, Debug, PartialEq)]
+struct RawCall {
+    tag: String,
+    payload: Value,
+    access: Access,
+}
+
+#[derive(Default)]
+struct Recorder {
+    projection: Mutex<Option<Value>>,
+    /// What `call_raw` answers, by tag; anything else fails.
+    responses: Mutex<HashMap<String, Value>>,
+    raw_calls: Mutex<Vec<RawCall>>,
+    commands: Mutex<Vec<OrchestrationV2Command>>,
+    launches: Mutex<Vec<OrchestrationV2ThreadLaunchInput>>,
+    events: Mutex<Option<mpsc::UnboundedSender<Result<OrchestrationV2ThreadStreamItem>>>>,
+}
+
+impl Recorder {
+    fn new() -> Arc<Self> {
+        let recorder = Self::default();
+        recorder.respond("server.getSettings", settings_json());
+        recorder.respond("vcs.listRefs", refs_json());
+        recorder.respond(
+            "projects.ensureScratch",
+            json!({ "projectId": "scratch-1" }),
+        );
+        Arc::new(recorder)
+    }
+
+    fn with_thread(model_selection: Value, run_status: &str) -> Arc<Self> {
+        let recorder = Self::new();
+        *recorder.projection.lock() = Some(projection_json(model_selection, run_status));
+        recorder
+    }
+
+    fn respond(&self, tag: &str, response: Value) {
+        self.responses.lock().insert(tag.into(), response);
+    }
+
+    fn raw_calls(&self, tag: &str) -> Vec<RawCall> {
+        self.raw_calls
+            .lock()
+            .iter()
+            .filter(|call| call.tag == tag)
+            .cloned()
+            .collect()
+    }
+
+    /// The commands sent, without their fresh ids.
+    fn commands(&self) -> Vec<Value> {
+        self.commands
+            .lock()
+            .iter()
+            .map(|command| {
+                let mut command = serde_json::to_value(command).unwrap();
+                let id = command
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("commandId")
+                    .unwrap();
+                assert!(uuid::Uuid::parse_str(id.as_str().unwrap()).is_ok());
+                command
+            })
+            .collect()
+    }
+
+    /// The launches, without their fresh ids.
+    fn launches(&self) -> Vec<Value> {
+        self.launches
+            .lock()
+            .iter()
+            .map(|launch| {
+                let mut launch = serde_json::to_value(launch).unwrap();
+                let object = launch.as_object_mut().unwrap();
+                for id in ["commandId", "threadId"] {
+                    let id = object.remove(id).unwrap();
+                    assert!(uuid::Uuid::parse_str(id.as_str().unwrap()).is_ok());
+                }
+                object["initialMessage"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("messageId");
+                launch
+            })
+            .collect()
+    }
+}
+
+fn ready<T: Send + 'static>(value: Result<T>) -> BoxFuture<'static, Result<T>> {
+    futures::future::ready(value).boxed()
+}
+
+impl ThreadBackend for Recorder {
+    fn shell_snapshot(&self) -> BoxFuture<'static, Result<OrchestrationV2ShellSnapshot>> {
+        ready(serde_json::from_value(shell_json()).map_err(Into::into))
+    }
+
+    fn subscribe_shell(
+        &self,
+        _input: OrchestrationV2SubscribeShellInput,
+    ) -> Result<BoxStream<'static, Result<OrchestrationV2ShellStreamItem>>> {
+        Ok(futures::stream::pending().boxed())
+    }
+
+    fn thread_snapshot(
+        &self,
+        _thread_id: String,
+    ) -> BoxFuture<'static, Result<OrchestrationV2ThreadDetailSnapshot>> {
+        let projection = self.projection.lock().clone();
+        ready(
+            projection
+                .ok_or_else(|| anyhow!("no such thread"))
+                .and_then(|projection| {
+                    serde_json::from_value(
+                        json!({ "snapshotSequence": 10, "projection": projection }),
+                    )
+                    .map_err(Into::into)
+                }),
+        )
+    }
+
+    fn subscribe_thread(
+        &self,
+        _input: OrchestrationV2SubscribeThreadInput,
+    ) -> Result<BoxStream<'static, Result<OrchestrationV2ThreadStreamItem>>> {
+        let (sender, receiver) = mpsc::unbounded();
+        *self.events.lock() = Some(sender);
+        Ok(receiver.boxed())
+    }
+
+    fn turn_item(
+        &self,
+        _input: OrchestrationV2GetTurnItemInput,
+    ) -> BoxFuture<'static, Result<OrchestrationV2GetTurnItemResult>> {
+        ready(Err(anyhow!("no turn items here")))
+    }
+
+    fn providers(&self) -> BoxFuture<'static, Result<Vec<t3_api::types::ServerProvider>>> {
+        ready(Ok(providers()))
+    }
+
+    fn dispatch(
+        &self,
+        command: OrchestrationV2Command,
+    ) -> BoxFuture<'static, Result<OrchestrationV2DispatchCommandResult>> {
+        self.commands.lock().push(command);
+        ready(Ok(OrchestrationV2DispatchCommandResult { sequence: 100 }))
+    }
+
+    fn launch_thread(
+        &self,
+        input: OrchestrationV2ThreadLaunchInput,
+    ) -> BoxFuture<'static, Result<OrchestrationV2ThreadLaunchResult>> {
+        self.launches.lock().push(input);
+        ready(
+            serde_json::from_value(json!({
+                "threadId": THREAD,
+                "resumed": false,
+                "projection": projection_json(json!({ "instanceId": "claudeAgent", "model": "claude-opus-4-7" }), "preparing")
+            }))
+            .map_err(Into::into),
+        )
+    }
+
+    fn call_raw(
+        &self,
+        tag: &str,
+        payload: Value,
+        access: Access,
+    ) -> BoxFuture<'static, Result<Value>> {
+        self.raw_calls.lock().push(RawCall {
+            tag: tag.into(),
+            payload,
+            access,
+        });
+        ready(
+            self.responses
+                .lock()
+                .get(tag)
+                .cloned()
+                .ok_or_else(|| anyhow!("{tag} isn't answered here")),
+        )
+    }
+
+    fn subscribe_raw(
+        &self,
+        tag: &str,
+        _payload: Value,
+        _access: Access,
+    ) -> Result<BoxStream<'static, Result<Value>>> {
+        Err(anyhow!("{tag} isn't followed here"))
+    }
+
+    fn upload(&self, _upload: AttachmentUpload) -> BoxFuture<'static, Result<()>> {
+        ready(Err(anyhow!("no uploads here")))
+    }
+}
+
+// The views.
+
+fn init_test(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        let settings_store = SettingsStore::test(cx);
+        cx.set_global(settings_store);
+        theme_settings::init(theme::LoadThemes::JustBase, cx);
+        cx.bind_keys(crate::key_bindings());
+    });
+}
+
+fn open_view<'a>(
+    backend: Arc<dyn ThreadBackend>,
+    thread_id: Option<&str>,
+    cx: &'a mut TestAppContext,
+) -> (Entity<ThreadView>, &'a mut VisualTestContext) {
+    init_test(cx);
+    let thread_id = thread_id.map(str::to_string);
+    let (view, cx) = cx.add_window_view(|window: &mut Window, cx| {
+        ThreadView::new(backend, None, thread_id, "Loading".into(), window, cx)
+    });
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(900.)));
+    cx.run_until_parked();
+    (view, cx)
+}
+
+fn launch(view: &Entity<ThreadView>, text: &str, cx: &mut VisualTestContext) {
+    let composer = view.read_with(cx, |view, _| view.composer().clone());
+    composer.update_in(cx, |editor, window, cx| editor.set_text(text, window, cx));
+    cx.focus(&composer);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| assert_eq!(view.error(), None));
+}
+
+fn bar(view: &Entity<ThreadView>, cx: &mut VisualTestContext) -> Entity<ThreadSettingsBar> {
+    view.read_with(cx, |view, _| view.settings_bar.clone())
+}
+
+use crate::settings_bar::ThreadSettingsBar;
+
+#[gpui::test]
+async fn drafts_start_with_t3s_defaults(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (view, cx) = open_view(backend.clone(), None, cx);
+
+    // The form asked T3 for its settings and for the first project's branches, read-only.
+    assert_eq!(
+        backend.raw_calls("server.getSettings"),
+        [RawCall {
+            tag: "server.getSettings".into(),
+            payload: json!({}),
+            access: Access::Read,
+        }]
+    );
+    assert_eq!(
+        backend.raw_calls("vcs.listRefs"),
+        [RawCall {
+            tag: "vcs.listRefs".into(),
+            payload: json!({ "cwd": "/src/api", "limit": 100 }),
+            access: Access::Read,
+        }]
+    );
+    for selector in [
+        "thread-settings-model",
+        "thread-settings-options",
+        "thread-settings-access",
+        "thread-settings-plan",
+    ] {
+        assert!(
+            cx.debug_bounds(selector).is_some(),
+            "{selector} isn't rendered"
+        );
+    }
+
+    launch(&view, "Add retries to the webhook dispatcher", cx);
+    assert_eq!(
+        backend.launches(),
+        [json!({
+            "creationSource": "web",
+            // The first project by name; T3's scratch project isn't listed as one.
+            "projectId": "project-api",
+            "title": "Add retries to the webhook dispatcher",
+            "generateTitle": true,
+            // T3's default model, with its options, and fast mode off.
+            "modelSelection": {
+                "instanceId": "claudeAgent", "model": "claude-opus-4-7",
+                "options": [
+                    { "id": "effort", "value": "max" },
+                    { "id": "fastMode", "value": false }
+                ]
+            },
+            // T3's default permission mode, not mustr's own.
+            "runtimeMode": "auto-accept-edits",
+            "interactionMode": "default",
+            // T3's default is a worktree, from the default branch, without fetching first.
+            "workspaceStrategy": { "type": "worktree", "baseRef": "main", "startFromOrigin": false },
+            "initialMessage": { "text": "Add retries to the webhook dispatcher", "attachments": [] }
+        })]
+    );
+}
+
+#[gpui::test]
+async fn drafts_launch_with_what_the_settings_bar_picks(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (view, cx) = open_view(backend.clone(), None, cx);
+    let bar = bar(&view, cx);
+    bar.update(cx, |bar, cx| {
+        bar.pick_model("codex".into(), "gpt-5.5".into(), cx);
+        bar.pick_option("reasoningEffort".into(), string("high"), cx);
+        // Codex can't auto-accept edits, so the draft starts supervised until picked.
+        bar.pick_runtime_mode(RuntimeMode::FullAccess, cx);
+        bar.toggle_plan_mode(cx);
+    });
+    // No command goes to T3 for a draft.
+    assert!(backend.commands().is_empty());
+
+    let form = cx.update(|_, cx| form_of(&view, cx)).unwrap();
+    form.update(cx, |form, cx| {
+        form.pick_ref(
+            crate::new_thread::RefPickerMode::BaseRef,
+            ref_choices(&serde_json::from_value(refs_json()).unwrap())[3].clone(),
+            cx,
+        );
+        form.set_start_from_origin(true, cx);
+    });
+
+    launch(&view, "Plan the retry policy", cx);
+    let launch = &backend.launches()[0];
+    assert_eq!(
+        (
+            &launch["modelSelection"],
+            &launch["runtimeMode"],
+            &launch["interactionMode"],
+            &launch["workspaceStrategy"],
+        ),
+        (
+            &json!({
+                "instanceId": "codex", "model": "gpt-5.5",
+                "options": [
+                    { "id": "reasoningEffort", "value": "high" },
+                    { "id": "serviceTier", "value": "default" }
+                ]
+            }),
+            &json!("full-access"),
+            &json!("plan"),
+            &json!({ "type": "worktree", "baseRef": "origin/main", "startFromOrigin": true }),
+        )
+    );
+}
+
+#[gpui::test]
+async fn agents_without_a_mode_fall_back_to_one_they_have(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (view, cx) = open_view(backend.clone(), None, cx);
+    bar(&view, cx).update(cx, |bar, cx| {
+        bar.pick_model("codex".into(), "gpt-5.5".into(), cx)
+    });
+    launch(&view, "Go", cx);
+    // T3's default is auto-accept edits, which Codex doesn't have.
+    assert_eq!(
+        backend.launches()[0]["runtimeMode"],
+        json!("approval-required")
+    );
+}
+
+#[gpui::test]
+async fn no_project_opens_t3s_scratch_project(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (view, cx) = open_view(backend.clone(), None, cx);
+    let form = cx.update(|_, cx| form_of(&view, cx)).unwrap();
+    form.update(cx, |form, cx| form.select_scratch(cx));
+    cx.run_until_parked();
+    assert_eq!(
+        backend.raw_calls("projects.ensureScratch"),
+        [RawCall {
+            tag: "projects.ensureScratch".into(),
+            payload: json!({}),
+            access: Access::Operate,
+        }]
+    );
+    launch(&view, "What's using port 3000?", cx);
+    let launch = &backend.launches()[0];
+    // T3 gives each scratch thread a folder of its own from `root`.
+    assert_eq!(
+        (&launch["projectId"], &launch["workspaceStrategy"]),
+        (&json!("scratch-1"), &json!({ "type": "root" }))
+    );
+}
+
+#[gpui::test]
+async fn scratch_fails_on_a_dry_run(cx: &mut TestAppContext) {
+    let recorder = Recorder::new();
+    let backend = Arc::new(ReadOnlyBackend::new(
+        recorder.clone(),
+        "MUSTR_DRY_RUN_WRITES is set",
+    ));
+    let (view, cx) = open_view(backend, None, cx);
+    let form = cx.update(|_, cx| form_of(&view, cx)).unwrap();
+    form.update(cx, |form, cx| form.select_scratch(cx));
+    cx.run_until_parked();
+    assert!(recorder.raw_calls("projects.ensureScratch").is_empty());
+    let error = form.read_with(cx, |form, cx| form.new_thread("Hi", cx).unwrap_err());
+    assert_eq!(
+        error,
+        "Couldn't start without a project: Not sent: MUSTR_DRY_RUN_WRITES is set."
+    );
+}
+
+/// Opens a draft filled in for `action`, launches it, and returns what T3 got.
+fn launch_prefilled(action: NewThreadInWorktree, cx: &mut TestAppContext) -> Value {
+    let backend = Recorder::new();
+    let (view, cx) = open_view(backend.clone(), None, cx);
+    let form = cx.update(|_, cx| form_of(&view, cx)).unwrap();
+    form.update(cx, |form, cx| form.prefill(&action, cx));
+    cx.run_until_parked();
+    launch(&view, "Go", cx);
+    backend.launches().remove(0)
+}
+
+#[gpui::test]
+async fn drafts_open_in_an_existing_worktree(cx: &mut TestAppContext) {
+    let launch = launch_prefilled(
+        NewThreadInWorktree {
+            project_id: "project-api".into(),
+            worktree_path: Some("/src/api-worktrees/fix-flaky-test".into()),
+            branch: Some("t3/fix-flaky-test".into()),
+        },
+        cx,
+    );
+    assert_eq!(
+        (&launch["projectId"], &launch["workspaceStrategy"]),
+        (
+            &json!("project-api"),
+            &json!({
+                "type": "existing_worktree",
+                "worktreePath": "/src/api-worktrees/fix-flaky-test",
+                "branch": "t3/fix-flaky-test"
+            })
+        )
+    );
+}
+
+#[gpui::test]
+async fn drafts_open_on_a_branch_of_the_checkout(cx: &mut TestAppContext) {
+    let launch = launch_prefilled(
+        NewThreadInWorktree {
+            project_id: "project-web".into(),
+            worktree_path: None,
+            branch: Some("release/2.4".into()),
+        },
+        cx,
+    );
+    assert_eq!(
+        (&launch["projectId"], &launch["workspaceStrategy"]),
+        (
+            &json!("project-web"),
+            &json!({ "type": "root", "branch": "release/2.4" })
+        )
+    );
+    // The web project's own defaults apply: supervised.
+    assert_eq!(launch["runtimeMode"], json!("approval-required"));
+}
+
+#[gpui::test]
+async fn the_bar_changes_an_open_thread(cx: &mut TestAppContext) {
+    let backend = Recorder::with_thread(
+        json!({
+            "instanceId": "claudeAgent", "model": "claude-opus-4-7",
+            "options": [{ "id": "effort", "value": "max" }]
+        }),
+        "completed",
+    );
+    let (view, cx) = open_view(backend.clone(), Some(THREAD), cx);
+    for selector in [
+        "thread-settings-model",
+        "thread-settings-options",
+        "thread-settings-access",
+        "thread-settings-plan",
+    ] {
+        assert!(
+            cx.debug_bounds(selector).is_some(),
+            "{selector} isn't rendered"
+        );
+    }
+    let bar = bar(&view, cx);
+    bar.update(cx, |bar, cx| {
+        bar.pick_runtime_mode(RuntimeMode::ApprovalRequired, cx);
+        // The current mode is no change.
+        bar.pick_runtime_mode(RuntimeMode::FullAccess, cx);
+        bar.pick_option(
+            "fastMode".into(),
+            ProviderOptionSelectionValue::Boolean(true),
+            cx,
+        );
+        bar.pick_model("claudeAgent".into(), "claude-sonnet-4-6".into(), cx);
+        bar.pick_model("codex".into(), "gpt-5.5".into(), cx);
+    });
+    let plan = cx.debug_bounds("thread-settings-plan").unwrap();
+    cx.simulate_click(plan.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+
+    assert_eq!(
+        backend.commands(),
+        [
+            json!({
+                "type": "thread.runtime-mode.set", "threadId": THREAD,
+                "runtimeMode": "approval-required"
+            }),
+            // One option changes; T3 gets them all.
+            json!({
+                "type": "thread.model-selection.set", "threadId": THREAD,
+                "modelSelection": {
+                    "instanceId": "claudeAgent", "model": "claude-opus-4-7",
+                    "options": [
+                        { "id": "effort", "value": "max" },
+                        { "id": "fastMode", "value": true },
+                        { "id": "contextWindow", "value": "200k" }
+                    ]
+                }
+            }),
+            // Another model keeps the options it takes too: Sonnet has no `max`, so its
+            // default effort.
+            json!({
+                "type": "thread.model-selection.set", "threadId": THREAD,
+                "modelSelection": {
+                    "instanceId": "claudeAgent", "model": "claude-sonnet-4-6",
+                    "options": [{ "id": "effort", "value": "high" }]
+                }
+            }),
+            // Another agent: T3 plans the switch from the same command.
+            json!({
+                "type": "thread.model-selection.set", "threadId": THREAD,
+                "modelSelection": { "instanceId": "codex", "model": "gpt-5.5" }
+            }),
+            json!({
+                "type": "thread.interaction-mode.set", "threadId": THREAD,
+                "interactionMode": "plan"
+            }),
+        ]
+    );
+}
+
+#[gpui::test]
+async fn running_threads_keep_their_agent(cx: &mut TestAppContext) {
+    let backend = Recorder::with_thread(
+        json!({ "instanceId": "claudeAgent", "model": "claude-opus-4-7" }),
+        "running",
+    );
+    let (view, cx) = open_view(backend, Some(THREAD), cx);
+    let locks = bar(&view, cx).update(cx, |bar, cx| bar.locks(cx));
+    assert_eq!(
+        locks,
+        (Some("Stop the agent's run to switch agents."), None, None)
+    );
+}
+
+#[gpui::test]
+async fn a_dry_run_disables_the_bar(cx: &mut TestAppContext) {
+    let recorder = Recorder::with_thread(
+        json!({ "instanceId": "claudeAgent", "model": "claude-opus-4-7" }),
+        "completed",
+    );
+    let backend = Arc::new(ReadOnlyBackend::new(
+        recorder.clone(),
+        "MUSTR_DRY_RUN_WRITES is set",
+    ));
+    let (view, cx) = open_view(backend, Some(THREAD), cx);
+    // Still shown, with what the thread runs.
+    assert!(cx.debug_bounds("thread-settings-model").is_some());
+    let plan = cx.debug_bounds("thread-settings-plan").unwrap();
+    cx.simulate_click(plan.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    let (_, _, blocked) = bar(&view, cx).update(cx, |bar, cx| bar.locks(cx));
+    assert_eq!(blocked.as_deref(), Some("MUSTR_DRY_RUN_WRITES is set"));
+    assert!(recorder.commands.lock().is_empty());
+}
+
+#[gpui::test]
+async fn new_thread_in_worktree_opens_a_filled_in_draft(cx: &mut TestAppContext) {
+    init_test(cx);
+    let backend = Recorder::new();
+    cx.update(|cx| {
+        crate::set_backend(backend.clone(), cx);
+        crate::init(cx);
+    });
+    let fs = project::FakeFs::new(cx.executor());
+    let project = project::Project::test(fs, [], cx).await;
+    let (multi_workspace, cx) = cx.add_window_view(|window, cx| {
+        workspace::MultiWorkspace::test_new(project.clone(), window, cx)
+    });
+    let workspace =
+        multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+    cx.simulate_resize(gpui::size(gpui::px(1200.), gpui::px(900.)));
+
+    workspace.update_in(cx, |workspace, window, cx| {
+        window.dispatch_action(
+            Box::new(NewThreadInWorktree {
+                project_id: "project-api".into(),
+                worktree_path: Some("/src/api-worktrees/fix-flaky-test".into()),
+                branch: Some("t3/fix-flaky-test".into()),
+            }),
+            cx,
+        );
+        let _ = workspace;
+    });
+    cx.run_until_parked();
+    let view = workspace
+        .read_with(cx, |workspace, cx| {
+            workspace.active_item_as::<ThreadView>(cx)
+        })
+        .expect("a draft opened");
+    let new_thread = cx
+        .update(|_, cx| form_of(&view, cx))
+        .unwrap()
+        .read_with(cx, |form, cx| form.new_thread("Fix it", cx))
+        .unwrap();
+    assert_eq!(new_thread.project_id, "project-api");
+    assert_eq!(
+        new_thread.workspace,
+        crate::commands::Workspace::ExistingWorktree {
+            worktree_path: "/src/api-worktrees/fix-flaky-test".into(),
+            branch: Some("t3/fix-flaky-test".into()),
+        }
+    );
+
+    // T3's `mod+shift+a` opens the permission modes; `mod+shift+m` the models.
+    let composer = view.read_with(cx, |view, _| view.composer().clone());
+    cx.focus(&composer);
+    cx.simulate_keystrokes("ctrl-shift-a");
+    cx.run_until_parked();
+    let bar = bar(&view, cx);
+    assert_eq!(
+        bar.read_with(cx, |bar, _| bar.open_menus()),
+        [false, false, true]
+    );
+    cx.focus(&composer);
+    cx.simulate_keystrokes("ctrl-shift-m");
+    cx.run_until_parked();
+    assert!(bar.read_with(cx, |bar, _| bar.open_menus()[0]));
 }

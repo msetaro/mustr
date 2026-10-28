@@ -1,47 +1,62 @@
-//! The form of a draft thread: which project, which agent and model, and whether the agent works
-//! in the project's checkout or in a new worktree. The project list comes from T3's shell, and the
-//! agents and their models from T3's provider catalog (`server.getConfig`).
+//! The form of a draft thread: where the agent works. That's a project, or no project (T3's
+//! scratch folder), and in the project's checkout, a new worktree from a base branch, or a
+//! worktree that already exists. How the agent runs (agent, model, options, permission mode,
+//! plan mode) is picked in the composer's settings bar (`settings_bar.rs`) and kept here until
+//! the thread launches.
+//!
+//! The projects come from T3's shell, the agents and models from T3's provider catalog
+//! (`server.getConfig`), the defaults from T3's settings (`server.getSettings`), and the
+//! branches and worktrees from `vcs.listRefs`.
+
+pub use crate::thread_settings::{AgentChoice, agent_choices};
 
 use crate::{
-    backend::ThreadBackend,
+    actions::NewThreadInWorktree,
+    backend::{Access, ThreadBackend, ThreadBackendExt as _},
     commands::{NewThread, Workspace as ThreadWorkspace},
+    shell::ThreadShells,
+    thread_settings::{
+        self, ModelChoice, ModelOption, RefChoice, ThreadDefaults, compatible_runtime_mode,
+        launch_options, model_selection, parse_options, ref_choices, resolve_options,
+        selection_instance_id, selection_model, selections_from,
+    },
+    thread_view::ThreadView,
 };
-use editor::Editor;
+use collections::HashMap;
 use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, FontWeight, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Task, WeakEntity, Window, div, px,
+    Anchor, App, AppContext as _, Context, DismissEvent, EventEmitter, FontWeight, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window,
+    div, px, rems,
 };
-use mustr_ui::{Card, SegmentedControl, palette, tokens};
-use serde_json::json;
+use mustr_ui::{Card, SegmentedControl};
+use picker::{Picker, PickerDelegate};
 use std::sync::Arc;
-use t3_api::types::{
-    ModelSelection, ProviderInteractionMode, RuntimeMode, ServerProvider, ServerProviderState,
+use t3_api::{
+    rpc,
+    types::{
+        OrchestrationProjectShell, ProjectsEnsureScratchPayload, ProviderInteractionMode,
+        ProviderOptionSelection, ProviderOptionSelectionValue, RuntimeMode,
+        ServerGetSettingsPayload, ServerSettings, ThreadEnvMode, VcsListRefsInput,
+        VcsListRefsInputRefKind,
+    },
 };
 use ui::{
-    Color, ContextMenu, DropdownMenu, DropdownStyle, IconPosition, Label, LabelCommon as _,
-    LabelSize, prelude::*,
+    Button, ButtonStyle, Color, ContextMenu, DropdownMenu, DropdownStyle, Icon, IconName,
+    IconPosition, IconSize, Label, LabelCommon as _, LabelSize, ListItem, ListItemSpacing,
+    PopoverMenu, PopoverMenuHandle, Switch, ToggleState, prelude::*,
 };
+use workspace::Workspace;
 
 pub enum NewThreadFormEvent {
     Changed,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProjectChoice {
-    pub id: String,
-    pub title: String,
-    pub default_model: Option<ModelSelection>,
-}
+/// T3's title for its scratch project (`ensureScratchProject` in T3's
+/// `ManagedProjectFolders.ts`). The form offers it as "No project", ahead of the others.
+const SCRATCH_PROJECT_TITLE: &str = "No project";
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct AgentChoice {
-    pub instance_id: String,
-    pub name: String,
-    /// `(name, slug)`.
-    pub models: Vec<(String, String)>,
-    pub default_model: Option<usize>,
-    pub supported_runtime_modes: Option<Vec<RuntimeMode>>,
-}
+/// How many refs one `vcs.listRefs` page holds, as in T3's branch picker.
+const REF_PAGE_SIZE: i64 = 100;
 
 enum Loadable<T> {
     Loading,
@@ -49,87 +64,97 @@ enum Loadable<T> {
     Loaded(T),
 }
 
+impl<T> Loadable<T> {
+    fn loaded(&self) -> Option<&T> {
+        match self {
+            Self::Loaded(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ProjectPick {
+    Project(String),
+    /// No project: the thread runs in a folder of its own under T3's scratch directory.
+    Scratch,
+}
+
+/// T3's scratch project, which `projects.ensureScratch` finds or creates.
+enum Scratch {
+    Idle,
+    Opening,
+    Ready(String),
+    Failed(SharedString),
+}
+
+/// Where the agent works.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorkspaceKind {
+    NewWorktree,
+    ExistingWorktree,
+    Checkout,
+}
+
+struct RefList {
+    refs: Vec<RefChoice>,
+    is_repo: bool,
+    total: i64,
+}
+
 pub struct NewThreadForm {
-    projects: Loadable<Vec<ProjectChoice>>,
+    backend: Arc<dyn ThreadBackend>,
+    projects: Loadable<Vec<OrchestrationProjectShell>>,
     agents: Loadable<Vec<AgentChoice>>,
-    project: Option<usize>,
-    agent: Option<usize>,
-    model: Option<usize>,
-    use_worktree: bool,
-    base_ref: Entity<Editor>,
+    settings: Loadable<ServerSettings>,
+    project: Option<ProjectPick>,
+    /// The project to pick once the projects load, from [`NewThreadInWorktree`].
+    pending_project: Option<String>,
+    scratch: Scratch,
+    /// The agent and model picked, by instance id and slug.
+    model: Option<(String, String)>,
+    /// The model options picked, or `None` to take the default model's.
+    options: Option<Vec<ProviderOptionSelection>>,
+    runtime_mode: Option<RuntimeMode>,
+    interaction_mode: ProviderInteractionMode,
+    workspace: Option<WorkspaceKind>,
+    base_ref: Option<String>,
+    start_from_origin: Option<bool>,
+    /// The existing worktree picked: its path and branch.
+    worktree: Option<(String, Option<String>)>,
+    /// The checkout's branch, when the draft was opened for one.
+    branch: Option<String>,
+    /// The refs of each project's repository, by its folder.
+    refs: HashMap<String, Loadable<RefList>>,
+    base_ref_picker: PopoverMenuHandle<Picker<RefPickerDelegate>>,
+    worktree_picker: PopoverMenuHandle<Picker<RefPickerDelegate>>,
     _tasks: Vec<Task<()>>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<NewThreadFormEvent> for NewThreadForm {}
 
-/// The agents a thread can start with: enabled, installed, and not reporting an error.
-pub fn agent_choices(providers: &[ServerProvider]) -> Vec<AgentChoice> {
-    providers
-        .iter()
-        .filter(|provider| {
-            provider.enabled
-                && provider.installed
-                && !matches!(
-                    provider.status,
-                    ServerProviderState::Error | ServerProviderState::Disabled
-                )
-        })
-        .map(|provider| {
-            let models = provider
-                .models
-                .iter()
-                .map(|model| (model.name.clone(), model.slug.clone()))
-                .collect::<Vec<_>>();
-            AgentChoice {
-                instance_id: provider.instance_id.clone(),
-                name: provider
-                    .display_name
-                    .clone()
-                    .filter(|name| !name.trim().is_empty())
-                    .unwrap_or_else(|| provider.driver.clone()),
-                default_model: provider
-                    .models
-                    .iter()
-                    .position(|model| model.is_default == Some(true))
-                    .or((!models.is_empty()).then_some(0)),
-                models,
-                supported_runtime_modes: provider.supported_runtime_modes.clone(),
-            }
-        })
-        .collect()
-}
-
-/// New threads ask before the agent runs commands or edits files (`mustr-docs/PLAN.md` §8),
-/// unless the agent doesn't support that.
-pub fn runtime_mode_for(agent: &AgentChoice) -> RuntimeMode {
-    match &agent.supported_runtime_modes {
-        Some(modes) if !modes.contains(&RuntimeMode::ApprovalRequired) => modes
-            .first()
-            .cloned()
-            .unwrap_or(RuntimeMode::ApprovalRequired),
-        _ => RuntimeMode::ApprovalRequired,
-    }
+/// The permission mode a new thread with `agent` starts in: `default` (from T3's settings) if
+/// the agent supports it, or else the first mode it does.
+pub fn runtime_mode_for(agent: &AgentChoice, default: RuntimeMode) -> RuntimeMode {
+    compatible_runtime_mode(default, &agent.runtime_modes())
 }
 
 impl NewThreadForm {
     pub fn new(
         backend: Arc<dyn ThreadBackend>,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let base_ref = cx.new(|cx| {
-            let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Base branch", window, cx);
-            editor.set_text("main", window, cx);
-            editor
-        });
         let load_projects = cx.spawn({
             let backend = backend.clone();
             async move |this, cx| {
                 let mut attempt = 0;
                 loop {
                     let shell = backend.shell_snapshot().await;
-                    let loaded = this.update(cx, |this, cx| this.projects_loaded(shell, cx));
+                    let loaded = this.update(cx, |this, cx| {
+                        this.projects_loaded(shell.map(|shell| shell.projects), cx)
+                    });
                     if !matches!(loaded, Ok(false)) {
                         return;
                     }
@@ -140,195 +165,610 @@ impl NewThreadForm {
                 }
             }
         });
-        let load_agents = cx.spawn(async move |this, cx| {
-            let mut attempt = 0;
-            loop {
-                let providers = backend.providers().await;
-                let loaded = this.update(cx, |this, cx| this.agents_loaded(providers, cx));
-                if !matches!(loaded, Ok(false)) {
-                    return;
+        let load_agents = cx.spawn({
+            let backend = backend.clone();
+            async move |this, cx| {
+                let mut attempt = 0;
+                loop {
+                    let providers = backend.providers().await;
+                    let loaded = this.update(cx, |this, cx| this.agents_loaded(providers, cx));
+                    if !matches!(loaded, Ok(false)) {
+                        return;
+                    }
+                    cx.background_executor()
+                        .timer(crate::backend::retry_delay(attempt))
+                        .await;
+                    attempt += 1;
                 }
-                cx.background_executor()
-                    .timer(crate::backend::retry_delay(attempt))
-                    .await;
-                attempt += 1;
             }
         });
+        let load_settings = cx.spawn({
+            let backend = backend.clone();
+            async move |this, cx| {
+                let mut attempt = 0;
+                loop {
+                    let settings = backend
+                        .call::<rpc::ServerGetSettings>(
+                            ServerGetSettingsPayload(Default::default()),
+                            Access::Read,
+                        )
+                        .await;
+                    let loaded = this.update(cx, |this, cx| this.settings_loaded(settings, cx));
+                    if !matches!(loaded, Ok(false)) {
+                        return;
+                    }
+                    cx.background_executor()
+                        .timer(crate::backend::retry_delay(attempt))
+                        .await;
+                    attempt += 1;
+                }
+            }
+        });
+        // Follow the app's shell too, when there is one, so projects added later show up.
+        let mut subscriptions = Vec::new();
+        if crate::backend(cx).is_some() {
+            let shells = ThreadShells::global(cx);
+            subscriptions.push(cx.observe(&shells, |this, shells, cx| {
+                let projects = shells
+                    .read(cx)
+                    .shell()
+                    .map(|shell| shell.projects.values().cloned().collect::<Vec<_>>());
+                if let Some(projects) = projects {
+                    this.projects_loaded(Ok(projects), cx);
+                }
+            }));
+        }
         Self {
+            backend,
             projects: Loadable::Loading,
             agents: Loadable::Loading,
+            settings: Loadable::Loading,
             project: None,
-            agent: None,
+            pending_project: None,
+            scratch: Scratch::Idle,
             model: None,
-            use_worktree: true,
-            base_ref,
-            _tasks: vec![load_projects, load_agents],
+            options: None,
+            runtime_mode: None,
+            interaction_mode: ProviderInteractionMode::Default,
+            workspace: None,
+            base_ref: None,
+            start_from_origin: None,
+            worktree: None,
+            branch: None,
+            refs: HashMap::default(),
+            base_ref_picker: PopoverMenuHandle::default(),
+            worktree_picker: PopoverMenuHandle::default(),
+            _tasks: vec![load_projects, load_agents, load_settings],
+            _subscriptions: subscriptions,
         }
+    }
+
+    fn changed(&mut self, cx: &mut Context<Self>) {
+        cx.emit(NewThreadFormEvent::Changed);
+        cx.notify();
     }
 
     /// Returns whether the projects loaded.
     fn projects_loaded(
         &mut self,
-        shell: anyhow::Result<t3_api::types::OrchestrationV2ShellSnapshot>,
+        projects: anyhow::Result<Vec<OrchestrationProjectShell>>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let loaded = shell.is_ok();
-        self.projects = match shell {
-            Ok(shell) => {
-                let mut projects = shell
-                    .projects
-                    .into_iter()
-                    .map(|project| ProjectChoice {
-                        id: project.id,
-                        title: project.title,
-                        default_model: project.default_model_selection,
-                    })
-                    .collect::<Vec<_>>();
-                projects.sort_by_key(|project| project.title.to_lowercase());
+        let loaded = projects.is_ok();
+        if !loaded && self.projects.loaded().is_some() {
+            // Keep the projects the shell already gave.
+            return false;
+        }
+        self.projects = match projects {
+            Ok(mut projects) => {
+                projects.sort_by(|left, right| {
+                    (left.title.to_lowercase(), &left.id)
+                        .cmp(&(right.title.to_lowercase(), &right.id))
+                });
                 Loadable::Loaded(projects)
             }
             Err(error) => Loadable::Failed(format!("{error:#}").into()),
         };
-        if self.project.is_none() && self.projects().is_some_and(|p| !p.is_empty()) {
-            self.select_project(0, cx);
+        if let Some(project_id) = self.pending_project.take() {
+            self.select_project_id(project_id, cx);
+        } else if self.project.is_none()
+            && let Some(first) = self
+                .listed_projects()
+                .first()
+                .map(|project| project.id.clone())
+        {
+            self.select_project_id(first, cx);
         }
-        cx.emit(NewThreadFormEvent::Changed);
-        cx.notify();
+        self.changed(cx);
         loaded
     }
 
     /// Returns whether the agents loaded.
     fn agents_loaded(
         &mut self,
-        providers: anyhow::Result<Vec<ServerProvider>>,
+        providers: anyhow::Result<Vec<t3_api::types::ServerProvider>>,
         cx: &mut Context<Self>,
     ) -> bool {
-        let loaded = providers.is_ok();
-        self.agents = match providers {
-            Ok(providers) => Loadable::Loaded(agent_choices(&providers)),
+        let agents = providers.as_deref().map(agent_choices);
+        // Until T3 has checked its agents (just after it starts) there may be none; ask again.
+        let loaded = agents.as_ref().is_ok_and(|agents| !agents.is_empty());
+        self.agents = match agents {
+            Ok(agents) => Loadable::Loaded(agents),
             Err(error) => Loadable::Failed(format!("{error:#}").into()),
         };
-        if self.agent.is_none() && self.agents().is_some_and(|a| !a.is_empty()) {
-            self.select_agent(0, cx);
-        }
-        self.apply_project_default(cx);
-        cx.emit(NewThreadFormEvent::Changed);
-        cx.notify();
+        self.changed(cx);
         loaded
     }
 
-    fn projects(&self) -> Option<&[ProjectChoice]> {
-        match &self.projects {
-            Loadable::Loaded(projects) => Some(projects),
+    /// Returns whether the settings loaded. Until they do, the form uses T3's own defaults.
+    fn settings_loaded(
+        &mut self,
+        settings: anyhow::Result<ServerSettings>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let loaded = settings.is_ok();
+        self.settings = match settings {
+            Ok(settings) => Loadable::Loaded(settings),
+            Err(error) => {
+                log::warn!("couldn't read T3's settings for a new thread: {error:#}");
+                Loadable::Failed(format!("{error:#}").into())
+            }
+        };
+        self.changed(cx);
+        loaded
+    }
+
+    pub(crate) fn agents(&self) -> Option<&[AgentChoice]> {
+        self.agents.loaded().map(Vec::as_slice)
+    }
+
+    /// The projects the form lists after "No project": every project but T3's scratch one.
+    fn listed_projects(&self) -> Vec<&OrchestrationProjectShell> {
+        let scratch_id = match &self.scratch {
+            Scratch::Ready(id) => Some(id.as_str()),
             _ => None,
+        };
+        self.projects
+            .loaded()
+            .map(|projects| {
+                projects
+                    .iter()
+                    .filter(|project| {
+                        project.title != SCRATCH_PROJECT_TITLE
+                            && Some(project.id.as_str()) != scratch_id
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn selected_project(&self) -> Option<&OrchestrationProjectShell> {
+        let id = match self.project.as_ref()? {
+            ProjectPick::Project(id) => id.as_str(),
+            ProjectPick::Scratch => match &self.scratch {
+                Scratch::Ready(id) => id.as_str(),
+                _ => return None,
+            },
+        };
+        self.projects
+            .loaded()?
+            .iter()
+            .find(|project| project.id == id)
+    }
+
+    fn selected_project_id(&self) -> Option<&str> {
+        match self.project.as_ref()? {
+            ProjectPick::Project(id) => Some(id),
+            ProjectPick::Scratch => match &self.scratch {
+                Scratch::Ready(id) => Some(id),
+                _ => None,
+            },
         }
     }
 
-    fn agents(&self) -> Option<&[AgentChoice]> {
-        match &self.agents {
-            Loadable::Loaded(agents) => Some(agents),
-            _ => None,
+    fn is_scratch(&self) -> bool {
+        self.project == Some(ProjectPick::Scratch)
+    }
+
+    /// What T3's settings give a new thread in the selected project.
+    pub(crate) fn defaults(&self) -> ThreadDefaults {
+        thread_settings::thread_defaults(
+            self.settings.loaded(),
+            self.selected_project_id(),
+            self.selected_project(),
+        )
+    }
+
+    fn select_project_id(&mut self, project_id: String, cx: &mut Context<Self>) {
+        let Some(root) = self
+            .projects
+            .loaded()
+            .and_then(|projects| projects.iter().find(|project| project.id == project_id))
+            .map(|project| project.workspace_root.clone())
+        else {
+            return;
+        };
+        if self.project.as_ref() != Some(&ProjectPick::Project(project_id.clone())) {
+            self.project = Some(ProjectPick::Project(project_id));
+            self.base_ref = None;
+            self.worktree = None;
+            self.branch = None;
+        }
+        self.load_refs(root, cx);
+        self.changed(cx);
+    }
+
+    /// Picks the project at `index` of the dropdown: 0 is "No project".
+    fn select_project(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index == 0 {
+            self.select_scratch(cx);
+            return;
+        }
+        let Some(project_id) = self
+            .listed_projects()
+            .get(index - 1)
+            .map(|project| project.id.clone())
+        else {
+            return;
+        };
+        self.select_project_id(project_id, cx);
+    }
+
+    /// Picks no project: T3's scratch project, which `projects.ensureScratch` finds or creates.
+    pub(crate) fn select_scratch(&mut self, cx: &mut Context<Self>) {
+        self.project = Some(ProjectPick::Scratch);
+        self.branch = None;
+        self.worktree = None;
+        if matches!(self.scratch, Scratch::Idle | Scratch::Failed(_)) {
+            self.scratch = Scratch::Opening;
+            let ensure = self.backend.call::<rpc::ProjectsEnsureScratch>(
+                ProjectsEnsureScratchPayload(Default::default()),
+                Access::Operate,
+            );
+            self._tasks.push(cx.spawn(async move |this, cx| {
+                let result = ensure.await;
+                this.update(cx, |this, cx| {
+                    this.scratch = match result {
+                        Ok(result) => Scratch::Ready(result.project_id),
+                        Err(error) => Scratch::Failed(format!("{error:#}").into()),
+                    };
+                    this.changed(cx);
+                })
+                .ok();
+            }));
+        }
+        self.changed(cx);
+    }
+
+    fn load_refs(&mut self, cwd: String, cx: &mut Context<Self>) {
+        if matches!(
+            self.refs.get(&cwd),
+            Some(Loadable::Loading | Loadable::Loaded(_))
+        ) {
+            return;
+        }
+        self.refs.insert(cwd.clone(), Loadable::Loading);
+        let list = self.backend.call::<rpc::VcsListRefs>(
+            VcsListRefsInput {
+                cursor: None,
+                cwd: cwd.clone(),
+                include_matching_remote_refs: None,
+                limit: Some(REF_PAGE_SIZE),
+                query: None,
+                ref_kind: None,
+                refresh: None,
+            },
+            Access::Read,
+        );
+        self._tasks.push(cx.spawn(async move |this, cx| {
+            let result = list.await;
+            this.update(cx, |this, cx| {
+                let refs = match result {
+                    Ok(result) => Loadable::Loaded(RefList {
+                        refs: ref_choices(&result),
+                        is_repo: result.is_repo,
+                        total: result.total_count,
+                    }),
+                    Err(error) => {
+                        log::warn!("couldn't list the branches of {cwd}: {error:#}");
+                        Loadable::Failed(format!("{error:#}").into())
+                    }
+                };
+                this.refs.insert(cwd, refs);
+                this.changed(cx);
+            })
+            .ok();
+        }));
+    }
+
+    /// The selected project's folder and its refs, once they've loaded.
+    fn project_refs(&self) -> Option<(&str, Option<&RefList>)> {
+        let project = self.selected_project()?;
+        let refs = self
+            .refs
+            .get(&project.workspace_root)
+            .and_then(Loadable::loaded);
+        Some((project.workspace_root.as_str(), refs))
+    }
+
+    fn is_repository(&self) -> bool {
+        !matches!(self.project_refs(), Some((_, Some(refs))) if !refs.is_repo)
+    }
+
+    /// Where the agent works: what was picked, or else what T3's settings say.
+    pub(crate) fn workspace_kind(&self) -> WorkspaceKind {
+        if self.is_scratch() || !self.is_repository() {
+            return WorkspaceKind::Checkout;
+        }
+        self.workspace
+            .unwrap_or_else(|| match self.defaults().env_mode {
+                ThreadEnvMode::Worktree => WorkspaceKind::NewWorktree,
+                _ => WorkspaceKind::Checkout,
+            })
+    }
+
+    fn set_workspace_kind(&mut self, kind: WorkspaceKind, cx: &mut Context<Self>) {
+        self.workspace = Some(kind);
+        self.changed(cx);
+    }
+
+    fn start_from_origin(&self) -> bool {
+        self.start_from_origin
+            .unwrap_or_else(|| self.defaults().start_from_origin)
+    }
+
+    pub(crate) fn set_start_from_origin(
+        &mut self,
+        start_from_origin: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_from_origin = Some(start_from_origin);
+        self.changed(cx);
+    }
+
+    /// The ref a new worktree starts from: the one picked, or the repository's default branch.
+    fn base_ref(&self) -> Option<&RefChoice> {
+        let (_, refs) = self.project_refs()?;
+        let refs = &refs?.refs;
+        match &self.base_ref {
+            Some(name) => refs.iter().find(|vcs_ref| &vcs_ref.name == name),
+            None => thread_settings::default_base_ref(refs),
         }
     }
 
-    fn selected_agent(&self) -> Option<&AgentChoice> {
-        self.agents()?.get(self.agent?)
+    fn base_ref_name(&self) -> Option<String> {
+        self.base_ref
+            .clone()
+            .or_else(|| self.base_ref().map(|vcs_ref| vcs_ref.name.clone()))
     }
 
-    pub fn select_project(&mut self, index: usize, cx: &mut Context<Self>) {
-        self.project = Some(index);
-        self.apply_project_default(cx);
-        cx.emit(NewThreadFormEvent::Changed);
-        cx.notify();
+    pub(crate) fn pick_ref(
+        &mut self,
+        mode: RefPickerMode,
+        choice: RefChoice,
+        cx: &mut Context<Self>,
+    ) {
+        match mode {
+            RefPickerMode::BaseRef => self.base_ref = Some(choice.name),
+            RefPickerMode::Worktree => {
+                self.worktree = choice.worktree_path.map(|path| (path, Some(choice.name)));
+            }
+        }
+        self.changed(cx);
     }
 
-    pub fn select_agent(&mut self, index: usize, cx: &mut Context<Self>) {
-        self.agent = Some(index);
-        self.model = self
+    /// Opens the draft for [`NewThreadInWorktree`]: its project, and its worktree, or its
+    /// branch of the project's checkout.
+    pub(crate) fn prefill(&mut self, action: &NewThreadInWorktree, cx: &mut Context<Self>) {
+        let project_id = action.project_id.clone();
+        if self.projects.loaded().is_some() {
+            self.select_project_id(project_id.clone(), cx);
+        } else {
+            self.pending_project = Some(project_id.clone());
+        }
+        self.project = Some(ProjectPick::Project(project_id));
+        let root = self
+            .selected_project()
+            .map(|project| project.workspace_root.clone());
+        match &action.worktree_path {
+            Some(path) if Some(path) != root.as_ref() => {
+                self.workspace = Some(WorkspaceKind::ExistingWorktree);
+                self.worktree = Some((path.clone(), action.branch.clone()));
+                self.branch = None;
+            }
+            _ => {
+                self.workspace = Some(WorkspaceKind::Checkout);
+                self.worktree = None;
+                self.branch = action.branch.clone();
+            }
+        }
+        self.changed(cx);
+    }
+
+    // The agent, model, options, and modes, which the settings bar picks.
+
+    /// The agent and model the thread starts with: the ones picked, or else the default model
+    /// in T3's settings, or else the first agent's default model.
+    pub(crate) fn model(&self) -> Option<(&AgentChoice, &ModelChoice)> {
+        let agents = self.agents()?;
+        let find = |instance_id: &str, slug: Option<&str>| {
+            let agent = agents
+                .iter()
+                .find(|agent| agent.instance_id == instance_id)?;
+            let model = slug
+                .and_then(|slug| agent.model(slug))
+                .or_else(|| agent.models.get(agent.default_model?))?;
+            Some((agent, model))
+        };
+        if let Some((instance_id, slug)) = &self.model
+            && let Some(found) = find(instance_id, Some(slug))
+        {
+            return Some(found);
+        }
+        if let Some(default) = self.defaults().model_selection
+            && let Some(instance_id) = selection_instance_id(&default)
+            && let Some(found) = find(instance_id, selection_model(&default))
+        {
+            return Some(found);
+        }
+        agents
+            .iter()
+            .find_map(|agent| Some((agent, agent.models.get(agent.default_model?)?)))
+    }
+
+    /// The options picked: the user's, or else the default model selection's when that's the
+    /// model in use.
+    fn picked_options(&self) -> Vec<ProviderOptionSelection> {
+        if let Some(options) = &self.options {
+            return options.clone();
+        }
+        let Some((agent, model)) = self.model() else {
+            return Vec::new();
+        };
+        self.defaults()
+            .model_selection
+            .filter(|default| {
+                selection_instance_id(default) == Some(agent.instance_id.as_str())
+                    && selection_model(default) == Some(model.slug.as_str())
+            })
+            .map(|default| parse_options(default.options.as_ref()))
+            .unwrap_or_default()
+    }
+
+    /// The model's options with the values picked.
+    pub(crate) fn resolved_options(&self) -> Vec<ModelOption> {
+        self.model()
+            .map(|(_, model)| resolve_options(&model.options, &self.picked_options()))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn pick_model(&mut self, instance_id: String, slug: String, cx: &mut Context<Self>) {
+        let picked = self.picked_options();
+        let options = self
             .agents()
-            .and_then(|agents| agents.get(index))
-            .and_then(|agent| agent.default_model);
-        cx.emit(NewThreadFormEvent::Changed);
-        cx.notify();
+            .and_then(|agents| agents.iter().find(|agent| agent.instance_id == instance_id))
+            .and_then(|agent| agent.model(&slug))
+            .map(|model| {
+                // Keep the options picked that the new model takes too.
+                selections_from(&resolve_options(&model.options, &picked))
+                    .into_iter()
+                    .filter(|selection| picked.iter().any(|picked| picked.id == selection.id))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        self.model = Some((instance_id, slug));
+        self.options = Some(options);
+        self.changed(cx);
     }
 
-    pub fn select_model(&mut self, index: usize, cx: &mut Context<Self>) {
-        self.model = Some(index);
-        cx.emit(NewThreadFormEvent::Changed);
-        cx.notify();
+    pub(crate) fn pick_option(
+        &mut self,
+        id: &str,
+        value: ProviderOptionSelectionValue,
+        cx: &mut Context<Self>,
+    ) {
+        let options = thread_settings::with_option(&self.resolved_options(), id, value);
+        if let Some((agent, model)) = self.model() {
+            self.model = Some((agent.instance_id.clone(), model.slug.clone()));
+        }
+        self.options = Some(options);
+        self.changed(cx);
     }
 
-    pub fn set_use_worktree(&mut self, use_worktree: bool, cx: &mut Context<Self>) {
-        self.use_worktree = use_worktree;
-        cx.emit(NewThreadFormEvent::Changed);
-        cx.notify();
+    /// The permission mode the thread starts in.
+    pub(crate) fn runtime_mode(&self) -> RuntimeMode {
+        let mode = self
+            .runtime_mode
+            .clone()
+            .unwrap_or_else(|| self.defaults().runtime_mode);
+        match self.model() {
+            Some((agent, _)) => runtime_mode_for(agent, mode),
+            None => mode,
+        }
     }
 
-    /// Picks the agent and model the project starts threads with, when T3 has one for it.
-    fn apply_project_default(&mut self, cx: &mut Context<Self>) {
-        let Some(default) = self
-            .projects()
-            .and_then(|projects| projects.get(self.project?))
-            .and_then(|project| project.default_model.clone())
-        else {
-            return;
-        };
-        let Some(agents) = self.agents() else {
-            return;
-        };
-        let instance_id = default.instance_id.as_ref().and_then(|id| id.as_str());
-        let Some(agent_index) = agents
-            .iter()
-            .position(|agent| Some(agent.instance_id.as_str()) == instance_id)
-        else {
-            return;
-        };
-        let agent = &agents[agent_index];
-        let model = agent
-            .models
-            .iter()
-            .position(|(_, slug)| default.model.as_str() == Some(slug.as_str()))
-            .or(agent.default_model);
-        self.agent = Some(agent_index);
-        self.model = model;
-        cx.notify();
+    pub(crate) fn pick_runtime_mode(&mut self, mode: RuntimeMode, cx: &mut Context<Self>) {
+        self.runtime_mode = Some(mode);
+        self.changed(cx);
+    }
+
+    pub(crate) fn interaction_mode(&self) -> ProviderInteractionMode {
+        match self.model() {
+            Some((agent, _)) if !agent.plan_mode => ProviderInteractionMode::Default,
+            _ => self.interaction_mode.clone(),
+        }
+    }
+
+    pub(crate) fn set_interaction_mode(
+        &mut self,
+        mode: ProviderInteractionMode,
+        cx: &mut Context<Self>,
+    ) {
+        self.interaction_mode = mode;
+        self.changed(cx);
     }
 
     /// The thread to launch with `text` as its first message, or why it can't be launched yet.
-    pub fn new_thread(&self, text: &str, cx: &App) -> Result<NewThread, SharedString> {
-        let project = self
-            .projects()
-            .and_then(|projects| projects.get(self.project?))
-            .ok_or_else(|| SharedString::from("Pick a project for the thread."))?;
-        let agent = self
-            .selected_agent()
-            .ok_or_else(|| SharedString::from("Pick an agent for the thread."))?;
-        let (_, slug) = self
-            .model
-            .and_then(|model| agent.models.get(model))
-            .ok_or_else(|| SharedString::from("Pick a model for the thread."))?;
-        let workspace = if self.use_worktree {
-            let base_ref = self.base_ref.read(cx).text(cx).trim().to_string();
-            if base_ref.is_empty() {
-                return Err("Name the branch the worktree starts from.".into());
+    pub fn new_thread(&self, text: &str, _cx: &App) -> Result<NewThread, SharedString> {
+        if matches!(self.settings, Loadable::Loading) {
+            return Err("Still reading T3's settings for new threads.".into());
+        }
+        let project_id = match &self.project {
+            None => return Err("Pick a project for the thread.".into()),
+            Some(ProjectPick::Project(id)) => id.clone(),
+            Some(ProjectPick::Scratch) => match &self.scratch {
+                Scratch::Ready(id) => id.clone(),
+                Scratch::Failed(error) => {
+                    return Err(format!("Couldn't start without a project: {error}").into());
+                }
+                Scratch::Idle | Scratch::Opening => {
+                    return Err("Still opening T3's scratch folder.".into());
+                }
+            },
+        };
+        let (agent, model) = self
+            .model()
+            .ok_or_else(|| SharedString::from("Pick an agent and a model for the thread."))?;
+        let options = launch_options(&model.options, &self.picked_options());
+        let workspace = match self.workspace_kind() {
+            WorkspaceKind::Checkout => ThreadWorkspace::ProjectRoot {
+                branch: self.branch.clone(),
+            },
+            WorkspaceKind::NewWorktree => {
+                let refs_loading = matches!(
+                    self.selected_project()
+                        .and_then(|project| self.refs.get(&project.workspace_root)),
+                    Some(Loadable::Loading)
+                );
+                let base_ref = match self.base_ref_name() {
+                    Some(base_ref) => base_ref,
+                    None if refs_loading => {
+                        return Err("Still loading the project's branches.".into());
+                    }
+                    // Without a branch list, start from `main`, as mustr always did.
+                    None => "main".to_string(),
+                };
+                ThreadWorkspace::NewWorktree {
+                    base_ref,
+                    start_from_origin: self.start_from_origin(),
+                }
             }
-            ThreadWorkspace::NewWorktree {
-                base_ref,
-                start_from_origin: true,
+            WorkspaceKind::ExistingWorktree => {
+                let (worktree_path, branch) = self
+                    .worktree
+                    .clone()
+                    .ok_or_else(|| SharedString::from("Pick the worktree to work in."))?;
+                ThreadWorkspace::ExistingWorktree {
+                    worktree_path,
+                    branch,
+                }
             }
-        } else {
-            ThreadWorkspace::ProjectRoot { branch: None }
         };
         Ok(NewThread {
-            project_id: project.id.clone(),
-            model_selection: ModelSelection {
-                instance_id: Some(json!(agent.instance_id)),
-                model: json!(slug),
-                options: None,
-                provider: None,
-            },
-            runtime_mode: runtime_mode_for(agent),
-            interaction_mode: ProviderInteractionMode::Default,
+            project_id,
+            model_selection: model_selection(&agent.instance_id, &model.slug, &options),
+            runtime_mode: self.runtime_mode(),
+            interaction_mode: self.interaction_mode(),
             workspace,
             text: text.to_string(),
         })
@@ -347,7 +787,7 @@ impl NewThreadForm {
         let this: WeakEntity<Self> = cx.entity().downgrade();
         let key = SharedString::from(format!(
             "{id}-{}-{}",
-            entries.len(),
+            entries.join("\u{1f}"),
             selected.unwrap_or(usize::MAX)
         ));
         let menu = window.use_keyed_state(key, cx, move |window, cx| {
@@ -369,6 +809,80 @@ impl NewThreadForm {
         });
         DropdownMenu::new(id, label, menu).style(DropdownStyle::Outlined)
     }
+
+    fn ref_picker(
+        &self,
+        mode: RefPickerMode,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let (root, refs) = self
+            .project_refs()
+            .map(|(root, refs)| {
+                (
+                    root.to_string(),
+                    refs.map(|refs| (refs.refs.clone(), refs.total)),
+                )
+            })
+            .unwrap_or_default();
+        let current = match mode {
+            RefPickerMode::BaseRef => self.base_ref_name(),
+            RefPickerMode::Worktree => self.worktree.as_ref().map(|(path, _)| path.clone()),
+        };
+        let handle = match mode {
+            RefPickerMode::BaseRef => self.base_ref_picker.clone(),
+            RefPickerMode::Worktree => self.worktree_picker.clone(),
+        };
+        let form = cx.entity().downgrade();
+        let backend = self.backend.clone();
+        let start_from_origin = self.start_from_origin();
+        PopoverMenu::new(match mode {
+            RefPickerMode::BaseRef => "new-thread-base-ref",
+            RefPickerMode::Worktree => "new-thread-worktree",
+        })
+        .trigger(
+            Button::new(
+                match mode {
+                    RefPickerMode::BaseRef => "new-thread-base-ref-trigger",
+                    RefPickerMode::Worktree => "new-thread-worktree-trigger",
+                },
+                label,
+            )
+            .style(ButtonStyle::Outlined)
+            .start_icon(
+                Icon::new(IconName::GitBranch)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .end_icon(
+                Icon::new(IconName::ChevronDown)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            ),
+        )
+        .with_handle(handle)
+        .anchor(Anchor::TopLeft)
+        .menu(move |window, cx| {
+            let delegate = RefPickerDelegate {
+                form: form.clone(),
+                backend: backend.clone(),
+                mode,
+                cwd: root.clone(),
+                current: current.clone(),
+                matches: filter_refs(mode, &root, refs.as_ref().map(|(refs, _)| refs.as_slice())),
+                total: refs.as_ref().map(|(_, total)| *total),
+                status: None,
+                selected_index: 0,
+                start_from_origin,
+            };
+            Some(cx.new(|cx| {
+                Picker::uniform_list(delegate, window, cx)
+                    .popover()
+                    .initial_width(rems(22.))
+                    .reopenable(false, cx)
+            }))
+        })
+    }
 }
 
 fn field(label: &'static str, control: impl IntoElement) -> impl IntoElement {
@@ -383,41 +897,41 @@ fn field(label: &'static str, control: impl IntoElement) -> impl IntoElement {
         .child(h_flex().flex_1().min_w_0().child(control))
 }
 
+fn note(text: impl Into<SharedString>, color: Color) -> impl IntoElement {
+    Label::new(text.into()).size(LabelSize::Small).color(color)
+}
+
 impl Render for NewThreadForm {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = palette(cx);
         let project_control = match &self.projects {
-            Loadable::Loading => Label::new("Loading projects…")
-                .size(LabelSize::Small)
-                .color(Color::Muted)
-                .into_any_element(),
-            Loadable::Failed(error) => Label::new(error.clone())
-                .size(LabelSize::Small)
-                .color(Color::Error)
-                .into_any_element(),
-            Loadable::Loaded(projects) if projects.is_empty() => {
-                Label::new("T3 has no projects. Add one in T3 Code first.")
-                    .size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .into_any_element()
-            }
-            Loadable::Loaded(projects) => {
-                let label = self
-                    .project
-                    .and_then(|index| projects.get(index))
-                    .map_or_else(
-                        || "Pick a project".to_string(),
-                        |project| project.title.clone(),
-                    );
-                let entries = projects
-                    .iter()
-                    .map(|project| project.title.clone())
+            Loadable::Loading => note("Loading projects…", Color::Muted).into_any_element(),
+            Loadable::Failed(error) => note(error.clone(), Color::Error).into_any_element(),
+            Loadable::Loaded(_) => {
+                let listed = self.listed_projects();
+                let label = match &self.project {
+                    Some(ProjectPick::Scratch) => SCRATCH_PROJECT_TITLE.to_string(),
+                    Some(ProjectPick::Project(id)) => listed
+                        .iter()
+                        .find(|project| &project.id == id)
+                        .map_or_else(|| "Pick a project".into(), |p| p.title.clone()),
+                    None => "Pick a project".into(),
+                };
+                let selected = match &self.project {
+                    Some(ProjectPick::Scratch) => Some(0),
+                    Some(ProjectPick::Project(id)) => listed
+                        .iter()
+                        .position(|project| &project.id == id)
+                        .map(|index| index + 1),
+                    None => None,
+                };
+                let entries = std::iter::once(SCRATCH_PROJECT_TITLE.to_string())
+                    .chain(listed.iter().map(|project| project.title.clone()))
                     .collect();
                 self.dropdown(
                     "new-thread-project",
                     label,
                     entries,
-                    self.project,
+                    selected,
                     Self::select_project,
                     window,
                     cx,
@@ -425,84 +939,20 @@ impl Render for NewThreadForm {
                 .into_any_element()
             }
         };
-        let (agent_control, model_control) = match &self.agents {
-            Loadable::Loading => (
-                Label::new("Loading agents…")
-                    .size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .into_any_element(),
-                div().into_any_element(),
-            ),
-            Loadable::Failed(error) => (
-                Label::new(error.clone())
-                    .size(LabelSize::Small)
-                    .color(Color::Error)
-                    .into_any_element(),
-                div().into_any_element(),
-            ),
-            Loadable::Loaded(agents) if agents.is_empty() => (
-                Label::new("No agent is set up in T3. Install and sign in to one in T3 Code.")
-                    .size(LabelSize::Small)
-                    .color(Color::Muted)
-                    .into_any_element(),
-                div().into_any_element(),
-            ),
-            Loadable::Loaded(agents) => {
-                let agent = self.agent.and_then(|index| agents.get(index));
-                let agent_label =
-                    agent.map_or_else(|| "Pick an agent".to_string(), |agent| agent.name.clone());
-                let agent_entries = agents.iter().map(|agent| agent.name.clone()).collect();
-                let model_entries = agent
-                    .map(|agent| {
-                        agent
-                            .models
-                            .iter()
-                            .map(|(name, _)| name.clone())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                let model_label = agent
-                    .and_then(|agent| agent.models.get(self.model?))
-                    .map_or_else(|| "Pick a model".to_string(), |(name, _)| name.clone());
-                let has_models = !model_entries.is_empty();
-                (
-                    self.dropdown(
-                        "new-thread-agent",
-                        agent_label,
-                        agent_entries,
-                        self.agent,
-                        Self::select_agent,
-                        window,
-                        cx,
-                    )
-                    .into_any_element(),
-                    if has_models {
-                        self.dropdown(
-                            "new-thread-model",
-                            model_label,
-                            model_entries,
-                            self.model,
-                            Self::select_model,
-                            window,
-                            cx,
-                        )
-                        .into_any_element()
-                    } else {
-                        Label::new("This agent lists no models.")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted)
-                            .into_any_element()
-                    },
+
+        let workspace_control = self.render_workspace(cx);
+        let agent_note = match &self.agents {
+            Loadable::Loaded(agents) if agents.is_empty() => Some(
+                note(
+                    "No agent is set up in T3. Install and sign in to one in T3 Code.",
+                    Color::Muted,
                 )
-            }
+                .into_any_element(),
+            ),
+            Loadable::Failed(error) => Some(note(error.clone(), Color::Error).into_any_element()),
+            _ => None,
         };
-        let runtime_note = match self.selected_agent().map(runtime_mode_for) {
-            Some(RuntimeMode::ApprovalRequired) | None => {
-                "The agent asks before it runs commands or edits files."
-            }
-            Some(_) => "This agent can't ask for approvals, so it runs without asking.",
-        };
-        let this = cx.entity().downgrade();
+        let summary = self.summary();
         Card::new()
             .gap_3()
             .px(px(14.))
@@ -512,55 +962,436 @@ impl Render for NewThreadForm {
                     .gap_0p5()
                     .child(Label::new("New agent thread").weight(FontWeight::SEMIBOLD))
                     .child(
-                        Label::new("T3 runs the agent on this machine with your own CLI.")
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
+                        Label::new(
+                            "T3 runs the agent on this machine with your own CLI. Pick its \
+                             model and permissions below the message.",
+                        )
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
                     ),
             )
             .child(field("Project", project_control))
-            .child(field("Agent", agent_control))
-            .child(field("Model", model_control))
-            .child(field(
-                "Works in",
-                h_flex()
-                    .gap_2()
-                    .child(
-                        SegmentedControl::new("new-thread-workspace")
-                            .segment("New worktree")
-                            .segment("Project checkout")
-                            .selected(if self.use_worktree { 0 } else { 1 })
-                            .on_select(move |index, _, cx| {
-                                this.update(cx, |this, cx| this.set_use_worktree(index == 0, cx))
-                                    .ok();
-                            }),
-                    )
-                    .when(self.use_worktree, |this| {
-                        this.child(
-                            h_flex()
-                                .gap_1()
-                                .child(
-                                    Label::new("from")
-                                        .size(LabelSize::Small)
-                                        .color(Color::Muted),
-                                )
-                                .child(
-                                    div()
-                                        .w(px(160.))
-                                        .px_2()
-                                        .py_0p5()
-                                        .rounded(tokens::CONTROL_RADIUS)
-                                        .border(tokens::BORDER_WIDTH)
-                                        .border_color(palette.border.hsla())
-                                        .bg(palette.background.hsla())
-                                        .child(self.base_ref.clone()),
-                                ),
-                        )
-                    }),
-            ))
-            .child(
-                Label::new(runtime_note)
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
-            )
+            .child(field("Works in", workspace_control))
+            .children(agent_note)
+            .when_some(summary, |this, summary| {
+                this.child(
+                    Label::new(summary)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+            })
     }
+}
+
+impl NewThreadForm {
+    fn render_workspace(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if self.is_scratch() {
+            return match &self.scratch {
+                Scratch::Failed(error) => note(
+                    format!("Couldn't start without a project: {error}"),
+                    Color::Error,
+                )
+                .into_any_element(),
+                _ => note(
+                    "A folder of its own in T3's scratch directory, with no repository.",
+                    Color::Muted,
+                )
+                .into_any_element(),
+            };
+        }
+        if self.selected_project().is_none() {
+            return div().into_any_element();
+        }
+        if !self.is_repository() {
+            return note(
+                "The project's folder. It isn't a git repository, so there are no worktrees.",
+                Color::Muted,
+            )
+            .into_any_element();
+        }
+        let kind = self.workspace_kind();
+        let this = cx.entity().downgrade();
+        let segments = SegmentedControl::new("new-thread-workspace")
+            .segment_with_tooltip("New worktree", "A new worktree and branch for this thread")
+            .segment_with_tooltip(
+                "Existing worktree",
+                "A worktree that's already there, such as another thread's",
+            )
+            .segment_with_tooltip("Project checkout", "The project's own folder")
+            .selected(match kind {
+                WorkspaceKind::NewWorktree => 0,
+                WorkspaceKind::ExistingWorktree => 1,
+                WorkspaceKind::Checkout => 2,
+            })
+            .on_select(move |index, _, cx| {
+                let kind = match index {
+                    0 => WorkspaceKind::NewWorktree,
+                    1 => WorkspaceKind::ExistingWorktree,
+                    _ => WorkspaceKind::Checkout,
+                };
+                this.update(cx, |this, cx| this.set_workspace_kind(kind, cx))
+                    .ok();
+            });
+        let detail = match kind {
+            WorkspaceKind::NewWorktree => {
+                let base = self.base_ref_name();
+                let label = match (base, self.base_ref()) {
+                    (Some(base), Some(vcs_ref))
+                        if self.start_from_origin() && !vcs_ref.is_remote =>
+                    {
+                        format!("{base} (remote)")
+                    }
+                    (Some(base), _) => base,
+                    (None, _) => "Loading branches…".to_string(),
+                };
+                h_flex()
+                    .gap_1()
+                    .child(
+                        Label::new("from")
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(self.ref_picker(RefPickerMode::BaseRef, label, cx))
+                    .into_any_element()
+            }
+            WorkspaceKind::ExistingWorktree => {
+                let label = match &self.worktree {
+                    Some((path, Some(branch))) => format!("{branch} · {}", short_path(path)),
+                    Some((path, None)) => short_path(path),
+                    None => "Pick a worktree".to_string(),
+                };
+                self.ref_picker(RefPickerMode::Worktree, label, cx)
+                    .into_any_element()
+            }
+            WorkspaceKind::Checkout => match &self.branch {
+                Some(branch) => note(format!("on {branch}"), Color::Muted).into_any_element(),
+                None => div().into_any_element(),
+            },
+        };
+        h_flex()
+            .gap_2()
+            .flex_wrap()
+            .child(segments)
+            .child(detail)
+            .into_any_element()
+    }
+
+    /// One line on how the thread will start, so nothing about it is a surprise.
+    fn summary(&self) -> Option<String> {
+        let (agent, model) = self.model()?;
+        let mode = self.runtime_mode();
+        let plan = if self.interaction_mode() == ProviderInteractionMode::Plan {
+            ", in plan mode"
+        } else {
+            ""
+        };
+        let defaults = match self.settings {
+            Loadable::Loaded(_) => "",
+            Loadable::Failed(_) => " (T3's settings couldn't be read, so these are its defaults)",
+            Loadable::Loading => " (reading T3's settings…)",
+        };
+        Some(format!(
+            "{} runs {} with {}{plan}: {}{defaults}",
+            agent.name,
+            model.name,
+            thread_settings::runtime_mode_label(&mode),
+            thread_settings::runtime_mode_description(&mode),
+        ))
+    }
+}
+
+/// The last two parts of a path, which tell worktrees apart.
+fn short_path(path: &str) -> String {
+    let parts = path
+        .trim_end_matches('/')
+        .rsplit('/')
+        .take(2)
+        .collect::<Vec<_>>();
+    parts.into_iter().rev().collect::<Vec<_>>().join("/")
+}
+
+// Picking a base branch or a worktree.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RefPickerMode {
+    /// The branch a new worktree starts from: any ref.
+    BaseRef,
+    /// A worktree that exists: the branches checked out in one.
+    Worktree,
+}
+
+fn filter_refs(mode: RefPickerMode, root: &str, refs: Option<&[RefChoice]>) -> Vec<RefChoice> {
+    let refs = refs.unwrap_or_default();
+    match mode {
+        RefPickerMode::BaseRef => refs.to_vec(),
+        RefPickerMode::Worktree => thread_settings::worktrees(refs, root)
+            .into_iter()
+            .cloned()
+            .collect(),
+    }
+}
+
+/// A searchable list of the project's refs, from `vcs.listRefs`, as T3's
+/// `WorktreeBaseBranchPicker` offers them, with its "Start from remote" switch.
+struct RefPickerDelegate {
+    form: WeakEntity<NewThreadForm>,
+    backend: Arc<dyn ThreadBackend>,
+    mode: RefPickerMode,
+    cwd: String,
+    /// The ref or worktree path picked now.
+    current: Option<String>,
+    matches: Vec<RefChoice>,
+    total: Option<i64>,
+    status: Option<SharedString>,
+    selected_index: usize,
+    start_from_origin: bool,
+}
+
+impl PickerDelegate for RefPickerDelegate {
+    type ListItem = ListItem;
+
+    fn name() -> &'static str {
+        "mustr new thread ref picker"
+    }
+
+    fn match_count(&self) -> usize {
+        self.matches.len()
+    }
+
+    fn selected_index(&self) -> usize {
+        self.selected_index
+    }
+
+    fn set_selected_index(
+        &mut self,
+        ix: usize,
+        _window: &mut Window,
+        _cx: &mut Context<Picker<Self>>,
+    ) {
+        self.selected_index = ix;
+    }
+
+    fn placeholder_text(&self, _window: &mut Window, _cx: &mut App) -> Arc<str> {
+        match self.mode {
+            RefPickerMode::BaseRef => "Search branches…".into(),
+            RefPickerMode::Worktree => "Search worktrees by branch…".into(),
+        }
+    }
+
+    fn no_matches_text(&self, _window: &mut Window, _cx: &mut App) -> Option<SharedString> {
+        Some(match self.mode {
+            RefPickerMode::BaseRef => "No branches match".into(),
+            RefPickerMode::Worktree => "No other worktrees".into(),
+        })
+    }
+
+    fn update_matches(
+        &mut self,
+        query: String,
+        window: &mut Window,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Task<()> {
+        let query = query.trim().to_string();
+        let list = self.backend.call::<rpc::VcsListRefs>(
+            VcsListRefsInput {
+                cursor: None,
+                cwd: self.cwd.clone(),
+                include_matching_remote_refs: None,
+                limit: Some(REF_PAGE_SIZE),
+                query: (!query.is_empty()).then_some(query),
+                ref_kind: (self.mode == RefPickerMode::Worktree)
+                    .then_some(VcsListRefsInputRefKind::Local),
+                refresh: None,
+            },
+            Access::Read,
+        );
+        cx.spawn_in(window, async move |picker, cx| {
+            let result = list.await;
+            picker
+                .update(cx, |picker, cx| {
+                    let delegate = &mut picker.delegate;
+                    match result {
+                        Ok(result) => {
+                            let refs = ref_choices(&result);
+                            delegate.matches =
+                                filter_refs(delegate.mode, &delegate.cwd, Some(&refs));
+                            delegate.total = Some(result.total_count);
+                            delegate.status = None;
+                        }
+                        Err(error) => {
+                            delegate.status = Some(format!("{error:#}").into());
+                        }
+                    }
+                    delegate.selected_index = delegate
+                        .selected_index
+                        .min(delegate.matches.len().saturating_sub(1));
+                    cx.notify();
+                })
+                .ok();
+        })
+    }
+
+    fn confirm(&mut self, _secondary: bool, window: &mut Window, cx: &mut Context<Picker<Self>>) {
+        if let Some(choice) = self.matches.get(self.selected_index).cloned() {
+            let mode = self.mode;
+            self.form
+                .update(cx, |form, cx| form.pick_ref(mode, choice, cx))
+                .ok();
+        }
+        self.dismissed(window, cx);
+    }
+
+    fn dismissed(&mut self, _window: &mut Window, cx: &mut Context<Picker<Self>>) {
+        cx.emit(DismissEvent);
+    }
+
+    fn render_match(
+        &self,
+        ix: usize,
+        selected: bool,
+        _window: &mut Window,
+        _cx: &mut Context<Picker<Self>>,
+    ) -> Option<Self::ListItem> {
+        let choice = self.matches.get(ix)?;
+        let (title, detail, current) = match self.mode {
+            RefPickerMode::BaseRef => (
+                choice.name.clone(),
+                choice.badge(&self.cwd).map(str::to_string),
+                self.current.as_deref() == Some(choice.name.as_str()),
+            ),
+            RefPickerMode::Worktree => (
+                choice.name.clone(),
+                choice.worktree_path.as_deref().map(short_path),
+                self.current.is_some() && self.current == choice.worktree_path,
+            ),
+        };
+        Some(
+            ListItem::new(ix)
+                .inset(true)
+                .spacing(ListItemSpacing::Sparse)
+                .toggle_state(selected)
+                .start_slot(
+                    Icon::new(if current {
+                        IconName::Check
+                    } else {
+                        IconName::GitBranch
+                    })
+                    .size(IconSize::XSmall)
+                    .color(if current { Color::Accent } else { Color::Muted }),
+                )
+                .child(
+                    h_flex()
+                        .w_full()
+                        .min_w_0()
+                        .gap_2()
+                        .justify_between()
+                        .child(Label::new(title).size(LabelSize::Small).truncate())
+                        .when_some(detail, |this, detail| {
+                            this.child(
+                                Label::new(detail)
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                        }),
+                ),
+        )
+    }
+
+    fn render_footer(
+        &self,
+        _window: &mut Window,
+        cx: &mut Context<Picker<Self>>,
+    ) -> Option<AnyElement> {
+        let shown = self.matches.len() as i64;
+        let status = self.status.clone().or_else(|| {
+            self.total
+                .filter(|total| *total > shown && self.mode == RefPickerMode::BaseRef)
+                .map(|total| {
+                    format!("Showing {shown} of {total} refs. Search for the rest.").into()
+                })
+        });
+        if self.mode == RefPickerMode::Worktree && status.is_none() {
+            return None;
+        }
+        let border = cx.theme().colors().border_variant;
+        Some(
+            v_flex()
+                .w_full()
+                .border_t_1()
+                .border_color(border)
+                .when(self.mode == RefPickerMode::BaseRef, |this| {
+                    let form = self.form.clone();
+                    let picker = cx.entity().downgrade();
+                    let checked = self.start_from_origin;
+                    this.child(
+                        h_flex()
+                            .px_3()
+                            .py_1p5()
+                            .gap_3()
+                            .justify_between()
+                            .child(
+                                Label::new("Start from remote")
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted),
+                            )
+                            .child(
+                                Switch::new(
+                                    "new-thread-start-from-remote",
+                                    if checked {
+                                        ToggleState::Selected
+                                    } else {
+                                        ToggleState::Unselected
+                                    },
+                                )
+                                .on_click(move |state, _, cx| {
+                                    let checked = *state == ToggleState::Selected;
+                                    form.update(cx, |form, cx| {
+                                        form.set_start_from_origin(checked, cx)
+                                    })
+                                    .ok();
+                                    picker
+                                        .update(cx, |picker, cx| {
+                                            picker.delegate.start_from_origin = checked;
+                                            cx.notify();
+                                        })
+                                        .ok();
+                                }),
+                            ),
+                    )
+                })
+                .when_some(status, |this, status| {
+                    this.child(
+                        div().px_3().py_1().child(
+                            Label::new(status)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+}
+
+/// Opens new threads for [`NewThreadInWorktree`], which the worktrees view and the thread
+/// toolbar dispatch: a draft with the project, worktree, and branch filled in.
+pub(crate) fn register(workspace: &mut Workspace) {
+    workspace.register_action(|workspace, action: &NewThreadInWorktree, window, cx| {
+        let Some(view) = ThreadView::open_new(workspace, window, cx) else {
+            log::error!("couldn't open a new thread: mustr isn't connected to T3");
+            return;
+        };
+        if let Some(form) = view.read(cx).new_thread.clone() {
+            form.update(cx, |form, cx| form.prefill(action, cx));
+        }
+    });
+}
+
+/// The form of `view`, if it's a draft. For tests.
+#[cfg(test)]
+pub(crate) fn form_of(
+    view: &gpui::Entity<ThreadView>,
+    cx: &App,
+) -> Option<gpui::Entity<NewThreadForm>> {
+    view.read(cx).new_thread.clone()
 }
