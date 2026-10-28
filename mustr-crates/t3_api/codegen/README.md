@@ -39,7 +39,7 @@ T3 `packages/contracts/src` → (copy into the work dir) → `node dump-schemas.
 3. **`typify-gen/`** is a Rust tool: typify 0.8 as a library, then a syn pass (`postprocess.rs`), printed with prettyplease. It is its own cargo workspace (an empty `[workspace]` table, pinned by its `Cargo.lock`) and is not part of Zed's workspace. It writes:
    - `types.rs`: every wire type.
    - `tagged.rs`: discriminated unions, as `crate::tagged_union!` invocations.
-   - `methods.rs`: `rpc::*` (one struct per RPC implementing `RpcMethod { TAG, STREAM, Payload, Success, Error }`), `http::*` (one per endpoint implementing `HttpEndpoint { METHOD, PATH, REQUEST_CONTENT_TYPE, Request, Response, … }`), and `named::*`.
+   - `methods.rs`: `rpc::*` (one struct per RPC implementing `RpcMethod { TAG, STREAM, Payload, Success, Error }`), `http::*` (one per endpoint implementing `HttpEndpoint { METHOD, PATH, REQUEST_CONTENT_TYPE, CONSTANT_HEADERS, Request, Response, … }`), and `named::*`. `CONSTANT_HEADERS` lists the required headers with a fixed value, such as `x-t3-orchestration-protocol: 2` on the orchestration snapshot endpoints.
    - `dispatch.rs`: definition name → round-trip function, used only by `tests/roundtrip.rs`.
 4. **Hand-written, depends only on Effect, not on T3:** `src/t3_api.rs` (the traits, `JsNumber`, `Never`, and the `string_enum!`/`tagged_union!` macros), `src/forward_compat.rs`, and `src/envelope.rs`. `envelope.rs` holds the Effect RPC frames (`Request`/`Chunk`/`Exit`/`Cause`…), which are TS interfaces in Effect, not schemas, so they can't be generated.
 

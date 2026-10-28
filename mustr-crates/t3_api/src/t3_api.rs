@@ -53,6 +53,9 @@ pub trait HttpEndpoint {
     const REQUEST_CONTENT_TYPE: Option<&'static str>;
     const SUCCESS_STATUS: u16;
     const ERROR_STATUSES: &'static [u16];
+    /// Required headers with a fixed value, which a client sends as-is, e.g.
+    /// `("x-t3-orchestration-protocol", "2")` on the orchestration snapshot endpoints.
+    const CONSTANT_HEADERS: &'static [(&'static str, &'static str)];
     type Params;
     type Query;
     type Headers;

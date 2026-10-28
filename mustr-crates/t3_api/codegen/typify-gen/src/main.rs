@@ -128,10 +128,11 @@ fn main() -> Result<()> {
     let out_dir = PathBuf::from(&args[2]);
     fs::create_dir_all(&out_dir)?;
 
-    let root: RootSchema = serde_json::from_str(
-        &fs::read_to_string(schema_dir.join("t3-api.schema.json")).context("read schema")?,
-    )
-    .context("parse schema as draft-07 RootSchema")?;
+    let schema_text =
+        fs::read_to_string(schema_dir.join("t3-api.schema.json")).context("read schema")?;
+    let root: RootSchema =
+        serde_json::from_str(&schema_text).context("parse schema as draft-07 RootSchema")?;
+    let schema_json: serde_json::Value = serde_json::from_str(&schema_text)?;
     let manifest: Manifest = serde_json::from_str(
         &fs::read_to_string(schema_dir.join("manifest.json")).context("read manifest")?,
     )?;
@@ -289,12 +290,17 @@ fn main() -> Result<()> {
             Some(s) => (s.status, rust(&s.ty)?),
         };
         let err_statuses: Vec<String> = h.errors.iter().map(|e| e.status.to_string()).collect();
+        let constant_headers: Vec<String> = constant_headers(&schema_json, h.headers.as_ref())
+            .iter()
+            .map(|(name, value)| format!("({name:?}, {value:?})"))
+            .collect();
         writeln!(
             m,
-            "    /// `{method} {path}`\n    #[derive(Debug, Clone, Copy, Default)]\n    pub struct {name};\n    impl HttpEndpoint for {name} {{\n        const METHOD: &'static str = {method:?};\n        const PATH: &'static str = {path:?};\n        const REQUEST_CONTENT_TYPE: Option<&'static str> = {req_ct};\n        const SUCCESS_STATUS: u16 = {ok_status};\n        const ERROR_STATUSES: &'static [u16] = &[{errs}];\n        type Params = {params};\n        type Query = {query};\n        type Headers = {headers};\n        type Request = {req};\n        type Response = {resp};\n    }}",
+            "    /// `{method} {path}`\n    #[derive(Debug, Clone, Copy, Default)]\n    pub struct {name};\n    impl HttpEndpoint for {name} {{\n        const METHOD: &'static str = {method:?};\n        const PATH: &'static str = {path:?};\n        const REQUEST_CONTENT_TYPE: Option<&'static str> = {req_ct};\n        const SUCCESS_STATUS: u16 = {ok_status};\n        const ERROR_STATUSES: &'static [u16] = &[{errs}];\n        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[{constant_headers}];\n        type Params = {params};\n        type Query = {query};\n        type Headers = {headers};\n        type Request = {req};\n        type Response = {resp};\n    }}",
             method = h.method,
             path = h.path,
             errs = err_statuses.join(", "),
+            constant_headers = constant_headers.join(", "),
         )?;
         for e in &h.errors {
             writeln!(
@@ -448,6 +454,37 @@ fn format_rust(path: &Path) -> Result<()> {
         format!("{}\n{}", header.join("\n"), prettyplease::unparse(&file)),
     )?;
     Ok(())
+}
+
+/// Required headers whose schema is a single string literal, e.g.
+/// `x-t3-orchestration-protocol: "2"` on the orchestration snapshot endpoints.
+fn constant_headers(
+    schema: &serde_json::Value,
+    headers: Option<&TypeRef>,
+) -> Vec<(String, String)> {
+    let Some(TypeRef::Ref { def, .. }) = headers else {
+        return Vec::new();
+    };
+    let definition = &schema["definitions"][def.as_str()];
+    let required: BTreeSet<&str> = definition["required"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|name| name.as_str())
+        .collect();
+    let Some(properties) = definition["properties"].as_object() else {
+        return Vec::new();
+    };
+    properties
+        .iter()
+        .filter(|(name, _)| required.contains(name.as_str()))
+        .filter_map(
+            |(name, property)| match property["enum"].as_array()?.as_slice() {
+                [serde_json::Value::String(value)] => Some((name.clone(), value.clone())),
+                _ => None,
+            },
+        )
+        .collect()
 }
 
 fn pascal(s: &str) -> String {

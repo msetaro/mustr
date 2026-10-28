@@ -2198,6 +2198,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2213,6 +2214,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpAuthSessionHeaders;
@@ -2229,6 +2231,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2248,6 +2251,7 @@ pub mod http {
         );
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpAuthTokenHeaders;
@@ -2266,6 +2270,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpAuthWebSocketTicketHeaders;
@@ -2283,6 +2288,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 403, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpAuthPairingCredentialHeaders;
@@ -2302,6 +2308,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[403, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpAuthPairingLinksHeaders;
@@ -2320,6 +2327,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[403, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpAuthRevokePairingLinkHeaders;
@@ -2338,6 +2346,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[403, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpAuthClientsHeaders;
@@ -2356,6 +2365,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[403, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpAuthRevokeClientHeaders;
@@ -2374,6 +2384,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[403, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpAuthRevokeOtherClientsHeaders;
@@ -2392,6 +2403,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2407,6 +2419,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2422,6 +2435,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2437,6 +2451,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 201;
         const ERROR_STATUSES: &'static [u16] = &[400];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2453,6 +2468,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 204;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2468,6 +2484,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2484,6 +2501,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2502,6 +2520,7 @@ pub mod http {
         );
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2518,6 +2537,9 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[403, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[
+            ("x-t3-orchestration-protocol", "2"),
+        ];
         type Params = ();
         type Query = ();
         type Headers = types::HttpOrchestrationShellSnapshotHeaders;
@@ -2536,6 +2558,9 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[403, 404, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[
+            ("x-t3-orchestration-protocol", "2"),
+        ];
         type Params = types::HttpOrchestrationThreadSnapshotParams;
         type Query = ();
         type Headers = types::HttpOrchestrationThreadSnapshotHeaders;
@@ -2555,6 +2580,9 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 403, 404, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[
+            ("x-t3-orchestration-protocol", "2"),
+        ];
         type Params = types::HttpOrchestrationThreadTranscriptParams;
         type Query = ();
         type Headers = types::HttpOrchestrationThreadTranscriptHeaders;
@@ -2575,6 +2603,9 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[403, 404, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[
+            ("x-t3-orchestration-protocol", "2"),
+        ];
         type Params = types::HttpOrchestrationThreadBoundedSnapshotParams;
         type Query = types::HttpOrchestrationThreadBoundedSnapshotQuery;
         type Headers = types::HttpOrchestrationThreadBoundedSnapshotHeaders;
@@ -2594,6 +2625,9 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 403, 404, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[
+            ("x-t3-orchestration-protocol", "2"),
+        ];
         type Params = types::HttpOrchestrationThreadHistoryPageParams;
         type Query = types::HttpOrchestrationThreadHistoryPageQuery;
         type Headers = types::HttpOrchestrationThreadHistoryPageHeaders;
@@ -2614,6 +2648,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[503, 502, 401, 403, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpPullRequestsDiffHeaders;
@@ -2634,6 +2669,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[403, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpProjectsSnapshotHeaders;
@@ -2652,6 +2688,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 403, 500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpProjectsMutateHeaders;
@@ -2671,6 +2708,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 401, 403, 409, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpConnectLinkProofHeaders;
@@ -2691,6 +2729,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 401, 403, 409, 500, 503];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpConnectRelayConfigHeaders;
@@ -2712,6 +2751,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 401, 403, 409, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpConnectLinkStateHeaders;
@@ -2732,6 +2772,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 401, 403, 409, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpConnectCheckReachabilityHeaders;
@@ -2752,6 +2793,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 401, 403, 409, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpConnectUnlinkHeaders;
@@ -2772,6 +2814,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 401, 403, 409, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::HttpConnectPreferencesHeaders;
@@ -2792,6 +2835,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 401, 403, 409, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2812,6 +2856,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 401, 403, 409, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2832,6 +2877,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[400, 401, 403, 409, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2852,6 +2898,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 202;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpWebhooksWebhookPostParams;
         type Query = ();
         type Headers = ();
@@ -2867,6 +2914,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 202;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpWebhooksWebhookPutParams;
         type Query = ();
         type Headers = ();
@@ -2882,6 +2930,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 202;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpWebhooksWebhookPatchParams;
         type Query = ();
         type Headers = ();
@@ -2897,6 +2946,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 202;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpWebhooksWebhookGetParams;
         type Query = ();
         type Headers = ();
@@ -2912,6 +2962,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2928,6 +2979,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2943,6 +2995,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = ();
@@ -2958,6 +3011,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::RelayDpopRequestHeaders;
@@ -2975,6 +3029,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::RelayDpopRequestHeaders;
@@ -2992,6 +3047,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::RelayDpopRequestHeaders;
@@ -3009,6 +3065,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::RelayDeviceUnregistrationParams;
         type Query = ();
         type Headers = types::RelayDpopRequestHeaders;
@@ -3026,6 +3083,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::RelayBearerRequestHeaders;
@@ -3043,6 +3101,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::RelayBearerRequestHeaders;
@@ -3060,6 +3119,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::RelayBearerRequestHeaders;
@@ -3077,6 +3137,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 400, 503, 403, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::RelayBearerRequestHeaders;
@@ -3097,6 +3158,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::RelayBearerRequestHeaders;
@@ -3114,6 +3176,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::RelayEnvironmentUnlinkParams;
         type Query = ();
         type Headers = types::RelayBearerRequestHeaders;
@@ -3131,6 +3194,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::RelayEnvironmentUnlinkParams;
         type Query = ();
         type Headers = types::RelayBearerRequestHeaders;
@@ -3150,6 +3214,7 @@ pub mod http {
         );
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = ();
         type Query = ();
         type Headers = types::RelayDpopProofRequestHeaders;
@@ -3167,6 +3232,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 403, 502, 504, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpDpopClientConnectEnvironmentParams;
         type Query = ();
         type Headers = types::RelayDpopRequestHeaders;
@@ -3187,6 +3253,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 403, 502, 504, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpDpopClientGetEnvironmentStatusParams;
         type Query = ();
         type Headers = types::RelayDpopRequestHeaders;
@@ -3207,6 +3274,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpServerRegisterManagedEndpointRecoveryParams;
         type Query = ();
         type Headers = ();
@@ -3224,6 +3292,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpServerRecoverManagedEndpointParams;
         type Query = ();
         type Headers = ();
@@ -3241,6 +3310,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpServerPublishAgentActivityParams;
         type Query = ();
         type Headers = ();
@@ -3258,6 +3328,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = Some("application/json");
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpServerUpdateLinkPreferencesParams;
         type Query = ();
         type Headers = ();
@@ -3275,6 +3346,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 200;
         const ERROR_STATUSES: &'static [u16] = &[401, 500];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpServerWakeHeldHooksParams;
         type Query = ();
         type Headers = ();
@@ -3292,6 +3364,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 204;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpHooksForwardPostParams;
         type Query = ();
         type Headers = ();
@@ -3307,6 +3380,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 204;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpHooksForwardPutParams;
         type Query = ();
         type Headers = ();
@@ -3322,6 +3396,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 204;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpHooksForwardPatchParams;
         type Query = ();
         type Headers = ();
@@ -3337,6 +3412,7 @@ pub mod http {
         const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
         const SUCCESS_STATUS: u16 = 204;
         const ERROR_STATUSES: &'static [u16] = &[];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
         type Params = types::HttpHooksForwardGetParams;
         type Query = ();
         type Headers = ();

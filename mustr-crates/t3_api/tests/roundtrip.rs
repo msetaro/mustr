@@ -225,6 +225,11 @@ fn envelope_and_method_table() {
     assert_eq!(rpc::PullRequestsDetail::TAG, "pullRequests.detail");
     assert!(rpc::OrchestrationSubscribeThread::STREAM);
     assert!(rpc::ALL_TAGS.contains(&"pullRequests.diffFileContents"));
+    assert_eq!(
+        <t3_api::http::OrchestrationShellSnapshot as t3_api::HttpEndpoint>::CONSTANT_HEADERS,
+        &[("x-t3-orchestration-protocol", "2")]
+    );
+    assert!(<t3_api::http::PullRequestsDiff as t3_api::HttpEndpoint>::CONSTANT_HEADERS.is_empty());
 
     let payload: types::PullRequestRef = serde_json::from_value(serde_json::json!({
         "projectId": "project-1", "repository": "pingdotgg/t3code", "number": 1
