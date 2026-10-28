@@ -1,0 +1,18 @@
+[
+  {
+    "isAtRepositoryRoot": true,
+    "refs": [
+      {
+        "name": "main",
+        "isRemote": false,
+        "current": true,
+        "isDefault": false,
+        "worktreePath": "/tmp/claude-1000/t3sync/nightly/home/capture-project"
+      }
+    ],
+    "isRepo": true,
+    "hasPrimaryRemote": false,
+    "nextCursor": null,
+    "totalCount": 1
+  }
+]

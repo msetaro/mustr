@@ -225,3 +225,137 @@ fn a_newer_servers_live_payloads_decode() {
     eprintln!("{} live payloads", files.len());
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// RPCs and endpoints mustr calls that the newer T3 dropped, and how mustr does without them.
+/// Anything else mustr calls must still be there.
+const DROPPED_WITH_FALLBACK: &[(&str, &str)] = &[(
+    "rpc server.getSettings",
+    "the new-thread form reads the settings from server.getConfig (thread_chat/src/new_thread.rs)",
+)];
+
+/// `rpc::X` and `http::X` in `methods.rs`: struct name -> `rpc <tag>` or `http <METHOD> <path>`.
+fn method_table() -> BTreeMap<String, String> {
+    let methods = fs::read_to_string(crate_dir().join("src/generated/methods.rs")).unwrap();
+    let constant = |line: &str, name: &str| {
+        line.trim()
+            .strip_prefix(&format!("const {name}: &'static str = \""))
+            .and_then(|rest| rest.strip_suffix("\";"))
+            .map(str::to_string)
+    };
+    let mut table = BTreeMap::new();
+    let lines: Vec<&str> = methods.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        let Some(name) = line
+            .trim()
+            .strip_prefix("pub struct ")
+            .and_then(|rest| rest.strip_suffix(';'))
+        else {
+            continue;
+        };
+        let body = &lines[i + 1..(i + 5).min(lines.len())];
+        if let Some(tag) = body.iter().find_map(|line| constant(line, "TAG")) {
+            table.insert(name.to_string(), format!("rpc {tag}"));
+        } else if let (Some(method), Some(path)) = (
+            body.iter().find_map(|line| constant(line, "METHOD")),
+            body.iter().find_map(|line| constant(line, "PATH")),
+        ) {
+            table.insert(name.to_string(), format!("http {method} {path}"));
+        }
+    }
+    table
+}
+
+/// Every `rpc::X` and `http::X` the code of `dir` names, outside its tests.
+fn calls_in(dir: &Path, table: &BTreeMap<String, String>, calls: &mut BTreeMap<String, String>) {
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        if path.is_dir() {
+            if name != "tests" && name != "generated" {
+                calls_in(&path, table, calls);
+            }
+            continue;
+        }
+        if !name.ends_with(".rs") || name.ends_with("tests.rs") || name == "test_rpc.rs" {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        for prefix in ["rpc::", "http::"] {
+            for (at, _) in text.match_indices(prefix) {
+                let ident: String = text[at + prefix.len()..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                if let Some(call) = table.get(&ident) {
+                    let file = path
+                        .strip_prefix(crate_dir().parent().unwrap())
+                        .unwrap_or(&path);
+                    calls
+                        .entry(call.clone())
+                        .or_insert_with(|| file.display().to_string());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_newer_server_has_every_call_mustr_makes() {
+    let fixtures = crate_dir().join("tests/fixtures/newer-server");
+    let source = read_json(&fixtures.join("SOURCE.json"));
+    let newer = read_json(&fixtures.join("manifest.json"));
+    let mut available = BTreeSet::new();
+    for rpc in newer["rpc"].as_array().unwrap() {
+        available.insert(format!("rpc {}", rpc["tag"].as_str().unwrap()));
+    }
+    for endpoint in newer["http"].as_array().unwrap() {
+        available.insert(format!(
+            "http {} {}",
+            endpoint["method"].as_str().unwrap(),
+            endpoint["path"].as_str().unwrap()
+        ));
+    }
+
+    let table = method_table();
+    let mut calls = BTreeMap::new();
+    let crates = crate_dir().parent().unwrap().to_path_buf();
+    for name in ["t3_client", "thread_chat", "mustr", "review"] {
+        let src = crates.join(name).join("src");
+        if src.is_dir() {
+            calls_in(&src, &table, &mut calls);
+        }
+    }
+    assert!(
+        calls.len() > 40,
+        "only found {} calls: {calls:#?}",
+        calls.len()
+    );
+
+    let mut missing = Vec::new();
+    for (call, file) in &calls {
+        if available.contains(call) {
+            continue;
+        }
+        match DROPPED_WITH_FALLBACK
+            .iter()
+            .find(|(dropped, _)| dropped == call)
+        {
+            Some((_, fallback)) => eprintln!("  dropped, with a fallback: {call}: {fallback}"),
+            None => missing.push(format!("{call} (called in {file})")),
+        }
+    }
+    eprintln!(
+        "T3 {}: has {} of the {} calls mustr makes",
+        source["t3Version"],
+        calls
+            .keys()
+            .filter(|call| available.contains(*call))
+            .count(),
+        calls.len()
+    );
+    assert!(
+        missing.is_empty(),
+        "T3 {} no longer has calls mustr makes: {missing:#?}",
+        source["t3Version"]
+    );
+}
