@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # mustr-sync-zed: merge a Zed stable release tag into a sync branch.
 #
-# Draft of script/mustr-sync-zed for msetaro/differ. Runbook: SYNC.md.
+# Draft of script/mustr-sync-zed for msetaro/mustr. Runbook: SYNC.md.
 #
 # Why this is not a plain `git merge`: Zed's stable tags (vX.Y.Z) sit on release
 # branches (v1.25.x, ...) made of cherry-picks and version bumps, so merging one
@@ -368,7 +368,7 @@ note upstream_commits "$UPSTREAM_COMMITS since $OLD_DESC"
 # --------------------------------------- 7. what changed for mustr ----
 read_lines NEW_WF < <(git diff --name-only --diff-filter=A "$OLD_BASE" "$TAG_REF" -- .github/workflows | grep -v '/mustr-' || true)
 if [ "${#NEW_WF[@]}" -gt 0 ]; then
-  note new_upstream_workflows "${#NEW_WF[@]} - after merging the PR run: gh workflow disable <file> -R msetaro/differ"
+  note new_upstream_workflows "${#NEW_WF[@]} - after merging the PR run: gh workflow disable <file> -R msetaro/mustr"
   for p in "${NEW_WF[@]}"; do note "  workflow" "$p"; done
 else
   note new_upstream_workflows "none"
@@ -426,5 +426,5 @@ PR_BODY="$GIT_DIR_ABS/mustr-sync/zed-$TAG.md"
 { printf 'Sync Zed %s (from %s).\n\n```\n%s```\n' "$TAG" "$OLD_DESC" "$SUMMARY"; } >"$PR_BODY"
 note result "merged"
 note pr_body "$PR_BODY"
-note next "git push -u origin $SYNC_BRANCH && gh pr create -R msetaro/differ --base $BASE --head $SYNC_BRANCH --title 'Sync Zed $TAG' --body-file '$PR_BODY'"
+note next "git push -u origin $SYNC_BRANCH && gh pr create -R msetaro/mustr --base $BASE --head $SYNC_BRANCH --title 'Sync Zed $TAG' --body-file '$PR_BODY'"
 exit 0

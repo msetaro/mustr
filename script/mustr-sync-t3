@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # mustr-sync-t3: move mustr's pinned T3 Code version to a T3 release tag.
 #
-# Draft of script/mustr-sync-t3 for msetaro/differ. Runbook: SYNC.md.
+# Draft of script/mustr-sync-t3 for msetaro/mustr. Runbook: SYNC.md.
 # Steps: resolve tag -> fetch that tag's packages/contracts -> check the
 # orchestration protocol version -> regenerate t3_client types (regen.sh) ->
 # pin version, protocol and runtime checksums -> commit on sync/t3-<tag> ->
@@ -382,5 +382,5 @@ PR_BODY="$WORK/t3-$TAG.md"
 } >"$PR_BODY"
 note result synced
 note pr_body "$PR_BODY"
-note next "git push -u origin $SYNC_BRANCH && gh pr create -R msetaro/differ --base $BASE --head $SYNC_BRANCH --title 'Sync T3 Code $TAG' --body-file '$PR_BODY'"
+note next "git push -u origin $SYNC_BRANCH && gh pr create -R msetaro/mustr --base $BASE --head $SYNC_BRANCH --title 'Sync T3 Code $TAG' --body-file '$PR_BODY'"
 exit 0

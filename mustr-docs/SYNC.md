@@ -96,7 +96,7 @@ script/mustr-sync-zed               # merge into sync/zed-<tag>, build, test
 - `invariant: OK`.
 - `git diff refs/upstream-tags/<tag> HEAD --stat` lists only the touch points and mustr-owned paths.
 - `git diff refs/upstream-tags/<tag> HEAD -- Cargo.lock` only adds mustr's crates and their dependencies. mustr-only dependencies can move to newer semver-compatible versions; note that in the PR.
-- `new_upstream_workflows`. After the PR merges, run `gh workflow disable <file> -R msetaro/differ` for each one; this needs the human's gh token with admin rights. Never delete them, because deleting causes merge conflicts.
+- `new_upstream_workflows`. After the PR merges, run `gh workflow disable <file> -R msetaro/mustr` for each one; this needs the human's gh token with admin rights. Never delete them, because deleting causes merge conflicts.
 
 ## 4. `mustr-sync-t3`
 

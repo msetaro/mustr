@@ -450,12 +450,12 @@ index 9999999..aaaaaaa 100644
         let pull_request = PullRequestRef {
             project_id: "project".to_string(),
             host: Some("github.com".to_string()),
-            repository: "msetaro/differ".to_string(),
+            repository: "msetaro/mustr".to_string(),
             number: 7,
         };
         assert_eq!(
             serde_json::to_value(&pull_request)?,
-            json!({ "projectId": "project", "host": "github.com", "repository": "msetaro/differ", "number": 7 })
+            json!({ "projectId": "project", "host": "github.com", "repository": "msetaro/mustr", "number": 7 })
         );
         Ok(())
     }
