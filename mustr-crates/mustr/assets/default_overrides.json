@@ -9,6 +9,10 @@
   },
   // mustr doesn't use Zed's hosted AI, agent panel, or edit predictions.
   "disable_ai": true,
+  // mustr never contacts Zed's servers (mustr-docs/ZED-SERVICES.md). Zed's
+  // `Client` and the links derived from it use this URL; `.invalid` never
+  // resolves, and mustr's HTTP client refuses it before any DNS lookup.
+  "server_url": "https://zed.invalid",
   // mustr doesn't use Zed's updater, which would download Zed releases.
   "auto_update": false,
   // mustr makes no requests to zed.dev, so it doesn't use Zed's extension

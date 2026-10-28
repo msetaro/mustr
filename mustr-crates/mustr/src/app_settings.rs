@@ -18,8 +18,8 @@ const DEFAULT_OVERRIDES: &str = include_str!("../assets/default_overrides.json")
 
 /// What a new settings file holds. Zed's settings writer garbles the first setting it adds to
 /// an empty object after a comment, or after a comment containing `://`, so the comments are
-/// inside the braces and the link has no scheme.
-pub const INITIAL_SETTINGS: &str = "{\n  // mustr settings\n  //\n  // mustr uses Zed's settings format. For the available settings, see\n  // zed.dev/docs/configuring-zed\n}\n";
+/// inside the braces. mustr has no settings docs of its own and doesn't link to Zed's site.
+pub const INITIAL_SETTINGS: &str = "{\n  // mustr settings\n  //\n  // mustr uses Zed's settings format and most of Zed's editor settings.\n}\n";
 
 /// Writes [`INITIAL_SETTINGS`] if there's no settings file yet. When something saves a setting
 /// (the diff style, the theme selector), Zed's `SettingsStore::update_settings_file` starts a
@@ -248,6 +248,7 @@ mod tests {
 
         let merged: Value = serde_json::from_str(&merged_default_settings().unwrap()).unwrap();
         assert_eq!(merged["disable_ai"], Value::Bool(true));
+        assert_eq!(merged["server_url"], Value::from("https://zed.invalid"));
         assert_eq!(merged["auto_update"], Value::Bool(false));
         assert_eq!(merged["telemetry"]["metrics"], Value::Bool(false));
         assert_eq!(merged["telemetry"]["diagnostics"], Value::Bool(false));
@@ -285,7 +286,7 @@ mod tests {
         let parsed: Value = settings::parse_json_with_comments(&new_text).unwrap();
         assert_eq!(parsed, serde_json::json!({"diff_view_style": "unified"}));
         assert!(
-            new_text.contains("  // zed.dev/docs/configuring-zed\n"),
+            new_text.contains("  // mustr uses Zed's settings format"),
             "{new_text}"
         );
     }
