@@ -46,6 +46,196 @@ pub struct ComposerState {
     /// What was copied last, by the id of its item, to say so on its button.
     pub(crate) copied: Option<String>,
     pub(crate) _copied_reset: Option<gpui::Task<()>>,
+    /// The sent prompt ArrowUp recalled, counting back from the newest, and its text.
+    pub(crate) recalled: Option<(usize, String)>,
+    /// The queued message the composer is editing, by its run's id.
+    pub(crate) editing_queued: Option<String>,
+    _save_draft: Option<gpui::Task<()>>,
+}
+
+/// Unsent text, by thread, kept while mustr runs and in its database across restarts
+/// (`composerDraftStore.ts` in T3), so closing a thread's tab loses nothing.
+#[derive(Default)]
+struct ComposerDrafts(collections::HashMap<String, String>);
+
+impl gpui::Global for ComposerDrafts {}
+
+const DRAFT_KEY_PREFIX: &str = "mustr-thread-draft:";
+const DRAFT_SAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The draft saved for a thread, if there is one.
+pub(crate) fn saved_draft(thread_id: &str, cx: &App) -> Option<String> {
+    if let Some(draft) = cx
+        .try_global::<ComposerDrafts>()
+        .and_then(|drafts| drafts.0.get(thread_id))
+    {
+        return Some(draft.clone());
+    }
+    if !cx.has_global::<db::AppDatabase>() {
+        return None;
+    }
+    db::kvp::KeyValueStore::global(cx)
+        .read_kvp(&format!("{DRAFT_KEY_PREFIX}{thread_id}"))
+        .ok()
+        .flatten()
+        .filter(|draft| !draft.trim().is_empty())
+}
+
+impl ThreadView {
+    /// Puts back the draft saved for this thread, if the composer is empty.
+    pub(crate) fn restore_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(thread_id) = self.thread_id.as_deref() else {
+            return;
+        };
+        let Some(draft) = saved_draft(thread_id, cx) else {
+            return;
+        };
+        if self.composer_text(cx).is_empty() {
+            self.composer
+                .update(cx, |editor, cx| editor.set_text(draft, window, cx));
+        }
+    }
+
+    /// Keeps the composer's text as the thread's draft; an empty composer forgets it.
+    fn save_draft(&mut self, cx: &mut Context<Self>) {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return;
+        };
+        let text = self.composer_text(cx);
+        let drafts = &mut cx.default_global::<ComposerDrafts>().0;
+        let unchanged = drafts.get(&thread_id).map(String::as_str).unwrap_or("") == text;
+        if text.trim().is_empty() {
+            drafts.remove(&thread_id);
+        } else {
+            drafts.insert(thread_id.clone(), text.clone());
+        }
+        if unchanged || !cx.has_global::<db::AppDatabase>() {
+            return;
+        }
+        let store = db::kvp::KeyValueStore::global(cx);
+        let key = format!("{DRAFT_KEY_PREFIX}{thread_id}");
+        // Saved once typing pauses; a newer edit replaces the pending save.
+        self.composer_state._save_draft = Some(cx.spawn(async move |_, cx| {
+            cx.background_executor().timer(DRAFT_SAVE_DELAY).await;
+            let saved = if text.trim().is_empty() {
+                store.delete_kvp(key).await
+            } else {
+                store.write_kvp(key, text).await
+            };
+            if let Err(error) = saved {
+                log::warn!("couldn't save the thread's draft: {error:#}");
+            }
+        }));
+    }
+
+    /// The prompts ArrowUp recalls, oldest first: the thread's user messages, without the ones
+    /// that implement a plan, and with repeats in a row merged (`composerPromptHistory.ts`).
+    fn prompt_history(&self) -> Vec<String> {
+        let Some(state) = self.thread_state() else {
+            return Vec::new();
+        };
+        let mut history: Vec<String> = Vec::new();
+        for item in state.items() {
+            let ItemKind::UserMessage { text, .. } = &item.kind else {
+                continue;
+            };
+            let text = text.trim();
+            if text.is_empty()
+                || text.starts_with(commands::PLAN_IMPLEMENTATION_PREFIX)
+                || history.last().is_some_and(|last| last == text)
+            {
+                continue;
+            }
+            history.push(text.to_string());
+        }
+        history
+    }
+
+    /// The composer's cursor row, and its last row.
+    fn cursor_row(&self, cx: &App) -> (u32, u32) {
+        let editor = self.composer.read(cx);
+        let snapshot = editor.buffer().read(cx).snapshot(cx);
+        let head = editor.selections.newest_anchor().head();
+        (
+            editor::ToPoint::to_point(&head, &snapshot).row,
+            snapshot.max_point().row,
+        )
+    }
+
+    fn show_recalled(
+        &mut self,
+        recalled: Option<(usize, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = recalled
+            .as_ref()
+            .map(|(_, text)| text.clone())
+            .unwrap_or_default();
+        self.composer_state.recalled = recalled;
+        self.composer.update(cx, |editor, cx| {
+            editor.set_text(text, window, cx);
+            editor.move_to_end(&editor::actions::MoveToEnd, window, cx);
+        });
+    }
+
+    /// ArrowUp in an empty composer recalls the last prompt sent, then earlier ones. Like T3, it
+    /// works only without images, and from the first line.
+    fn on_move_up(
+        &mut self,
+        _: &zed_actions::editor::MoveUp,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.images.composer.is_empty() || self.cursor_row(cx).0 != 0 {
+            return;
+        }
+        let text = self.composer_text(cx);
+        let stepping = self
+            .composer_state
+            .recalled
+            .as_ref()
+            .is_some_and(|(_, recalled)| *recalled == text);
+        if !stepping && !text.is_empty() {
+            return;
+        }
+        let history = self.prompt_history();
+        let next = match &self.composer_state.recalled {
+            Some((index, _)) if stepping => index + 1,
+            _ => 0,
+        };
+        let Some(prompt) = history.iter().rev().nth(next) else {
+            return;
+        };
+        cx.stop_propagation();
+        self.show_recalled(Some((next, prompt.clone())), window, cx);
+    }
+
+    /// ArrowDown steps back toward the newest recalled prompt, then to an empty composer.
+    fn on_move_down(
+        &mut self,
+        _: &zed_actions::editor::MoveDown,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (row, last_row) = self.cursor_row(cx);
+        let text = self.composer_text(cx);
+        let Some((index, recalled)) = self.composer_state.recalled.clone() else {
+            return;
+        };
+        if recalled != text || row != last_row {
+            return;
+        }
+        cx.stop_propagation();
+        let recalled = index.checked_sub(1).and_then(|previous| {
+            self.prompt_history()
+                .iter()
+                .rev()
+                .nth(previous)
+                .map(|prompt| (previous, prompt.clone()))
+        });
+        self.show_recalled(recalled, window, cx);
+    }
 }
 
 impl ThreadView {
@@ -75,8 +265,18 @@ pub(crate) fn observe_composer(
     composer: &Entity<Editor>,
     cx: &mut Context<ThreadView>,
 ) -> Subscription {
-    cx.subscribe(composer, |_, _, event: &EditorEvent, cx| {
+    cx.subscribe(composer, |this, _, event: &EditorEvent, cx| {
         if matches!(event, EditorEvent::BufferEdited { .. }) {
+            this.save_draft(cx);
+            let text = this.composer_text(cx);
+            if this
+                .composer_state
+                .recalled
+                .as_ref()
+                .is_some_and(|(_, recalled)| *recalled != text)
+            {
+                this.composer_state.recalled = None;
+            }
             cx.notify();
         }
     })
@@ -106,6 +306,10 @@ impl ThreadView {
     }
 
     pub(crate) fn send(&mut self, delivery: Delivery, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(run_id) = self.composer_state.editing_queued.clone() {
+            self.save_queued_edit(run_id, window, cx);
+            return;
+        }
         let text = self.composer_text(cx);
         let has_images = !self.images.composer.is_empty();
         if (text.trim().is_empty() && !has_images) || self.sending {
@@ -160,6 +364,67 @@ impl ThreadView {
             })
             .ok();
         }));
+    }
+
+    /// Opens a queued message in the composer to change it (`queuedMessageEdit.ts` in T3).
+    pub(crate) fn edit_queued(
+        &mut self,
+        message: QueuedMessage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.composer_state.editing_queued = Some(message.run_id);
+        self.composer.update(cx, |editor, cx| {
+            editor.set_text(message.text, window, cx);
+            editor.move_to_end(&editor::actions::MoveToEnd, window, cx);
+        });
+        window.focus(&self.composer.focus_handle(cx), cx);
+        cx.notify();
+    }
+
+    pub(crate) fn cancel_queued_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.composer_state.editing_queued.take().is_some() {
+            self.composer
+                .update(cx, |editor, cx| editor.clear(window, cx));
+        }
+        cx.notify();
+    }
+
+    /// Saves the composer's text as the queued message's (`queued-run.edit`).
+    fn save_queued_edit(&mut self, run_id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return;
+        };
+        let text = self.composer_text(cx);
+        if text.trim().is_empty() {
+            return;
+        }
+        let still_queued = self.thread_state().is_some_and(|state| {
+            state
+                .queued_messages()
+                .iter()
+                .any(|queued| queued.run_id == run_id)
+        });
+        if !still_queued {
+            self.composer_state.editing_queued = None;
+            self.error = Some("That message isn't queued anymore; send this as a new one.".into());
+            cx.notify();
+            return;
+        }
+        let command = commands::edit_queued(&thread_id, &run_id, text.trim(), commands::new_id());
+        self.dispatch_in_order(
+            vec![command],
+            window,
+            cx,
+            |this, result, window, cx| match result {
+                Ok(()) => {
+                    this.composer_state.editing_queued = None;
+                    this.composer
+                        .update(cx, |editor, cx| editor.clear(window, cx));
+                }
+                Err(error) => this.error = Some(format!("{error:#}").into()),
+            },
+        );
     }
 
     /// Sends commands one after another, stopping at the first T3 refuses, then calls `done`
@@ -826,6 +1091,27 @@ impl ThreadView {
                             .child(truncate(&message.text, 200)),
                     )
                     .child(
+                        div()
+                            .debug_selector({
+                                let run_id = run_id.clone();
+                                move || format!("thread-edit-queued-{run_id}")
+                            })
+                            .child(
+                                TextButton::new(
+                                    SharedString::from(format!("edit-queued-{run_id}")),
+                                    "Edit",
+                                )
+                                .disabled(blocked)
+                                .tooltip("Change this message before it runs")
+                                .on_click(cx.listener({
+                                    let message = message.clone();
+                                    move |this, _, window, cx| {
+                                        this.edit_queued(message.clone(), window, cx)
+                                    }
+                                })),
+                            ),
+                    )
+                    .child(
                         TextButton::new(
                             SharedString::from(format!("steer-queued-{run_id}")),
                             "Steer now",
@@ -1044,8 +1330,31 @@ impl ThreadView {
         let can_write = blocked.is_none() && (is_draft || state.is_some()) && !self.sending;
         let has_text = !self.composer_text(cx).trim().is_empty();
 
+        let editing_queued = self.composer_state.editing_queued.is_some();
         let mut buttons: Vec<AnyElement> = Vec::new();
-        if running {
+        if editing_queued {
+            buttons.push(
+                TextButton::new("thread-cancel-edit", "Cancel")
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.cancel_queued_edit(window, cx)),
+                    )
+                    .into_any_element(),
+            );
+            buttons.push(
+                div()
+                    .debug_selector(|| "thread-save-queued".into())
+                    .child(
+                        TextButton::new("thread-save-queued", "Save")
+                            .style(MustrButtonStyle::Primary)
+                            .disabled(!can_write || !has_text)
+                            .tooltip("Replace the queued message with this")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.send(Delivery::Queue, window, cx)
+                            })),
+                    )
+                    .into_any_element(),
+            );
+        } else if running {
             buttons.push(
                 div()
                     .debug_selector(|| "thread-stop".into())
@@ -1220,6 +1529,22 @@ impl ThreadView {
                                 ),
                         )
                     })
+                    .when(self.composer_state.editing_queued.is_some(), |this| {
+                        this.child(
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    Icon::new(IconName::Pencil)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Accent),
+                                )
+                                .child(
+                                    Label::new("Editing a queued message: Save replaces it")
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                ),
+                        )
+                    })
                     .when_some(self.images.intake_error.clone(), |this, error| {
                         this.child(
                             h_flex()
@@ -1245,6 +1570,8 @@ impl ThreadView {
                             .on_action(cx.listener(Self::on_steer))
                             .on_action(cx.listener(Self::on_stop))
                             .capture_action(cx.listener(Self::on_paste))
+                            .capture_action(cx.listener(Self::on_move_up))
+                            .capture_action(cx.listener(Self::on_move_down))
                             .drag_over::<ExternalPaths>(|style, _, _, cx| {
                                 let palette = mustr_ui::palette(cx);
                                 style

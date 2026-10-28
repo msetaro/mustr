@@ -449,7 +449,9 @@ impl ThreadView {
             ItemKind::UserMessage { text, images, .. } => {
                 let thumbnails =
                     (!images.is_empty()).then(|| self.render_message_images(&item.id, images, cx));
+                let copy = self.render_copy_message(item, text, cx);
                 h_flex()
+                    .group(SharedString::from(format!("message-{}", item.id)))
                     .items_start()
                     .gap_2()
                     .child(avatar("Y", gpui::rgb(0x6e7781).into()))
@@ -467,28 +469,36 @@ impl ThreadView {
                             })
                             .children(thumbnails),
                     )
+                    .children(copy)
                     .into_any_element()
             }
-            ItemKind::AssistantMessage { streaming, .. } => h_flex()
-                .items_start()
-                .gap_2()
-                .child(avatar(&self.agent_letter(), palette.agent.hsla()))
-                .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .child(self.render_markdown(&item.id, false, window, cx))
-                        .when(*streaming, |this| {
-                            this.child(
-                                div()
-                                    .w(px(6.))
-                                    .h(px(12.))
-                                    .bg(palette.text.hsla())
-                                    .opacity(0.7),
-                            )
-                        }),
-                )
-                .into_any_element(),
+            ItemKind::AssistantMessage { streaming, text } => {
+                let copy = (!*streaming)
+                    .then(|| self.render_copy_message(item, text, cx))
+                    .flatten();
+                h_flex()
+                    .group(SharedString::from(format!("message-{}", item.id)))
+                    .items_start()
+                    .gap_2()
+                    .child(avatar(&self.agent_letter(), palette.agent.hsla()))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.render_markdown(&item.id, false, window, cx))
+                            .when(*streaming, |this| {
+                                this.child(
+                                    div()
+                                        .w(px(6.))
+                                        .h(px(12.))
+                                        .bg(palette.text.hsla())
+                                        .opacity(0.7),
+                                )
+                            }),
+                    )
+                    .children(copy)
+                    .into_any_element()
+            }
             ItemKind::Plan {
                 title, markdown, ..
             } => {
@@ -695,6 +705,51 @@ impl ThreadView {
                 self.render_work(vec![item.clone()], window, cx)
             }
         }
+    }
+
+    /// A message's copy button, shown on hover, as T3's `chat/MessageCopyButton.tsx`.
+    fn render_copy_message(
+        &self,
+        item: &TimelineItem,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if text.trim().is_empty() {
+            return None;
+        }
+        let copied = self.composer_state.copied.as_deref() == Some(item.id.as_str());
+        let item_id = item.id.clone();
+        let text = text.to_string();
+        let selector = format!("thread-copy-{}", item.id);
+        Some(
+            div()
+                .flex_none()
+                .debug_selector(|| selector)
+                .when(!copied, |this| {
+                    this.visible_on_hover(SharedString::from(format!("message-{}", item.id)))
+                })
+                .child(
+                    ui::IconButton::new(
+                        SharedString::from(format!("copy-message-{}", item.id)),
+                        if copied {
+                            IconName::Check
+                        } else {
+                            IconName::Copy
+                        },
+                    )
+                    .icon_size(IconSize::XSmall)
+                    .icon_color(if copied { Color::Success } else { Color::Muted })
+                    .tooltip(ui::Tooltip::text(if copied {
+                        "Copied"
+                    } else {
+                        "Copy message"
+                    }))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.copy_text(item_id.clone(), text.clone(), cx)
+                    })),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Implement, Implement in a new thread, and Refine, on the plan T3 would offer them for.

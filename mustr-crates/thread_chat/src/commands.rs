@@ -28,6 +28,7 @@ use t3_api::{
         OrchestrationV2CommandQueueResumeType, OrchestrationV2CommandQueuedMessagePromoteToSteer,
         OrchestrationV2CommandQueuedMessagePromoteToSteerType,
         OrchestrationV2CommandQueuedRunCancel, OrchestrationV2CommandQueuedRunCancelType,
+        OrchestrationV2CommandQueuedRunEdit, OrchestrationV2CommandQueuedRunEditType,
         OrchestrationV2CommandRuntimeRequestRespond,
         OrchestrationV2CommandRuntimeRequestRespondType, OrchestrationV2CommandThreadCreate,
         OrchestrationV2CommandThreadCreateType, OrchestrationV2CommandThreadDelete,
@@ -338,6 +339,25 @@ pub fn continue_run(
         dispatch.manual_continuation_of_run_id = Some(run_id.to_string());
     }
     command
+}
+
+/// Replaces a queued message's text before it runs (`queued-run.edit`). Its attachments are
+/// left out, which keeps the ones it has.
+pub fn edit_queued(
+    thread_id: &str,
+    queued_run_id: &str,
+    text: &str,
+    command_id: String,
+) -> OrchestrationV2Command {
+    OrchestrationV2Command::QueuedRunEdit(OrchestrationV2CommandQueuedRunEdit {
+        attachments: None,
+        command_id,
+        context: None,
+        run_id: queued_run_id.to_string(),
+        text: text.to_string(),
+        thread_id: thread_id.to_string(),
+        type_: OrchestrationV2CommandQueuedRunEditType::QueuedRunEdit,
+    })
 }
 
 /// Restarts a held queue (`queue.resume`).
@@ -882,6 +902,21 @@ mod tests {
                 "text": "Continue where you left off.",
                 "attachments": [],
                 "dispatchMode": { "type": "start_immediately" }
+            })
+        );
+        assert_eq!(
+            wire(&edit_queued(
+                "thread-1",
+                "run-q",
+                "Then update the docs",
+                "command-6".into()
+            )),
+            json!({
+                "type": "queued-run.edit",
+                "commandId": "command-6",
+                "threadId": "thread-1",
+                "runId": "run-q",
+                "text": "Then update the docs"
             })
         );
         assert_eq!(

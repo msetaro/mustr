@@ -201,7 +201,10 @@ impl ThreadView {
             _subscriptions: vec![composer_subscription],
         };
         match thread_id {
-            Some(thread_id) => this.load(thread_id, cx),
+            Some(thread_id) => {
+                this.restore_draft(window, cx);
+                this.load(thread_id, cx)
+            }
             None => {
                 let form = cx.new(|cx| NewThreadForm::new(backend, window, cx));
                 this._subscriptions.push(cx.subscribe(

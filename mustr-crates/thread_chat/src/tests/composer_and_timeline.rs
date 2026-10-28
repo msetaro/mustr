@@ -10,7 +10,7 @@ use crate::{
     },
     commands::PLAN_IMPLEMENTATION_PREFIX,
 };
-use gpui::{ClipboardItem, ExternalPaths, FileDropEvent, ImageFormat};
+use gpui::{AppContext as _, ClipboardItem, ExternalPaths, FileDropEvent, ImageFormat};
 use pretty_assertions::assert_eq;
 use std::path::PathBuf;
 
@@ -980,4 +980,141 @@ fn only_stopped_or_usage_limited_runs_resume() {
         Some("run-1".to_string())
     );
     assert!(limited("provider_error").is_none());
+}
+
+// Drafts and recalling prompts.
+
+#[gpui::test]
+async fn drafts_survive_closing_the_thread(cx: &mut TestAppContext) {
+    let backend = FakeBackend::with_thread(finished_thread(), 10);
+    let (view, cx) = open_view(backend.clone(), Some(THREAD), cx);
+    type_message(&view, "half-written thought", cx);
+    cx.run_until_parked();
+
+    let reopened = view.update_in(cx, |_, window, cx| {
+        cx.new(|cx| {
+            ThreadView::new(
+                backend.clone(),
+                None,
+                Some(THREAD.to_string()),
+                "Again".into(),
+                window,
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    assert_eq!(composer_text(&reopened, cx), "half-written thought");
+
+    // Sending clears it.
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+    let fresh = view.update_in(cx, |_, window, cx| {
+        cx.new(|cx| {
+            ThreadView::new(
+                backend.clone(),
+                None,
+                Some(THREAD.to_string()),
+                "Again".into(),
+                window,
+                cx,
+            )
+        })
+    });
+    cx.run_until_parked();
+    assert_eq!(composer_text(&fresh, cx), "");
+}
+
+#[gpui::test]
+async fn arrow_up_recalls_sent_prompts(cx: &mut TestAppContext) {
+    let mut projection = running_thread();
+    // A plan's implementation isn't a prompt to recall.
+    projection.items.push(user_message(
+        "i9",
+        9,
+        "run-3",
+        &format!("{PLAN_IMPLEMENTATION_PREFIX}# Plan"),
+    ));
+    let backend = FakeBackend::with_thread(projection, 20);
+    let (view, cx) = open_view(backend, Some(THREAD), cx);
+    type_message(&view, "", cx);
+
+    cx.dispatch_action(zed_actions::editor::MoveUp);
+    cx.run_until_parked();
+    assert_eq!(composer_text(&view, cx), "Now handle 429s");
+    cx.dispatch_action(zed_actions::editor::MoveUp);
+    cx.run_until_parked();
+    assert_eq!(composer_text(&view, cx), "Add retries with backoff");
+    // The oldest stays.
+    cx.dispatch_action(zed_actions::editor::MoveUp);
+    cx.run_until_parked();
+    assert_eq!(composer_text(&view, cx), "Add retries with backoff");
+    cx.dispatch_action(zed_actions::editor::MoveDown);
+    cx.run_until_parked();
+    assert_eq!(composer_text(&view, cx), "Now handle 429s");
+    cx.dispatch_action(zed_actions::editor::MoveDown);
+    cx.run_until_parked();
+    assert_eq!(composer_text(&view, cx), "");
+
+    // Not over text the user typed.
+    type_message(&view, "my own words", cx);
+    cx.dispatch_action(zed_actions::editor::MoveUp);
+    cx.run_until_parked();
+    assert_eq!(composer_text(&view, cx), "my own words");
+}
+
+#[gpui::test]
+async fn messages_copy_their_text(cx: &mut TestAppContext) {
+    let backend = FakeBackend::with_thread(finished_thread(), 10);
+    let (view, cx) = open_view(backend, Some(THREAD), cx);
+    view.update(cx, |view, cx| {
+        view.copy_text(
+            "i5".into(),
+            "Done. `withRetry` now wraps `post()`.".into(),
+            cx,
+        )
+    });
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("Done. `withRetry` now wraps `post()`.".to_string())
+    );
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.composer_state.copied.as_deref(), Some("i5"))
+    });
+}
+
+#[gpui::test]
+async fn queued_messages_can_be_edited(cx: &mut TestAppContext) {
+    let backend = FakeBackend::with_thread(running_thread(), 20);
+    let (view, cx) = open_view(backend.clone(), Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(1200.)));
+    cx.run_until_parked();
+    let edit = cx.debug_bounds("thread-edit-queued-run-3").unwrap();
+    cx.simulate_click(edit.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(composer_text(&view, cx), "Then update the docs");
+    // Save replaces Stop, Steer, and Queue while editing.
+    assert!(cx.debug_bounds("thread-save-queued").is_some());
+    assert!(cx.debug_bounds("thread-queue").is_none());
+
+    type_message(&view, "Then update the docs and the changelog", cx);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+    assert_eq!(
+        backend
+            .commands()
+            .into_iter()
+            .map(without_ids)
+            .collect::<Vec<_>>(),
+        [json!({
+            "type": "queued-run.edit",
+            "threadId": THREAD,
+            "runId": "run-3",
+            "text": "Then update the docs and the changelog"
+        })]
+    );
+    assert_eq!(composer_text(&view, cx), "");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.composer_state.editing_queued, None)
+    });
 }

@@ -16,6 +16,7 @@ doctest = false
 [dependencies]
 anyhow.workspace = true
 collections.workspace = true
+db.workspace = true
 editor.workspace = true
 futures.workspace = true
 gpui.workspace = true
@@ -32,6 +33,7 @@ t3_api = { path = "../t3_api" }
 ui.workspace = true
 uuid = { workspace = true, features = ["v4"] }
 workspace.workspace = true
+zed_actions.workspace = true
 
 [dev-dependencies]
 editor = { workspace = true, features = ["test-support"] }
