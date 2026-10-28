@@ -188,8 +188,8 @@ pub(crate) struct SlashContext {
     pub compact_available: bool,
 }
 
-/// The skills a user can start: enabled, not agent-only, once per name (`isProviderSkillUserInvocable`,
-/// `dedupeProviderSkillsByName`).
+/// The skills a user can start: enabled, not agent-only, once per name
+/// (`isProviderSkillUserInvocable`, `dedupeProviderSkillsByName`).
 fn invocable_skills(skills: &[ServerProviderSkill]) -> Vec<ServerProviderSkill> {
     let mut seen = Vec::new();
     skills
@@ -564,7 +564,11 @@ mod tests {
     use serde_json::json;
 
     fn skill(name: &str, fields: serde_json::Value) -> ServerProviderSkill {
-        let mut skill = json!({ "name": name, "path": format!("/home/me/.claude/skills/{name}"), "enabled": true });
+        let mut skill = json!({
+            "name": name,
+            "path": format!("/home/me/.claude/skills/{name}"),
+            "enabled": true
+        });
         if let (Some(skill), serde_json::Value::Object(fields)) = (skill.as_object_mut(), fields) {
             skill.extend(fields);
         }

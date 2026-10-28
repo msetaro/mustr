@@ -1243,6 +1243,13 @@ enum ChipKind {
     Other,
 }
 
+/// What a chip in the composer shows: its kind, its label, and its tooltip.
+struct Chip {
+    kind: ChipKind,
+    label: String,
+    tooltip: String,
+}
+
 /// A mention in the composer, drawn over its text the way T3's `ContextChip` draws it.
 #[derive(IntoElement)]
 struct MentionChip {
@@ -1849,7 +1856,12 @@ impl ThreadView {
                     ChipKind::File
                 };
                 let label = basename(&entry.path).to_string();
-                self.insert_mention(&trigger, link, kind, label, entry.path, window, cx);
+                let chip = Chip {
+                    kind,
+                    label,
+                    tooltip: entry.path,
+                };
+                self.insert_mention(&trigger, link, chip, window, cx);
             }
             MenuItem::Thread { thread_id, title } => {
                 let Some(environment_id) = self
@@ -1869,15 +1881,12 @@ impl ThreadView {
                     &label,
                 );
                 self.composer_state.menu.remember_record(record);
-                self.insert_mention(
-                    &trigger,
-                    reference,
-                    ChipKind::Thread,
+                let chip = Chip {
+                    kind: ChipKind::Thread,
                     label,
-                    format!("Thread: {title}"),
-                    window,
-                    cx,
-                );
+                    tooltip: format!("Thread: {title}"),
+                };
+                self.insert_mention(&trigger, reference, chip, window, cx);
             }
             MenuItem::PullRequest(pull_request) => {
                 let record = pull_request_record(&pull_request);
@@ -1889,15 +1898,12 @@ impl ThreadView {
                 );
                 self.composer_state.menu.remember_record(record);
                 let state = pull_request_state(&pull_request.state, pull_request.is_draft);
-                self.insert_mention(
-                    &trigger,
-                    reference,
-                    ChipKind::PullRequest(state),
+                let chip = Chip {
+                    kind: ChipKind::PullRequest(state),
                     label,
-                    format!("#{} {}", pull_request.number, pull_request.title),
-                    window,
-                    cx,
-                );
+                    tooltip: format!("#{} {}", pull_request.number, pull_request.title),
+                };
+                self.insert_mention(&trigger, reference, chip, window, cx);
             }
             MenuItem::Slash(item) => self.pick_slash_item(&trigger, item, window, cx),
         }
@@ -1938,27 +1944,17 @@ impl ThreadView {
 
     /// Writes a mention in place of the trigger's word, with a space after it, and draws it as
     /// a chip.
-    #[allow(clippy::too_many_arguments)]
     fn insert_mention(
         &mut self,
         trigger: &Trigger,
         serialized: String,
-        kind: ChipKind,
-        label: String,
-        tooltip: String,
+        chip: Chip,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let start =
             self.replace_in_composer(trigger.range.clone(), &format!("{serialized} "), window, cx);
-        self.add_chip(
-            start..start + serialized.len(),
-            kind,
-            label,
-            tooltip,
-            window,
-            cx,
-        );
+        self.add_chip(start..start + serialized.len(), chip, window, cx);
         self.composer_state.menu.close();
         self.refresh_menu(cx);
         cx.notify();
@@ -1968,12 +1964,15 @@ impl ThreadView {
     fn add_chip(
         &mut self,
         range: Range<usize>,
-        kind: ChipKind,
-        label: String,
-        tooltip: String,
+        chip: Chip,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Chip {
+            kind,
+            label,
+            tooltip,
+        } = chip;
         let label = SharedString::from(label);
         let tooltip = SharedString::from(tooltip);
         let chip = self.composer.update(cx, |editor, cx| {
@@ -2021,7 +2020,12 @@ impl ThreadView {
                 ChipKind::File
             };
             let label = basename(&link.path).to_string();
-            self.add_chip(link.range, kind, label, link.path, window, cx);
+            let chip = Chip {
+                kind,
+                label,
+                tooltip: link.path,
+            };
+            self.add_chip(link.range, chip, window, cx);
         }
         for reference in context_references(&text) {
             let record = self
@@ -2050,7 +2054,12 @@ impl ThreadView {
                         .map(str::to_string)
                 })
                 .unwrap_or_else(|| reference.label.clone());
-            self.add_chip(reference.range, kind, reference.label, tooltip, window, cx);
+            let chip = Chip {
+                kind,
+                label: reference.label,
+                tooltip,
+            };
+            self.add_chip(reference.range, chip, window, cx);
         }
     }
 
