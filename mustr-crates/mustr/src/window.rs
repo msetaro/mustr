@@ -87,13 +87,16 @@ pub fn init(cx: &mut App) {
             log::info!("Using GPU: {specs:?}");
         }
         let center_pane = workspace.active_pane().clone();
-        add_search_bars(workspace, &center_pane, window, cx);
+        add_toolbar_items(workspace, &center_pane, window, cx);
         let workspace_handle = cx.entity();
 
         // Zed adds its panels in `initialize_panels` (crates/zed/src/zed.rs); mustr's are
         // created synchronously, so dock restoration can finish right away.
         let nav_panel = cx.new(|cx| NavPanel::new(&workspace_handle, window, cx));
         workspace.add_panel(nav_panel.clone(), window, cx);
+        // Work packages add their dock panels here, created synchronously like the nav panel,
+        // each package under its own label (`mustr-docs/PARITY.md` §3).
+        // WP6, terminals and worktrees:
         workspace.finish_dock_restoration(cx);
         // The window's first item may already be open.
         let active_item = workspace.active_item(cx);
@@ -118,7 +121,7 @@ pub fn init(cx: &mut App) {
             window,
             |workspace, _, event, window, cx| {
                 if let workspace::Event::PaneAdded(pane) = event {
-                    add_search_bars(workspace, pane, window, cx);
+                    add_toolbar_items(workspace, pane, window, cx);
                 }
             },
         )
@@ -314,8 +317,8 @@ fn bind_on_window_closed(cx: &mut App) -> Option<gpui::Subscription> {
 }
 
 // Zed's `initialize_pane` (crates/zed/src/zed.rs) adds many toolbar items;
-// mustr only needs search.
-fn add_search_bars(
+// mustr adds search, and its own.
+fn add_toolbar_items(
     workspace: &Workspace,
     pane: &Entity<Pane>,
     window: &mut Window,
@@ -329,6 +332,9 @@ fn add_search_bars(
             toolbar.add_item(buffer_search_bar, window, cx);
             let project_search_bar = cx.new(|_| search::project_search::ProjectSearchBar::new());
             toolbar.add_item(project_search_bar, window, cx);
+            // Work packages add their toolbar items here, each package under its own label
+            // (`mustr-docs/PARITY.md` §3).
+            // WP4, ship the work:
         })
     });
 }

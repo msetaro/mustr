@@ -5,17 +5,19 @@
 //! (`mustr-docs/ZED-INTEGRATION.md` Q4). While a review is active the panel is as wide as the
 //! rail plus the tree. While a thread is active, or after the rail's Agents button, it shows the
 //! threads instead. Elsewhere it narrows to just the rail.
+//!
+//! Other parts of mustr add their own rail buttons with [`register_rail_entry`].
 
 use crate::{home::HomeView, navigation};
 use gpui::{
-    Action, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, Styled as _,
-    Subscription, WeakEntity, Window, div, px,
+    Action, AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
+    Focusable, Global, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render,
+    SharedString, Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 use mustr_ui::{MustrIcon, RailButton, tokens};
 use review::{FileTreePanel, ReviewView, ToggleFileTree};
 use thread_chat::{ThreadView, ThreadsSidebar};
-use ui::{FluentBuilder as _, h_flex, v_flex};
+use ui::{FluentBuilder as _, Icon, h_flex, v_flex};
 use workspace::{
     ItemHandle, Workspace,
     dock::{Dock, DockPosition, Panel, PanelEvent, PanelSizeState},
@@ -23,6 +25,48 @@ use workspace::{
 use zed_actions::OpenSettingsFile;
 
 const DEFAULT_TREE_WIDTH: Pixels = px(280.);
+
+/// A rail button added with [`register_rail_entry`].
+struct RailEntry {
+    id: SharedString,
+    icon: Icon,
+    tooltip: SharedString,
+    action: Box<dyn Action>,
+    is_active: fn(&dyn ItemHandle) -> bool,
+}
+
+#[derive(Default)]
+struct RailEntries(Vec<RailEntry>);
+
+impl Global for RailEntries {}
+
+/// Adds a button to the icon rail, under the built-in ones and above Settings, in the order
+/// they're added. Clicking it dispatches `action` from the rail, so the workspace's handlers get
+/// it. `is_active` says whether the active item is the entry's destination, which highlights the
+/// button. Call it from the package's `init`, before windows open.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the schedules page and the worktrees view register their entries"
+    )
+)]
+pub fn register_rail_entry(
+    id: impl Into<SharedString>,
+    icon: Icon,
+    tooltip: impl Into<SharedString>,
+    action: impl Action,
+    is_active: fn(&dyn ItemHandle) -> bool,
+    cx: &mut App,
+) {
+    cx.default_global::<RailEntries>().0.push(RailEntry {
+        id: id.into(),
+        icon,
+        tooltip: tooltip.into(),
+        action: Box::new(action),
+        is_active,
+    });
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Destination {
@@ -46,6 +90,8 @@ pub struct NavPanel {
     file_tree: Entity<FileTreePanel>,
     threads: Entity<ThreadsSidebar>,
     destination: Destination,
+    /// The registered rail entry whose destination is active.
+    active_rail_entry: Option<SharedString>,
     /// Whether the threads show while neither a review nor a thread is active (the rail's Agents
     /// button toggles it).
     threads_open: bool,
@@ -81,6 +127,7 @@ impl NavPanel {
             file_tree,
             threads,
             destination: Destination::Other,
+            active_rail_entry: None,
             threads_open: false,
             sized_for: None,
             file_tree_width: None,
@@ -109,6 +156,13 @@ impl NavPanel {
         self.threads
             .update(cx, |threads, cx| threads.set_active_thread(thread_id, cx));
         self.destination = destination;
+        self.active_rail_entry = item.and_then(|item| {
+            cx.try_global::<RailEntries>()?
+                .0
+                .iter()
+                .find(|entry| (entry.is_active)(item))
+                .map(|entry| entry.id.clone())
+        });
         cx.notify();
         self.update_size(left_dock, window, cx);
     }
@@ -233,6 +287,7 @@ impl NavPanel {
                     .tooltip("Agent threads")
                     .on_click(on_click(Self::toggle_threads)),
             )
+            .children(self.render_rail_entries(cx))
             .child(div().flex_1())
             .child(
                 RailButton::new("rail-settings", MustrIcon::Settings.icon())
@@ -241,6 +296,35 @@ impl NavPanel {
                         window.dispatch_action(OpenSettingsFile.boxed_clone(), cx)
                     }),
             )
+    }
+
+    fn render_rail_entries(&self, cx: &App) -> Vec<AnyElement> {
+        let Some(entries) = cx.try_global::<RailEntries>() else {
+            return Vec::new();
+        };
+        entries
+            .0
+            .iter()
+            .map(|entry| {
+                let action = entry.action.boxed_clone();
+                let focus_handle = self.focus_handle.clone();
+                let selector = format!("rail-entry-{}", entry.id);
+                div()
+                    .debug_selector(|| selector)
+                    .child(
+                        RailButton::new(
+                            SharedString::from(format!("rail-{}", entry.id)),
+                            entry.icon.clone(),
+                        )
+                        .active(self.active_rail_entry.as_ref() == Some(&entry.id))
+                        .tooltip(entry.tooltip.clone())
+                        .on_click(move |_, window, cx| {
+                            focus_handle.dispatch_action(action.as_ref(), window, cx)
+                        }),
+                    )
+                    .into_any_element()
+            })
+            .collect()
     }
 
     /// Activates the review the file tree shows (the last one that was active), or goes home to
@@ -350,8 +434,10 @@ mod tests {
     use anyhow::{Result, anyhow};
     use futures::{FutureExt as _, future::BoxFuture, stream::BoxStream};
     use gpui::{TestAppContext, VisualTestContext};
+    use serde_json::Value;
     use settings::SettingsStore;
     use std::sync::Arc;
+    use std::{cell::Cell, rc::Rc};
     use t3_client::t3_api::{
         tagged::{
             OrchestrationV2Command, OrchestrationV2ShellStreamItem, OrchestrationV2ThreadStreamItem,
@@ -364,8 +450,10 @@ mod tests {
             OrchestrationV2ThreadLaunchResult, ServerProvider,
         },
     };
-    use thread_chat::ThreadBackend;
+    use thread_chat::{Access, AttachmentUpload, ThreadBackend};
     use workspace::MultiWorkspace;
+
+    gpui::actions!(nav_panel_tests, [OpenSchedules]);
 
     /// A T3 that isn't there: every read fails, and nothing can be written.
     struct UnreachableBackend;
@@ -422,6 +510,23 @@ mod tests {
             &self,
             _: OrchestrationV2ThreadLaunchInput,
         ) -> BoxFuture<'static, Result<OrchestrationV2ThreadLaunchResult>> {
+            unreachable()
+        }
+
+        fn call_raw(&self, _: &str, _: Value, _: Access) -> BoxFuture<'static, Result<Value>> {
+            unreachable()
+        }
+
+        fn subscribe_raw(
+            &self,
+            _: &str,
+            _: Value,
+            _: Access,
+        ) -> Result<BoxStream<'static, Result<Value>>> {
+            Err(anyhow!("not connected"))
+        }
+
+        fn upload(&self, _: AttachmentUpload) -> BoxFuture<'static, Result<()>> {
             unreachable()
         }
     }
@@ -501,6 +606,56 @@ mod tests {
         });
         nav_panel.read_with(cx, |nav_panel, _| {
             assert_eq!(nav_panel.sidebar(), Sidebar::None)
+        });
+    }
+
+    #[gpui::test]
+    async fn registered_rail_entries_open_their_destinations(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            register_rail_entry(
+                "schedules",
+                MustrIcon::Settings.icon(),
+                "Scheduled tasks",
+                OpenSchedules,
+                // A thread stands in for the entry's own page.
+                |item| item.downcast::<ThreadView>().is_some(),
+                cx,
+            )
+        });
+        let (workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;
+        let opened = Rc::new(Cell::new(0));
+        workspace.update(cx, |workspace, _| {
+            let opened = opened.clone();
+            workspace
+                .register_action(move |_, _: &OpenSchedules, _, _| opened.set(opened.get() + 1));
+        });
+        cx.simulate_resize(gpui::size(px(1000.), px(800.)));
+        cx.run_until_parked();
+
+        let button = cx
+            .debug_bounds("rail-entry-schedules")
+            .expect("the entry is on the rail");
+        cx.simulate_click(button.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(opened.get(), 1);
+
+        // Its destination highlights it.
+        nav_panel.read_with(cx, |nav_panel, _| {
+            assert_eq!(nav_panel.active_rail_entry, None)
+        });
+        let weak_workspace = workspace.downgrade();
+        nav_panel.update_in(cx, |_, window, cx| {
+            thread_chat::open_thread(
+                "thread-1".into(),
+                "Retry".into(),
+                weak_workspace,
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        nav_panel.read_with(cx, |nav_panel, _| {
+            assert_eq!(nav_panel.active_rail_entry.as_deref(), Some("schedules"))
         });
     }
 }
