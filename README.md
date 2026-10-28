@@ -13,11 +13,8 @@ mustr is a fork of [Zed](https://github.com/zed-industries/zed), the editor made
 
 ### Building
 
-Until mustr has its own build docs, follow Zed's:
-
-- [Building on macOS](./docs/src/development/macos.md)
-- [Building on Linux](./docs/src/development/linux.md)
-- [Building on Windows](./docs/src/development/windows.md)
+- **macOS:** [mustr-docs/MACOS.md](./mustr-docs/MACOS.md) covers the prerequisites, `cargo run -p mustr`, and the first run with your T3 Code.
+- **Linux and Windows:** until mustr has its own build docs, follow Zed's guides for [Linux](./docs/src/development/linux.md) and [Windows](./docs/src/development/windows.md).
 
 ### Licensing
 
