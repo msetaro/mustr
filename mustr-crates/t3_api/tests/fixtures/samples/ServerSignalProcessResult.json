@@ -1,0 +1,1 @@
+[{"pid":36,"signal":"SIGINT","signaled":false,"message":{"_tag":"None"}},{"pid":28,"signal":"SIGKILL","signaled":false,"message":{"_tag":"None"}},{"pid":31,"signal":"SIGINT","signaled":true,"message":{"_tag":"None"}}]

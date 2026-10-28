@@ -1,0 +1,3866 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "T3 Code Relay API",
+    "version": "1.0.0",
+    "description": "Control-plane API for linking T3 environments, connecting authorized clients, and publishing agent activity."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "health.health",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "service": {
+                      "type": "string",
+                      "enum": [
+                        "relay"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "service"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Check relay health"
+      }
+    },
+    "/.well-known/oauth-authorization-server": {
+      "get": {
+        "tags": [
+          "metadata"
+        ],
+        "operationId": "metadata.authorizationServer",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "issuer": {
+                      "type": "string"
+                    },
+                    "token_endpoint": {
+                      "type": "string"
+                    },
+                    "grant_types_supported": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "urn:ietf:params:oauth:grant-type:token-exchange"
+                        ]
+                      }
+                    },
+                    "token_endpoint_auth_methods_supported": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "none"
+                        ]
+                      }
+                    },
+                    "dpop_signing_alg_values_supported": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "ES256"
+                        ]
+                      }
+                    },
+                    "scopes_supported": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "environment:connect",
+                          "environment:status",
+                          "mobile:registration"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "issuer",
+                    "token_endpoint",
+                    "grant_types_supported",
+                    "token_endpoint_auth_methods_supported",
+                    "dpop_signing_alg_values_supported",
+                    "scopes_supported"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read OAuth authorization-server metadata"
+      }
+    },
+    "/.well-known/oauth-protected-resource": {
+      "get": {
+        "tags": [
+          "metadata"
+        ],
+        "operationId": "metadata.protectedResource",
+        "parameters": [],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "resource": {
+                      "type": "string"
+                    },
+                    "authorization_servers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "scopes_supported": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "environment:connect",
+                          "environment:status",
+                          "mobile:registration"
+                        ]
+                      }
+                    },
+                    "dpop_bound_access_tokens_required": {
+                      "type": "boolean"
+                    },
+                    "dpop_signing_alg_values_supported": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "ES256"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "resource",
+                    "authorization_servers",
+                    "scopes_supported",
+                    "dpop_bound_access_tokens_required",
+                    "dpop_signing_alg_values_supported"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read OAuth protected-resource metadata"
+      }
+    },
+    "/v1/mobile/devices": {
+      "post": {
+        "tags": [
+          "mobile"
+        ],
+        "operationId": "mobile.registerDevice",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "dpop",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "relayDpop": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Register or update a mobile device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deviceId": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "ios",
+                      "android"
+                    ]
+                  },
+                  "iosMajorVersion": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 18,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "androidApiLevel": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 24,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "appVersion": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "bundleId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "apsEnvironment": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "sandbox",
+                          "production"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "pushToken": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "pushToStartToken": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "preferences": {
+                    "type": "object",
+                    "properties": {
+                      "liveActivitiesEnabled": {
+                        "type": "boolean"
+                      },
+                      "notificationsEnabled": {
+                        "type": "boolean"
+                      },
+                      "notifyOnApproval": {
+                        "type": "boolean"
+                      },
+                      "notifyOnInput": {
+                        "type": "boolean"
+                      },
+                      "notifyOnCompletion": {
+                        "type": "boolean"
+                      },
+                      "notifyOnFailure": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "liveActivitiesEnabled",
+                      "notificationsEnabled",
+                      "notifyOnApproval",
+                      "notifyOnInput",
+                      "notifyOnCompletion",
+                      "notifyOnFailure"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "deviceId",
+                  "label",
+                  "platform",
+                  "preferences"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1/mobile/live-activities": {
+      "post": {
+        "tags": [
+          "mobile"
+        ],
+        "operationId": "mobile.registerLiveActivity",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "dpop",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "relayDpop": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Register a Live Activity push token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deviceId": {
+                    "type": "string"
+                  },
+                  "activityPushToken": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "deviceId",
+                  "activityPushToken"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1/mobile/agent-activity": {
+      "get": {
+        "tags": [
+          "mobile"
+        ],
+        "operationId": "mobile.getAgentActivitySnapshot",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "dpop",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "relayDpop": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "aggregate": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string"
+                            },
+                            "subtitle": {
+                              "type": "string"
+                            },
+                            "activeCount": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "updatedAt": {
+                              "type": "string"
+                            },
+                            "activities": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "environmentId": {
+                                    "type": "string"
+                                  },
+                                  "threadId": {
+                                    "type": "string"
+                                  },
+                                  "projectTitle": {
+                                    "type": "string"
+                                  },
+                                  "threadTitle": {
+                                    "type": "string"
+                                  },
+                                  "modelTitle": {
+                                    "type": "string"
+                                  },
+                                  "phase": {
+                                    "type": "string",
+                                    "enum": [
+                                      "starting",
+                                      "running",
+                                      "waiting_for_approval",
+                                      "waiting_for_input",
+                                      "completed",
+                                      "failed",
+                                      "stale"
+                                    ]
+                                  },
+                                  "status": {
+                                    "type": "string"
+                                  },
+                                  "updatedAt": {
+                                    "type": "string"
+                                  },
+                                  "deepLink": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "environmentId",
+                                  "threadId",
+                                  "projectTitle",
+                                  "threadTitle",
+                                  "modelTitle",
+                                  "phase",
+                                  "status",
+                                  "updatedAt",
+                                  "deepLink"
+                                ],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": [
+                            "title",
+                            "subtitle",
+                            "activeCount",
+                            "updatedAt",
+                            "activities"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "aggregate"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read the current Live Activity aggregate"
+      }
+    },
+    "/v1/mobile/devices/{deviceId}": {
+      "delete": {
+        "tags": [
+          "mobile"
+        ],
+        "operationId": "mobile.unregisterDevice",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "dpop",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "relayDpop": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Unregister a mobile device"
+      }
+    },
+    "/v1/environments": {
+      "get": {
+        "tags": [
+          "client"
+        ],
+        "operationId": "client.listEnvironments",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "clientBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "environments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "environmentId": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "endpoint": {
+                            "type": "object",
+                            "properties": {
+                              "httpBaseUrl": {
+                                "type": "string"
+                              },
+                              "wsBaseUrl": {
+                                "type": "string"
+                              },
+                              "providerKind": {
+                                "type": "string",
+                                "enum": [
+                                  "manual",
+                                  "cloudflare_tunnel",
+                                  "t3_relay"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "httpBaseUrl",
+                              "wsBaseUrl",
+                              "providerKind"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "linkedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "environmentId",
+                          "label",
+                          "endpoint",
+                          "linkedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "environments"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List linked environments"
+      }
+    },
+    "/v1/client/devices": {
+      "get": {
+        "tags": [
+          "client"
+        ],
+        "operationId": "client.listDevices",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "clientBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "devices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "deviceId": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "ios"
+                            ]
+                          },
+                          "iosMajorVersion": {
+                            "type": "integer",
+                            "minimum": 18,
+                            "maximum": 9007199254740991
+                          },
+                          "androidApiLevel": {
+                            "anyOf": [
+                              {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "appVersion": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "notifications": {
+                            "type": "object",
+                            "properties": {
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "notifyOnApproval": {
+                                "type": "boolean"
+                              },
+                              "notifyOnInput": {
+                                "type": "boolean"
+                              },
+                              "notifyOnCompletion": {
+                                "type": "boolean"
+                              },
+                              "notifyOnFailure": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "enabled",
+                              "notifyOnApproval",
+                              "notifyOnInput",
+                              "notifyOnCompletion",
+                              "notifyOnFailure"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "liveActivities": {
+                            "type": "object",
+                            "properties": {
+                              "enabled": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "enabled"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "deviceId",
+                          "label",
+                          "platform",
+                          "iosMajorVersion",
+                          "appVersion",
+                          "notifications",
+                          "liveActivities",
+                          "updatedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "devices"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List registered iOS devices (legacy clients)"
+      }
+    },
+    "/v2/client/devices": {
+      "get": {
+        "tags": [
+          "client"
+        ],
+        "operationId": "client.listDevicesV2",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "clientBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "devices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "deviceId": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "platform": {
+                            "type": "string",
+                            "enum": [
+                              "ios",
+                              "android"
+                            ]
+                          },
+                          "iosMajorVersion": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": 18,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "androidApiLevel": {
+                            "anyOf": [
+                              {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "appVersion": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "notifications": {
+                            "type": "object",
+                            "properties": {
+                              "enabled": {
+                                "type": "boolean"
+                              },
+                              "notifyOnApproval": {
+                                "type": "boolean"
+                              },
+                              "notifyOnInput": {
+                                "type": "boolean"
+                              },
+                              "notifyOnCompletion": {
+                                "type": "boolean"
+                              },
+                              "notifyOnFailure": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "enabled",
+                              "notifyOnApproval",
+                              "notifyOnInput",
+                              "notifyOnCompletion",
+                              "notifyOnFailure"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "liveActivities": {
+                            "type": "object",
+                            "properties": {
+                              "enabled": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "enabled"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "deviceId",
+                          "label",
+                          "platform",
+                          "iosMajorVersion",
+                          "appVersion",
+                          "notifications",
+                          "liveActivities",
+                          "updatedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "devices"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List registered mobile devices"
+      }
+    },
+    "/v1/client/environment-links": {
+      "post": {
+        "tags": [
+          "client"
+        ],
+        "operationId": "client.linkEnvironment",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "clientBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "cloudUserId": {
+                      "type": "string"
+                    },
+                    "environmentId": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "object",
+                      "properties": {
+                        "httpBaseUrl": {
+                          "type": "string"
+                        },
+                        "wsBaseUrl": {
+                          "type": "string"
+                        },
+                        "providerKind": {
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "cloudflare_tunnel",
+                            "t3_relay"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "httpBaseUrl",
+                        "wsBaseUrl",
+                        "providerKind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "endpointRuntime": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "providerKind": {
+                              "type": "string",
+                              "enum": [
+                                "manual",
+                                "cloudflare_tunnel",
+                                "t3_relay"
+                              ]
+                            },
+                            "connectorToken": {
+                              "type": "string"
+                            },
+                            "tunnelId": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "tunnelName": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "providerKind",
+                            "connectorToken"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "relayIssuer": {
+                      "type": "string"
+                    },
+                    "environmentCredential": {
+                      "type": "string"
+                    },
+                    "cloudMintPublicKey": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "cloudUserId",
+                    "environmentId",
+                    "endpoint",
+                    "endpointRuntime",
+                    "relayIssuer",
+                    "environmentCredential",
+                    "cloudMintPublicKey"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "RelayEnvironmentLinkProofInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvironmentLinkProofInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError | RelayEnvironmentLinkProofExpiredError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RelayEnvironmentLinkProofExpiredErrorEncoded"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "RelayEnvironmentLinkLimitExceededError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvironmentLinkLimitExceededErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayEnvironmentLinkFailedError | RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RelayEnvironmentLinkFailedErrorEncoded"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "RelayEnvironmentLinkUnavailableError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvironmentLinkUnavailableErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Link an environment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deviceId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "proof": {
+                    "type": "string"
+                  },
+                  "notificationsEnabled": {
+                    "type": "boolean"
+                  },
+                  "liveActivitiesEnabled": {
+                    "type": "boolean"
+                  },
+                  "managedTunnelsEnabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "proof",
+                  "notificationsEnabled",
+                  "liveActivitiesEnabled",
+                  "managedTunnelsEnabled"
+                ],
+                "additionalProperties": false,
+                "description": "Links an authenticated cloud user to a T3 environment."
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1/client/environment-link-challenges": {
+      "post": {
+        "tags": [
+          "client"
+        ],
+        "operationId": "client.createEnvironmentLinkChallenge",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "clientBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "challenge": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "challenge",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Create an environment-link challenge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notificationsEnabled": {
+                    "type": "boolean",
+                    "description": "Whether this link may deliver push notifications."
+                  },
+                  "liveActivitiesEnabled": {
+                    "type": "boolean",
+                    "description": "Whether this link may update Live Activities."
+                  },
+                  "managedTunnelsEnabled": {
+                    "type": "boolean",
+                    "description": "Whether the relay should provision a managed tunnel for this environment."
+                  }
+                },
+                "required": [
+                  "notificationsEnabled",
+                  "liveActivitiesEnabled",
+                  "managedTunnelsEnabled"
+                ],
+                "additionalProperties": false,
+                "description": "Requested capabilities for a new environment-link challenge."
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1/client/environment-links/{environmentId}": {
+      "delete": {
+        "tags": [
+          "client"
+        ],
+        "operationId": "client.unlinkEnvironment",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "clientBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Unlink an environment"
+      }
+    },
+    "/v1/client/environment-links/{environmentId}/tunnel": {
+      "delete": {
+        "tags": [
+          "client"
+        ],
+        "operationId": "client.releaseEnvironmentTunnel",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "clientBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "description": "Deletes the provisioned Cloudflare tunnel while keeping the environment link and its hostname reservation, so a later link re-provisions the tunnel under the same URL. Environments call this when they shut down; Cloudflare bills per provisioned tunnel, so idle tunnels should not outlive their environment.",
+        "summary": "Release an environment's managed tunnel"
+      }
+    },
+    "/v1/client/dpop-token": {
+      "post": {
+        "tags": [
+          "token"
+        ],
+        "operationId": "token.exchangeDpopAccessToken",
+        "parameters": [
+          {
+            "name": "dpop",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "access_token": {
+                      "type": "string"
+                    },
+                    "issued_token_type": {
+                      "type": "string",
+                      "enum": [
+                        "urn:ietf:params:oauth:token-type:access_token"
+                      ]
+                    },
+                    "token_type": {
+                      "type": "string",
+                      "enum": [
+                        "DPoP"
+                      ]
+                    },
+                    "expires_in": {
+                      "type": "integer",
+                      "maximum": 9007199254740991,
+                      "exclusiveMinimum": 0
+                    },
+                    "scope": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "access_token",
+                    "issued_token_type",
+                    "token_type",
+                    "expires_in",
+                    "scope"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "description": "Bootstrap endpoint. Send the DPoP proof JWT in the dpop header and the Clerk token in subject_token. The returned access token is bound to the proof key.",
+        "summary": "Exchange a Clerk token for a DPoP access token",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "grant_type": {
+                    "type": "string",
+                    "enum": [
+                      "urn:ietf:params:oauth:grant-type:token-exchange"
+                    ]
+                  },
+                  "subject_token": {
+                    "type": "string"
+                  },
+                  "subject_token_type": {
+                    "type": "string",
+                    "enum": [
+                      "urn:ietf:params:oauth:token-type:jwt"
+                    ]
+                  },
+                  "requested_token_type": {
+                    "type": "string",
+                    "enum": [
+                      "urn:ietf:params:oauth:token-type:access_token"
+                    ]
+                  },
+                  "resource": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "client_id": {
+                    "type": "string",
+                    "enum": [
+                      "t3-mobile",
+                      "t3-web"
+                    ]
+                  }
+                },
+                "required": [
+                  "grant_type",
+                  "subject_token",
+                  "subject_token_type",
+                  "requested_token_type",
+                  "resource",
+                  "scope",
+                  "client_id"
+                ],
+                "additionalProperties": false,
+                "description": "OAuth token exchange request for a DPoP-bound relay access token."
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/connect": {
+      "post": {
+        "tags": [
+          "dpopClient"
+        ],
+        "operationId": "dpopClient.connectEnvironment",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "dpop",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "relayDpop": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "environmentId": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "object",
+                      "properties": {
+                        "httpBaseUrl": {
+                          "type": "string"
+                        },
+                        "wsBaseUrl": {
+                          "type": "string"
+                        },
+                        "providerKind": {
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "cloudflare_tunnel",
+                            "t3_relay"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "httpBaseUrl",
+                        "wsBaseUrl",
+                        "providerKind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "credential": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "environmentId",
+                    "endpoint",
+                    "credential",
+                    "expiresAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "RelayEnvironmentConnectNotAuthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvironmentConnectNotAuthorizedErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "RelayEnvironmentEndpointUnavailableError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvironmentEndpointUnavailableErrorEncoded"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "RelayEnvironmentEndpointTimedOutError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvironmentEndpointTimedOutErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Connect to an environment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deviceId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "clientKeyThumbprint": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "clientProofKeyThumbprint": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Requests a short-lived credential for connecting to an environment."
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/status": {
+      "post": {
+        "tags": [
+          "dpopClient"
+        ],
+        "operationId": "dpopClient.getEnvironmentStatus",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "dpop",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "relayDpop": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "environmentId": {
+                      "type": "string"
+                    },
+                    "endpoint": {
+                      "type": "object",
+                      "properties": {
+                        "httpBaseUrl": {
+                          "type": "string"
+                        },
+                        "wsBaseUrl": {
+                          "type": "string"
+                        },
+                        "providerKind": {
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "cloudflare_tunnel",
+                            "t3_relay"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "httpBaseUrl",
+                        "wsBaseUrl",
+                        "providerKind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "online",
+                        "offline"
+                      ]
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "descriptor": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "environmentId": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "platform": {
+                              "type": "object",
+                              "properties": {
+                                "os": {
+                                  "type": "string",
+                                  "enum": [
+                                    "darwin",
+                                    "linux",
+                                    "windows",
+                                    "unknown"
+                                  ]
+                                },
+                                "arch": {
+                                  "type": "string",
+                                  "enum": [
+                                    "arm64",
+                                    "x64",
+                                    "other"
+                                  ]
+                                },
+                                "machine": {}
+                              },
+                              "required": [
+                                "os",
+                                "arch"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "serverVersion": {
+                              "type": "string"
+                            },
+                            "orchestrationProtocolVersion": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "capabilities": {
+                              "type": "object",
+                              "properties": {
+                                "repositoryIdentity": {
+                                  "anyOf": [
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "connectionProbe": {
+                                  "type": "boolean"
+                                },
+                                "attachmentUploads": {
+                                  "type": "boolean"
+                                },
+                                "questionAttachments": {
+                                  "type": "boolean"
+                                },
+                                "fileAttachments": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxUploadBytes": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "maxUploadBytes"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "pullRequests": {
+                                  "type": "boolean"
+                                },
+                                "pullRequestChecks": {
+                                  "type": "boolean"
+                                },
+                                "inlineMessageContext": {
+                                  "type": "boolean"
+                                },
+                                "requiredWorktreeBootstrap": {
+                                  "type": "boolean"
+                                },
+                                "threadSettlement": {
+                                  "type": "boolean"
+                                },
+                                "threadAutoSettlement": {
+                                  "type": "boolean"
+                                },
+                                "storageCleanup": {
+                                  "type": "boolean"
+                                },
+                                "storageCleanupRun": {
+                                  "type": "boolean"
+                                },
+                                "databaseStorage": {
+                                  "type": "boolean"
+                                },
+                                "otlpEndpointCheck": {
+                                  "type": "boolean"
+                                },
+                                "projectWorktreeCleanup": {
+                                  "type": "boolean"
+                                },
+                                "settledWorktreeCleanup": {
+                                  "type": "boolean"
+                                },
+                                "worktreesDirectory": {
+                                  "type": "boolean"
+                                },
+                                "threadAutoSettlementScope": {
+                                  "type": "boolean"
+                                },
+                                "threadRestartContinuation": {
+                                  "type": "boolean"
+                                },
+                                "projectSettingsOverrides": {
+                                  "type": "boolean"
+                                },
+                                "projectProviderInstanceOverrides": {
+                                  "type": "boolean"
+                                },
+                                "threadSnooze": {
+                                  "type": "boolean"
+                                },
+                                "environmentThemes": {
+                                  "type": "boolean"
+                                },
+                                "usageLimitSources": {
+                                  "type": "boolean"
+                                },
+                                "usagePriceOverrides": {
+                                  "type": "boolean"
+                                },
+                                "usageModelAliases": {
+                                  "type": "boolean"
+                                },
+                                "threadPinning": {
+                                  "type": "boolean"
+                                },
+                                "threadPinReorder": {
+                                  "type": "boolean"
+                                },
+                                "threadActiveReorder": {
+                                  "type": "boolean"
+                                },
+                                "threadAutoSettleOptOut": {
+                                  "type": "boolean"
+                                },
+                                "threadTitleRegeneration": {
+                                  "type": "boolean"
+                                },
+                                "threadVisitedTracking": {
+                                  "type": "boolean"
+                                },
+                                "threadPullRequestLinking": {
+                                  "type": "boolean"
+                                },
+                                "serverResolvedCommandContext": {
+                                  "type": "boolean"
+                                },
+                                "threadStop": {
+                                  "type": "boolean"
+                                },
+                                "threadPullRequests": {
+                                  "type": "boolean"
+                                },
+                                "threadPullRequestWatch": {
+                                  "type": "boolean"
+                                },
+                                "pullRequestStackActions": {
+                                  "type": "boolean"
+                                },
+                                "serverSelfUpdate": {
+                                  "type": "string",
+                                  "enum": [
+                                    "boot-service",
+                                    "respawn",
+                                    "desktop-managed"
+                                  ]
+                                },
+                                "serverInstallation": {},
+                                "serverSelfUpdateProgress": {
+                                  "type": "boolean"
+                                },
+                                "serverUpdateThreadContinuation": {
+                                  "type": "boolean"
+                                },
+                                "agentActivityPublishing": {
+                                  "type": "boolean"
+                                },
+                                "projectCloneTracking": {
+                                  "type": "boolean"
+                                },
+                                "ignoredFileListing": {
+                                  "type": "boolean"
+                                },
+                                "environmentIcon": {
+                                  "type": "boolean"
+                                },
+                                "desktopAppUpdate": {
+                                  "type": "boolean"
+                                },
+                                "commandOutputStreaming": {
+                                  "type": "boolean"
+                                },
+                                "serverBrowser": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "environmentId",
+                            "label",
+                            "platform",
+                            "serverVersion",
+                            "capabilities"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "endpointFailure": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "tunnel_down",
+                            "origin_unreachable",
+                            "dns",
+                            "tls",
+                            "refused",
+                            "timeout",
+                            "invalid_response",
+                            "unknown"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "endpointStatus": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "Infinity",
+                                "-Infinity",
+                                "NaN"
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "offlineReason": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "tunnel_released"
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "traceId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "environmentId",
+                    "endpoint",
+                    "status",
+                    "checkedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "RelayEnvironmentConnectNotAuthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvironmentConnectNotAuthorizedErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "RelayEnvironmentEndpointUnavailableError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvironmentEndpointUnavailableErrorEncoded"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "RelayEnvironmentEndpointTimedOutError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayEnvironmentEndpointTimedOutErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Check environment status"
+      }
+    },
+    "/v1/environments/{environmentId}/tunnel/recovery": {
+      "post": {
+        "tags": [
+          "server"
+        ],
+        "operationId": "server.registerManagedEndpointRecovery",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "environmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "recovery_required"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Register managed tunnel recovery without provisioning",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cloudUserId": {
+                    "type": "string"
+                  },
+                  "tunnelId": {
+                    "type": "string"
+                  },
+                  "origin": {
+                    "type": "object",
+                    "properties": {
+                      "localHttpHost": {
+                        "type": "string"
+                      },
+                      "localHttpPort": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535
+                      }
+                    },
+                    "required": [
+                      "localHttpHost",
+                      "localHttpPort"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "proof": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "cloudUserId",
+                  "tunnelId",
+                  "origin",
+                  "proof"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/tunnel": {
+      "post": {
+        "tags": [
+          "server"
+        ],
+        "operationId": "server.recoverManagedEndpoint",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "environmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "endpoint": {
+                      "type": "object",
+                      "properties": {
+                        "httpBaseUrl": {
+                          "type": "string"
+                        },
+                        "wsBaseUrl": {
+                          "type": "string"
+                        },
+                        "providerKind": {
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "cloudflare_tunnel",
+                            "t3_relay"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "httpBaseUrl",
+                        "wsBaseUrl",
+                        "providerKind"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "endpointRuntime": {
+                      "type": "object",
+                      "properties": {
+                        "providerKind": {
+                          "type": "string",
+                          "enum": [
+                            "manual",
+                            "cloudflare_tunnel",
+                            "t3_relay"
+                          ]
+                        },
+                        "connectorToken": {
+                          "type": "string"
+                        },
+                        "tunnelId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "tunnelName": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "providerKind",
+                        "connectorToken"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "endpoint",
+                    "endpointRuntime"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Recover an environment's managed tunnel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cloudUserId": {
+                    "type": "string"
+                  },
+                  "origin": {
+                    "type": "object",
+                    "properties": {
+                      "localHttpHost": {
+                        "type": "string"
+                      },
+                      "localHttpPort": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535
+                      }
+                    },
+                    "required": [
+                      "localHttpHost",
+                      "localHttpPort"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "proof": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "cloudUserId",
+                  "origin",
+                  "proof"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/threads/{threadId}/agent-activity": {
+      "post": {
+        "tags": [
+          "server"
+        ],
+        "operationId": "server.publishAgentActivity",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "threadId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "environmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "deliveries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "deviceId": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "live_activity_start",
+                              "live_activity_update",
+                              "live_activity_end",
+                              "push_notification"
+                            ]
+                          },
+                          "ok": {
+                            "type": "boolean"
+                          },
+                          "queued": {
+                            "anyOf": [
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "apnsStatus": {
+                            "anyOf": [
+                              {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "Infinity",
+                                      "-Infinity",
+                                      "NaN"
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "apnsReason": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "apnsId": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "deviceId",
+                          "kind",
+                          "ok",
+                          "apnsStatus",
+                          "apnsReason",
+                          "apnsId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "deliveries"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError | RelayAgentActivityPublishProofExpiredError | RelayAgentActivityPublishProofInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RelayAgentActivityPublishProofExpiredErrorEncoded"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RelayAgentActivityPublishProofInvalidErrorEncoded"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Publish agent activity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "environmentId": {
+                            "type": "string"
+                          },
+                          "threadId": {
+                            "type": "string"
+                          },
+                          "projectTitle": {
+                            "type": "string"
+                          },
+                          "threadTitle": {
+                            "type": "string"
+                          },
+                          "phase": {
+                            "type": "string",
+                            "enum": [
+                              "starting",
+                              "running",
+                              "waiting_for_approval",
+                              "waiting_for_input",
+                              "completed",
+                              "failed",
+                              "stale"
+                            ]
+                          },
+                          "headline": {
+                            "type": "string"
+                          },
+                          "detail": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "modelTitle": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "deepLink": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "environmentId",
+                          "threadId",
+                          "projectTitle",
+                          "threadTitle",
+                          "phase",
+                          "headline",
+                          "modelTitle",
+                          "updatedAt",
+                          "deepLink"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Current agent-awareness state, or null to remove the published state."
+                  },
+                  "proof": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "state",
+                  "proof"
+                ],
+                "additionalProperties": false,
+                "description": "Publishes a signed agent-awareness update from an environment."
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/link-preferences": {
+      "post": {
+        "tags": [
+          "server"
+        ],
+        "operationId": "server.updateLinkPreferences",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "environmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "holdWebhooksWhileOffline": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "holdWebhooksWhileOffline"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Update an environment's link preferences",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "holdWebhooksWhileOffline": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "holdWebhooksWhileOffline"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/v1/environments/{environmentId}/hooks/wake": {
+      "post": {
+        "tags": [
+          "server"
+        ],
+        "operationId": "server.wakeHeldHooks",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "environmentBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pending": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "pending"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "RelayAuthInvalidError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayAuthInvalidErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RelayInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelayInternalErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Deliver webhook requests held while the environment was offline now"
+      }
+    },
+    "/v1/hooks/{endpointKey}/{hookId}/{token}": {
+      "post": {
+        "tags": [
+          "hooks"
+        ],
+        "operationId": "hooks.forwardPost",
+        "parameters": [
+          {
+            "name": "endpointKey",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "hookId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "<No Content>"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "hooks"
+        ],
+        "operationId": "hooks.forwardPut",
+        "parameters": [
+          {
+            "name": "endpointKey",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "hookId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "<No Content>"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "hooks"
+        ],
+        "operationId": "hooks.forwardPatch",
+        "parameters": [
+          {
+            "name": "endpointKey",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "hookId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "<No Content>"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "hooks"
+        ],
+        "operationId": "hooks.forwardGet",
+        "parameters": [
+          {
+            "name": "endpointKey",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "hookId",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "token",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "<No Content>"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RelayInternalErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayInternalError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "internal_error"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "database_unavailable",
+              "persistence_failed",
+              "upstream_unavailable",
+              "internal_error"
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "reason",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayAuthInvalidErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayAuthInvalidError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "auth_invalid"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "missing_bearer",
+              "invalid_bearer",
+              "invalid_dpop",
+              "not_authorized"
+            ]
+          },
+          "dpopFailureReason": {
+            "type": "string",
+            "enum": [
+              "time_window",
+              "key_mismatch",
+              "request_mismatch",
+              "token_mismatch",
+              "replay",
+              "invalid_proof"
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "reason",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayAgentActivityPublishProofInvalidErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayAgentActivityPublishProofInvalidError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "agent_activity_publish_proof_invalid"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "invalid_signature_or_payload",
+              "replayed_nonce"
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "reason",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayAgentActivityPublishProofExpiredErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayAgentActivityPublishProofExpiredError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "agent_activity_publish_proof_expired"
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayEnvironmentEndpointTimedOutErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayEnvironmentEndpointTimedOutError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "environment_endpoint_timed_out"
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayEnvironmentEndpointUnavailableErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayEnvironmentEndpointUnavailableError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "environment_endpoint_unavailable"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "endpoint_request_failed",
+              "endpoint_response_invalid"
+            ]
+          },
+          "endpointFailure": {
+            "type": "string",
+            "enum": [
+              "tunnel_down",
+              "origin_unreachable",
+              "dns",
+              "tls",
+              "refused",
+              "timeout",
+              "invalid_response",
+              "unknown"
+            ]
+          },
+          "endpointStatus": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
+                ]
+              }
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "reason",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayEnvironmentConnectNotAuthorizedErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayEnvironmentConnectNotAuthorizedError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "environment_connect_not_authorized"
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "client_proof_key_thumbprint_missing",
+                  "environment_link_not_found",
+                  "endpoint_provider_not_managed",
+                  "managed_endpoint_allocation_not_found",
+                  "managed_endpoint_base_domain_not_configured",
+                  "managed_endpoint_allocation_not_ready",
+                  "managed_endpoint_hostname_invalid",
+                  "managed_endpoint_mismatch"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayEnvironmentLinkFailedErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayEnvironmentLinkFailedError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "environment_link_failed"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "link_persistence_failed",
+              "credential_persistence_failed",
+              "replay_persistence_failed",
+              "internal_error"
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "reason",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayEnvironmentLinkLimitExceededErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayEnvironmentLinkLimitExceededError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "environment_link_limit_exceeded"
+            ]
+          },
+          "maxTunnels": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "Infinity",
+                  "-Infinity",
+                  "NaN"
+                ]
+              }
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "maxTunnels",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayEnvironmentLinkUnavailableErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayEnvironmentLinkUnavailableError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "environment_link_unavailable"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "managed_endpoint_not_configured",
+              "managed_endpoint_provisioning_failed"
+            ]
+          },
+          "provisioningStage": {
+            "type": "string"
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "reason",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayEnvironmentLinkProofInvalidErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayEnvironmentLinkProofInvalidError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "environment_link_proof_invalid"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "invalid_signature_or_scope",
+              "descriptor_mismatch",
+              "replayed_nonce",
+              "challenge_invalid",
+              "origin_not_allowed",
+              "endpoint_not_secure"
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "reason",
+          "traceId"
+        ],
+        "additionalProperties": false
+      },
+      "RelayEnvironmentLinkProofExpiredErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "RelayEnvironmentLinkProofExpiredError"
+            ]
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "environment_link_proof_expired"
+            ]
+          },
+          "traceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "_tag",
+          "code",
+          "traceId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "relayDpop": {
+        "description": "DPoP-bound access token. Requests must also include the DPoP proof JWT header.",
+        "type": "http",
+        "scheme": "DPoP"
+      },
+      "clientBearer": {
+        "description": "Clerk session or OAuth bearer token for the signed-in T3 Connect user.",
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "environmentBearer": {
+        "description": "Relay-issued environment credential installed when the environment is linked.",
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "security": [],
+  "tags": [
+    {
+      "name": "health",
+      "description": "Service health and readiness."
+    },
+    {
+      "name": "metadata",
+      "description": "OAuth and DPoP discovery metadata."
+    },
+    {
+      "name": "mobile",
+      "description": "Mobile push-notification and Live Activity registration."
+    },
+    {
+      "name": "client",
+      "description": "Cloud-user environment links and registered devices."
+    },
+    {
+      "name": "token",
+      "description": "OAuth token exchange for DPoP-bound client access."
+    },
+    {
+      "name": "dpopClient",
+      "description": "DPoP-authenticated client access to linked environments."
+    },
+    {
+      "name": "server",
+      "description": "Environment-authenticated activity publication."
+    },
+    {
+      "name": "hooks",
+      "description": "Forward webhook requests to an environment."
+    }
+  ]
+}

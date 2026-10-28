@@ -1,0 +1,1 @@
+[{"_tag":"UsageReadError","reason":"scanFailed","detail":"j","cause":""},{"_tag":"EnvironmentAuthorizationError","message":" Y5iPv","requiredScope":"filesystem:read","requiredPermission":" "},{"_tag":"EnvironmentAuthorizationError","message":"\n","requiredScope":"relay:write","requiredPermission":"�"}]

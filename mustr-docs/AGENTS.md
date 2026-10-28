@@ -26,6 +26,7 @@ Ignore the rest of `.rules`, which is for Zed's own repository: the README banne
 ## T3 Code servers
 
 - `mustr-crates/t3_client` talks to T3 over HTTP and WebSocket. `mustr-crates/t3_client/T3_VERSION` pins the T3 version and orchestration protocol, which must match the server exactly.
+- `mustr-crates/t3_api` holds T3's wire types, generated from T3's contracts by `mustr-crates/t3_api/codegen/regen.sh` (see its README). Never hand-edit `src/generated/` or `schema/`. Call RPCs and endpoints through the typed tables: `connection.call::<t3_api::rpc::X>(…)`, `connection.stream::<…>`, and `t3_client::call_endpoint::<t3_api::http::Y>(…)`.
 - Live tests are ignored by default. When you run one against a real T3 server, mint a pairing token with only `--scope orchestration:read`, and revoke the session afterwards (`t3 auth session list`, `t3 auth session revoke`).
 - Never request `access:write` or `relay:*` scopes, and never print tokens.
 

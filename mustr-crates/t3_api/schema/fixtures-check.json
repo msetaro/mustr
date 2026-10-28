@@ -1,0 +1,9 @@
+{
+  "ExecutionEnvironmentDescriptor.future-manager.json": "ok (type-level codec; T3's JSON codec rejects it: SchemaError(Expected JSON value)",
+  "ExecutionEnvironmentDescriptor.json": "ok",
+  "ExecutionEnvironmentDescriptor.npm-global.json": "ok",
+  "ExecutionEnvironmentDescriptor.npx.json": "ok",
+  "PullRequestDetail.known-options.json": "ok",
+  "PullRequestDetail.newer-server.json": "ok",
+  "PullRequestListResult.json": "ok"
+}

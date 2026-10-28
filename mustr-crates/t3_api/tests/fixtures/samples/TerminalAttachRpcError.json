@@ -1,0 +1,1 @@
+[{"_tag":"EnvironmentAuthorizationError","message":"-1","requiredScope":"filesystem:read","requiredPermission":"�"},{"_tag":"EnvironmentAuthorizationError","message":" Y5iPv","requiredScope":"filesystem:read","requiredPermission":" "},{"_tag":"EnvironmentAuthorizationError","message":"\n","requiredScope":"relay:write","requiredPermission":"�"}]
