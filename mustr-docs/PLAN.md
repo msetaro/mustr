@@ -119,12 +119,33 @@ The rule: mustr's code lives in its own directories, and every upstream pull is 
 ## 4. The T3 server connection
 
 ### Getting a server
-- **If T3 Code is installed,** mustr pairs with that environment. Threads are then shared with T3's own apps, including its mobile app.
-- **Otherwise,** mustr downloads a pinned T3 runtime from T3's official releases on first run, verifies its checksum, and manages it: start, stop, and local-only listening.
-- **Version check:** T3 requires the client's orchestration protocol version to match the server's exactly (`ORCHESTRATION_PROTOCOL_VERSION`, currently 2; it has changed once). A mismatch returns HTTP 426. mustr reads the server's version from `/.well-known/t3/environment` before connecting. If it doesn't match, mustr offers to update itself, or falls back to its own pinned runtime.
+mustr runs on T3 Code's engine, unmodified. The setting `"t3": {"mode": …}` picks which one (`mustr-crates/mustr/src/t3_engine.rs`); the runtime work is in `mustr-crates/t3_runtime`.
+
+- **`"installed"`, the default: the user's own T3 Code.** Its projects and threads appear in mustr and stay shared with T3's other apps.
+  - mustr finds T3's home (`$T3CODE_HOME` or `~/.t3`) and the server running from it (`userdata/server-runtime.json`, pid alive, descriptor answers).
+  - If T3's background service is installed but stopped, mustr starts it once with T3's own `t3 service restart`.
+  - If T3 Code is installed but nothing runs it, the home view offers **Run T3 Code in the background** (`t3 service install`).
+  - If T3 Code isn't installed, the home view offers **Install the agents engine**. mustr does what `install.sh` does:
+    - downloads the pinned release into `~/.t3/runtime/versions/<V>`, verified against the release's `SHA256SUMS`;
+    - links `~/.local/bin/t3` and lists it in `runtime/launchers`;
+    - sets up the service with `t3 service install`.
+  - mustr never installs, starts, or updates anything there without the user's click, except for restarting the user's already-installed service.
+- **`"embedded"`: mustr's own hidden copy of the pinned release,** also the fallback when the installed one can't be used ("Use mustr's own engine").
+  - Its files are separate from the user's T3 Code:
+    - the runtime is in `<data dir>/t3-runtime/<V>` (the previous version is kept for rollback);
+    - the engine's home is `<data dir>/t3-home`;
+    - its log is `<data dir>/logs/t3-engine.log`.
+  - It listens on a free loopback port that is never 3773, holds `<data dir>/t3-engine.lock`, and is started like T3's desktop app starts its backend: `t3 --mode desktop --bootstrap-fd 0 …`.
+  - It is restarted with backoff (0.5 s doubling to 10 s; mustr gives up after six crashes in a row).
+  - It is stopped when mustr quits: SIGTERM, then a kill after 5 s. In desktop mode it also exits on its own if mustr dies.
+  - It never touches `~/.t3`, the user's service, or port 3773.
+- **`"external"`:** a T3 server at a URL (`"t3": {"url": …}` or `--t3-server`), paired by pasting a credential. For development and T3 servers on other machines.
+- **Version check:** T3 requires the client's orchestration protocol version to match the server's exactly (`ORCHESTRATION_PROTOCOL_VERSION`, currently 2; it has changed once). A mismatch returns HTTP 426. mustr reads the server's version from `/.well-known/t3/environment` before connecting. If the installed T3 Code doesn't match, mustr explains why. If T3 Code is older, it offers **Update T3 Code** (`t3 update <V> --yes`). In either case it offers mustr's own engine.
+- **Platforms:** T3 publishes engine archives for macOS on Apple silicon, Linux x64/arm64, and Windows x64/arm64. There is none for Intel Macs; there, mustr says so and offers the external mode. T3's service exists only with systemd and launchd.
 
 ### Pairing
-- mustr uses the same path as T3's mobile app. A one-time pairing credential (from T3's pairing link, or `t3 auth pairing create --json` when mustr manages the runtime) is exchanged at `POST /oauth/token` (OAuth token exchange) for a bearer token that lasts about 30 days.
+- **Installed and external modes** use the same path as T3's mobile app. A one-time pairing credential (from `t3 auth pairing create --json` run with the installed runtime, or a pasted pairing link) is exchanged at `POST /oauth/token` (OAuth token exchange) for a bearer token that lasts about 30 days.
+- **The embedded engine needs no pairing.** mustr hands it a random secret in its bootstrap envelope. It then exchanges the token the secret derives (HMAC-SHA256 over 12-hour windows, as T3's desktop app does) at the same endpoint, with the `environment-bootstrap` grant. Nothing is stored; each launch signs in again.
 - mustr asks only for the scopes it needs: `orchestration:read`, `orchestration:operate`, `source-control:write`, and later `terminal:read`/`terminal:operate`. Never `access:write` or `relay:*`.
 - The bearer token is stored in the OS keychain and is the only secret mustr holds. Forge tokens stay in T3.
 - **Verified in the M0 spike** (`mustr-docs/T3-PROTOCOL.md`):
@@ -315,7 +336,7 @@ v0.1 keeps Zed's customization intact and adds a little.
     "collapse": ["generated", "**/*.lock"],
     "confirm_submit": true
   },
-  "t3": { "server": "auto" }        // "auto" | "installed" | "bundled"
+  "t3": { "mode": "installed" }     // "installed" | "embedded" | "external" (with "url")
 }
 ```
 - **mustr's actions** have their own key contexts:
@@ -478,10 +499,10 @@ One line each, roughly in priority order:
 6. **Zed's extension registry is off.** Zed's terms (§2.4) forbid accessing non-public APIs of Zed's service, so mustr makes no requests to zed.dev at all. v0.1 relies on Zed's built-in languages. A mustr registry built from the open-source extensions repo is Later.
 7. **App identity:** app ID `dev.mustr.mustr`, URL scheme `mustr://`, and a placeholder icon until a real one exists.
 8. **M0 started** on 2026-10-27, solo.
+9. **The engine (2026-10-28):** mustr uses the installed T3 Code by default (shared threads, §4), offers to install it when it's missing, and runs its own pinned copy when it can't be used or `"t3": {"mode": "embedded"}` is set.
 
 **Open**
-1. **When T3 Code is installed,** whether mustr pairs with it (shared threads; the recommended default) or always runs its own pinned runtime (predictable versions).
-2. **Zed's git commit and push UI:** hidden by default (recommended, since mustr is review-first) or visible.
+1. **Zed's git commit and push UI:** hidden by default (recommended, since mustr is review-first) or visible.
 
 ---
 
