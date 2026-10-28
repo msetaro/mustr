@@ -577,6 +577,16 @@ impl HomeView {
                     | ConnectionStatus::Failed(_)
                     | ConnectionStatus::NeedsPairing(_)
             );
+        // An installed T3 Code older than mustr's works, with what its version has; say quietly
+        // that updating brings the rest.
+        let update_hint = match status {
+            ConnectionStatus::Connected {
+                server_version,
+                engine: EngineKind::Installed,
+                ..
+            } => update_hint(server_version.as_deref(), pinned),
+            _ => None,
+        };
         let fallback_note = connection.is_fallback().then_some(
             "Using mustr's own engine for this session, because your T3 Code couldn't be used. \
              Your T3 Code's projects and threads aren't shown here.",
@@ -643,6 +653,21 @@ impl HomeView {
                                     })),
                             )
                         }),
+                )
+            })
+            .when_some(update_hint, |this, hint| {
+                this.child(
+                    h_flex()
+                        .gap_2()
+                        .child(Label::new(hint).size(LabelSize::Small).color(Color::Muted))
+                        .child(
+                            Button::new("update-t3-hint", "Update")
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::Small)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.connection.update(cx, T3Connection::update_installed)
+                                })),
+                        ),
                 )
             })
             .when_some(read_only, |this, read_only| {
@@ -1622,10 +1647,34 @@ impl Render for HomeView {
     }
 }
 
+/// "T3 Code 0.1.3 is available", when the connected T3 Code is older than the version mustr is
+/// built for (`T3_VERSION`). Older 0.1.x servers on the same protocol work; they only lack
+/// what came later.
+fn update_hint(server_version: Option<&str>, pinned: &str) -> Option<SharedString> {
+    let server = semver::Version::parse(server_version?).ok()?;
+    let pinned_version = semver::Version::parse(pinned).ok()?;
+    (server < pinned_version).then(|| format!("T3 Code {pinned} is available.").into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn older_t3_codes_get_a_quiet_update_hint() {
+        assert_eq!(
+            update_hint(Some("0.1.1"), "0.1.3").as_deref(),
+            Some("T3 Code 0.1.3 is available.")
+        );
+        // The nightlies before a release are older than it.
+        assert!(update_hint(Some("0.1.3-nightly.20261027.3754"), "0.1.3").is_some());
+        for newer_or_same in ["0.1.3", "0.1.4-nightly.20261028.3841", "0.2.0"] {
+            assert_eq!(update_hint(Some(newer_or_same), "0.1.3"), None);
+        }
+        assert_eq!(update_hint(None, "0.1.3"), None);
+        assert_eq!(update_hint(Some("dev"), "0.1.3"), None);
+    }
 
     fn shell(threads: Vec<serde_json::Value>) -> Shell {
         let thread_fields = |thread: serde_json::Value| {

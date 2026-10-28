@@ -1126,8 +1126,7 @@ impl ThreadGit {
         let (Some(backend), Some(checkout)) = (self.backend.clone(), self.checkout.clone()) else {
             return;
         };
-        let refresh = backend
-            .call::<rpc::VcsRefreshStatus>(
+        let refresh = backend.call::<rpc::VcsRefreshStatus>(
             VcsRefreshStatusPayload {
                 cwd: checkout.cwd,
                 local_only: None,
