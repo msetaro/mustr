@@ -219,6 +219,37 @@ fn init_reduce_motion(cx: &mut App) {
     cx.observe_global::<SettingsStore>(apply).detach();
 }
 
+/// `"updates"` in mustr's settings file (`updates.rs`). `{"enabled": false}` stops mustr from
+/// checking for updates on its own; mustr › Check for Updates… still checks. Zed's own
+/// `auto_update` setting is Zed's updater's, which mustr never runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(default)]
+pub struct UpdateSettings {
+    pub enabled: bool,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl UpdateSettings {
+    /// The settings in mustr's settings file (JSON with comments). A file without `"updates"`
+    /// has the defaults.
+    pub fn from_settings_text(text: &str) -> Result<Self> {
+        if text.trim().is_empty() {
+            return Ok(Self::default());
+        }
+        let settings: serde_json::Value = settings::parse_json_with_comments(text)?;
+        match settings.get("updates") {
+            None | Some(serde_json::Value::Null) => Ok(Self::default()),
+            Some(updates) => serde_json::from_value(updates.clone())
+                .map_err(|error| anyhow::anyhow!("\"updates\" in mustr's settings: {error}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
