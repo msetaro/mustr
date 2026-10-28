@@ -1246,25 +1246,37 @@ impl Render for PullRequestActions {
                 } else {
                     tooltip("Merge the pull request")
                 };
-                let button = SplitButton::new("pull-request-merge", label)
-                    .style(ButtonStyle::Primary)
-                    .disabled(write_disabled || conflicting)
-                    .tooltip(tooltip)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.armed = Some(Armed::Merge(method.clone()));
-                        cx.notify();
-                    }));
-                this.child(if several_methods {
-                    button.menu_tooltip("Choose how to merge").on_menu_click(
-                        move |event, window, cx| {
-                            merge_menu
-                                .update(cx, |this, cx| this.deploy_merge_menu(event, window, cx))
-                                .ok();
-                        },
+                let disabled = write_disabled || conflicting;
+                let arm = cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
+                    this.armed = Some(Armed::Merge(method.clone()));
+                    cx.notify();
+                });
+                // The ▾ only shows when there's a choice of merge methods.
+                if several_methods {
+                    this.child(
+                        SplitButton::new("pull-request-merge", label)
+                            .style(ButtonStyle::Primary)
+                            .disabled(disabled)
+                            .tooltip(tooltip)
+                            .on_click(arm)
+                            .menu_tooltip("Choose how to merge")
+                            .on_menu_click(move |event, window, cx| {
+                                merge_menu
+                                    .update(cx, |this, cx| {
+                                        this.deploy_merge_menu(event, window, cx)
+                                    })
+                                    .ok();
+                            }),
                     )
                 } else {
-                    button
-                })
+                    this.child(
+                        TextButton::new("pull-request-merge", label)
+                            .style(ButtonStyle::Primary)
+                            .disabled(disabled)
+                            .tooltip(tooltip)
+                            .on_click(arm),
+                    )
+                }
             })
             .when(!is_open, |this| {
                 this.child(
