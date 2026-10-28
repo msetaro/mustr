@@ -10,8 +10,9 @@ use editor::{
     display_map::{BlockPlacement, BlockProperties, BlockStyle},
 };
 use gpui::{
-    App, AppContext as _, Context, Entity, FontWeight, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, TextStyleRefinement, Window, px, relative,
+    App, AppContext as _, Context, Entity, FontWeight, IntoElement, MouseButton,
+    ParentElement as _, Render, SharedString, Styled as _, TextStyleRefinement, Window, px,
+    relative,
 };
 use language::{Buffer, LanguageRegistry, Point};
 use markdown::{Markdown, MarkdownElement, MarkdownStyle};
@@ -295,7 +296,7 @@ impl Render for ThreadCard {
         let expanded = self.expanded;
         let first = thread.comments.first();
         let summary = first
-            .map(|comment| comment.body.lines().next().unwrap_or_default().to_string())
+            .map(|comment| plain_summary(&comment.body))
             .unwrap_or_default();
         let count = thread.comment_count.max(thread.comments.len());
         let count_label = if count == 1 {
@@ -387,6 +388,8 @@ impl Render for ThreadCard {
             .border_color(colors.border)
             .bg(colors.surface_background)
             .overflow_hidden()
+            // Clicks on a card are the card's, not the editor's: they shouldn't move the cursor.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(title)
             .children(comments)
             .when(expanded && not_loaded > 0, |this| {
@@ -452,6 +455,8 @@ impl Render for OutdatedThreads {
             .border_color(colors.border)
             .bg(colors.surface_background)
             .overflow_hidden()
+            // Clicks on a card are the card's, not the editor's: they shouldn't move the cursor.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 h_flex()
                     .id("outdated-threads-title")
@@ -506,6 +511,22 @@ impl Render for OutdatedThreads {
     }
 }
 
+/// The first line of a comment with the most common Markdown markers removed, for a one-line
+/// summary.
+fn plain_summary(body: &str) -> String {
+    let line = body
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    let line = line.trim_start_matches(['#', '>', ' ']);
+    line.replace("**", "")
+        .replace("__", "")
+        .replace('`', "")
+        .trim()
+        .to_string()
+}
+
 fn author_name(comment: &ThreadComment) -> String {
     comment
         .author
@@ -533,6 +554,16 @@ pub(crate) fn relative_time(timestamp: OffsetDateTime, now: OffsetDateTime) -> S
 mod tests {
     use super::*;
     use time::macros::datetime;
+
+    #[test]
+    fn summaries_drop_markdown_markers() {
+        assert_eq!(
+            plain_summary("\n## **Critical** `src/main.rs:3`\nMore."),
+            "Critical src/main.rs:3"
+        );
+        assert_eq!(plain_summary("> quoted"), "quoted");
+        assert_eq!(plain_summary(""), "");
+    }
 
     #[test]
     fn relative_times() {

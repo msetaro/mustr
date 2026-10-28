@@ -18,7 +18,7 @@ use collections::{HashMap, HashSet};
 use editor::{
     Editor, EditorEvent, EditorSettings, HiddenDiffHunkRenderer, MultiBuffer, SelectionEffects,
     SplittableEditor,
-    display_map::{BlockPlacement, CustomBlockId},
+    display_map::{BlockPlacement, CustomBlockId, DisplayRow, ToDisplayPoint as _},
     multibuffer_context_lines,
     scroll::Autoscroll,
 };
@@ -94,6 +94,9 @@ pub struct ReviewContents {
     /// the map are unviewed.
     pub viewed: Option<std::collections::HashMap<String, FileViewedState>>,
 }
+
+/// How far above a file's first line to look for its header and the blocks listed with it.
+const BLOCK_ROWS_ABOVE_FILE: u32 = 64;
 
 /// Review files aren't backed by a worktree. An id that never matches a real worktree makes
 /// project-local settings lookups fall back to the global settings.
@@ -489,8 +492,26 @@ impl ReviewView {
             return false;
         };
         rhs_editor.update(cx, |editor, cx| {
+            // Put the file's header, and anything listed above its first line (such as outdated
+            // threads), at the top rather than under the sticky header.
+            let snapshot = editor.snapshot(window, cx);
+            let first_row = position.to_display_point(&snapshot).row();
+            let mut top = first_row;
+            let blocks = snapshot
+                .blocks_in_range(
+                    DisplayRow(first_row.0.saturating_sub(BLOCK_ROWS_ABOVE_FILE))..first_row,
+                )
+                .map(|(row, block)| (row, block.height()))
+                .collect::<Vec<_>>();
+            for (row, height) in blocks.into_iter().rev() {
+                if row.0 + height != top.0 {
+                    break;
+                }
+                top = row;
+            }
+            let rows_above = f64::from(first_row.0 - top.0);
             editor.change_selections(
-                SelectionEffects::scroll(Autoscroll::focused()),
+                SelectionEffects::scroll(Autoscroll::top_relative(rows_above)),
                 window,
                 cx,
                 |selections| selections.select_anchor_ranges([position..position]),
@@ -973,7 +994,7 @@ impl Render for ReviewView {
 mod tests {
     use super::*;
     use buffer_diff::DiffHunkStatusKind;
-    use editor::display_map::{Block, DisplayRow};
+    use editor::display_map::Block;
     use gpui::{TestAppContext, VisualTestContext};
     use language::{markdown_lang, rust_lang};
     use project::FakeFs;
