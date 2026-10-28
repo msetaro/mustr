@@ -20,7 +20,7 @@ pub use auth::{
     ORCHESTRATION_PROTOCOL_VERSION, Scope, check_protocol_compatibility,
     exchange_pairing_credential, fetch_descriptor, websocket_ticket, websocket_url,
 };
-pub use endpoints::{call_endpoint, call_endpoint_with};
+pub use endpoints::{call_endpoint, call_endpoint_as, call_endpoint_with};
 pub use pull_requests::{
     ChangeType, ChangedFile, PatchHunk, PatchLine, PullRequestFile, PullRequestRef, changed_files,
     load_pull_request_files, pull_request_patch,
