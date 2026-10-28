@@ -589,6 +589,9 @@ pub struct ThreadsSidebar {
     items: Vec<Item>,
     keys: Vec<ItemKey>,
     list_state: ListState,
+    /// The window's rem size when the list's rows were measured: they're measured again when
+    /// `ui_font_size` changes.
+    rem_size: Pixels,
     folded: HashSet<Section>,
     settled_shown: usize,
     active_thread_id: Option<String>,
@@ -650,6 +653,7 @@ impl ThreadsSidebar {
             items: Vec::new(),
             keys: Vec::new(),
             list_state: ListState::new(0, ListAlignment::Top, px(1000.)),
+            rem_size: window.rem_size(),
             folded: HashSet::from_iter([Section::Snoozed, Section::Settled]),
             settled_shown: SETTLED_FIRST_PAGE,
             active_thread_id: None,
@@ -1188,7 +1192,11 @@ impl Focusable for ThreadsSidebar {
 }
 
 impl Render for ThreadsSidebar {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.rem_size != window.rem_size() {
+            self.rem_size = window.rem_size();
+            self.list_state.remeasure();
+        }
         let palette = palette(cx);
         let shells = self.shells.read(cx);
         let loaded = shells.shell().is_some();
