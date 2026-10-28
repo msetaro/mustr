@@ -88,6 +88,7 @@ pub fn parse_pull_request_list(list: Value) -> PullRequestList {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThreadRow {
+    pub id: String,
     pub title: String,
     pub status: ThreadStatus,
     pub branch: Option<String>,
@@ -132,6 +133,7 @@ pub fn recent_threads(snapshot: &Value, limit: usize) -> Vec<ThreadRow> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Thread {
+        id: String,
         project_id: String,
         title: String,
         status: String,
@@ -166,6 +168,7 @@ pub fn recent_threads(snapshot: &Value, limit: usize) -> Vec<ThreadRow> {
             let status =
                 ThreadStatus::from_shell(thread.status, thread.pending_runtime_request.is_some());
             ThreadRow {
+                id: thread.id,
                 title: if thread.title.trim().is_empty() {
                     "Untitled thread".to_string()
                 } else {
@@ -591,18 +594,21 @@ mod tests {
             threads,
             vec![
                 ThreadRow {
+                    id: "newest".into(),
                     title: "newest".into(),
                     status: ThreadStatus::Working("running".into()),
                     branch: Some("t3/newest".into()),
                     project: Some("mustr".into()),
                 },
                 ThreadRow {
+                    id: "waiting".into(),
                     title: "waiting".into(),
                     status: ThreadStatus::NeedsInput,
                     branch: Some("t3/waiting".into()),
                     project: Some("mustr".into()),
                 },
                 ThreadRow {
+                    id: "".into(),
                     title: "Untitled thread".into(),
                     status: ThreadStatus::Failed,
                     branch: None,

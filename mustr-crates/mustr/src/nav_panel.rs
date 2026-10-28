@@ -1,8 +1,10 @@
-//! The left dock's panel: mustr's icon rail, and next to it the file tree of the active review.
+//! The left dock's panel: mustr's icon rail, and next to it a sidebar: the file tree of the
+//! active review, or the agent threads.
 //!
-//! A dock shows one panel at a time, so the rail and the file tree share this panel
+//! A dock shows one panel at a time, so the rail and the sidebars share this panel
 //! (`mustr-docs/ZED-INTEGRATION.md` Q4). While a review is active the panel is as wide as the
-//! rail plus the tree; elsewhere it narrows to just the rail.
+//! rail plus the tree. While a thread is active, or after the rail's Agents button, it shows the
+//! threads instead. Elsewhere it narrows to just the rail.
 
 use crate::{home::HomeView, navigation};
 use gpui::{
@@ -12,6 +14,7 @@ use gpui::{
 };
 use mustr_ui::{MustrIcon, RailButton, tokens};
 use review::{FileTreePanel, ReviewView, ToggleFileTree};
+use thread_chat::{ThreadView, ThreadsSidebar};
 use ui::{FluentBuilder as _, h_flex, v_flex};
 use workspace::{
     ItemHandle, Workspace,
@@ -25,18 +28,32 @@ const DEFAULT_TREE_WIDTH: Pixels = px(280.);
 enum Destination {
     Home,
     Review,
+    Thread,
     Other,
+}
+
+/// What shows next to the rail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Sidebar {
+    None,
+    FileTree,
+    Threads,
 }
 
 pub struct NavPanel {
     focus_handle: FocusHandle,
     workspace: WeakEntity<Workspace>,
     file_tree: Entity<FileTreePanel>,
+    threads: Entity<ThreadsSidebar>,
     destination: Destination,
-    /// Whether the panel was last sized for a review (rail and file tree) or not (rail only).
-    sized_for_review: Option<bool>,
-    /// The panel's width while a review is active, restored when a review shows again.
-    review_width: Option<Pixels>,
+    /// Whether the threads show while neither a review nor a thread is active (the rail's Agents
+    /// button toggles it).
+    threads_open: bool,
+    /// What the panel was last sized for.
+    sized_for: Option<Sidebar>,
+    /// The panel's width with each sidebar, restored when that sidebar shows again.
+    file_tree_width: Option<Pixels>,
+    threads_width: Option<Pixels>,
     _subscription: Subscription,
 }
 
@@ -45,6 +62,7 @@ impl NavPanel {
     /// example, from `observe_new`).
     pub fn new(workspace: &Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let file_tree = cx.new(|cx| FileTreePanel::new(workspace, window, cx));
+        let threads = cx.new(|cx| ThreadsSidebar::new(workspace.downgrade(), cx));
         let subscription = cx.subscribe_in(
             workspace,
             window,
@@ -61,16 +79,18 @@ impl NavPanel {
             focus_handle: cx.focus_handle(),
             workspace: workspace.downgrade(),
             file_tree,
+            threads,
             destination: Destination::Other,
-            sized_for_review: None,
-            review_width: None,
+            threads_open: false,
+            sized_for: None,
+            file_tree_width: None,
+            threads_width: None,
             _subscription: subscription,
         }
     }
 
-    /// Highlights the rail button for `item`, and shows the file tree (widening the panel) if
-    /// it's a review. Call once the panel is in `left_dock`, and whenever the active item
-    /// changes.
+    /// Highlights the rail button for `item`, and shows the sidebar that goes with it (widening
+    /// the panel). Call once the panel is in `left_dock`, and whenever the active item changes.
     pub fn active_item_changed(
         &mut self,
         item: Option<&dyn ItemHandle>,
@@ -78,32 +98,60 @@ impl NavPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let thread = item.and_then(|item| item.downcast::<ThreadView>());
         let destination = match item {
             Some(item) if item.downcast::<ReviewView>().is_some() => Destination::Review,
             Some(item) if item.downcast::<HomeView>().is_some() => Destination::Home,
+            Some(_) if thread.is_some() => Destination::Thread,
             _ => Destination::Other,
         };
+        let thread_id = thread.and_then(|thread| thread.read(cx).thread_id().map(str::to_string));
+        self.threads
+            .update(cx, |threads, cx| threads.set_active_thread(thread_id, cx));
         self.destination = destination;
         cx.notify();
-        let is_review = destination == Destination::Review;
-        if self.sized_for_review == Some(is_review) {
+        self.update_size(left_dock, window, cx);
+    }
+
+    fn sidebar(&self) -> Sidebar {
+        match self.destination {
+            Destination::Review => Sidebar::FileTree,
+            Destination::Thread => Sidebar::Threads,
+            _ if self.threads_open => Sidebar::Threads,
+            _ => Sidebar::None,
+        }
+    }
+
+    fn update_size(
+        &mut self,
+        left_dock: &Entity<Dock>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sidebar = self.sidebar();
+        if self.sized_for == Some(sidebar) {
             return;
         }
-
         let panel = cx.entity();
-        if self.sized_for_review == Some(true) {
-            self.review_width = left_dock
-                .read(cx)
-                .stored_panel_size_state(&panel)
-                .and_then(|size_state| size_state.size);
+        let current_width = left_dock
+            .read(cx)
+            .stored_panel_size_state(&panel)
+            .and_then(|size_state| size_state.size);
+        match self.sized_for {
+            Some(Sidebar::FileTree) => self.file_tree_width = current_width,
+            Some(Sidebar::Threads) => self.threads_width = current_width,
+            Some(Sidebar::None) | None => {}
         }
-        let width = if is_review {
-            self.review_width
-                .unwrap_or_else(|| self.default_size(window, cx))
-        } else {
-            tokens::RAIL_WIDTH
+        let width = match sidebar {
+            Sidebar::FileTree => self
+                .file_tree_width
+                .unwrap_or_else(|| self.default_size(window, cx)),
+            Sidebar::Threads => self
+                .threads_width
+                .unwrap_or_else(|| self.default_size(window, cx)),
+            Sidebar::None => tokens::RAIL_WIDTH,
         };
-        self.sized_for_review = Some(is_review);
+        self.sized_for = Some(sidebar);
         left_dock.update(cx, |dock, cx| {
             dock.set_panel_size_state(
                 &panel,
@@ -114,6 +162,23 @@ impl NavPanel {
                 cx,
             );
         });
+    }
+
+    /// The rail's Agents button: shows or hides the threads next to the rail.
+    fn toggle_threads(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.destination == Destination::Thread {
+            return;
+        }
+        self.threads_open = !self.threads_open;
+        cx.notify();
+        let Some(left_dock) = self
+            .workspace
+            .read_with(cx, |workspace, _| workspace.left_dock().clone())
+            .ok()
+        else {
+            return;
+        };
+        self.update_size(&left_dock, window, cx);
     }
 
     fn with_workspace(
@@ -144,7 +209,7 @@ impl NavPanel {
             .gap(px(6.))
             .py(px(10.))
             .bg(palette.surface.hsla())
-            .when(self.destination == Destination::Review, |this| {
+            .when(self.sidebar() != Sidebar::None, |this| {
                 this.border_r(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
             })
@@ -164,7 +229,9 @@ impl NavPanel {
             )
             .child(
                 RailButton::new("rail-agents", MustrIcon::Agent.icon())
-                    .tooltip("Agent threads (coming soon)"),
+                    .active(self.sidebar() == Sidebar::Threads)
+                    .tooltip("Agent threads")
+                    .on_click(on_click(Self::toggle_threads)),
             )
             .child(div().flex_1())
             .child(
@@ -207,10 +274,10 @@ impl Panel for NavPanel {
     }
 
     fn activation_focus_handle(&self, cx: &App) -> FocusHandle {
-        if self.destination == Destination::Review {
-            self.file_tree.focus_handle(cx)
-        } else {
-            self.focus_handle.clone()
+        match self.sidebar() {
+            Sidebar::FileTree => self.file_tree.focus_handle(cx),
+            Sidebar::Threads => self.threads.focus_handle(cx),
+            Sidebar::None => self.focus_handle.clone(),
         }
     }
 
@@ -257,14 +324,183 @@ impl Render for NavPanel {
             .track_focus(&self.focus_handle)
             .size_full()
             .child(self.render_rail(cx))
-            .when(self.destination == Destination::Review, |this| {
-                this.child(
+            .map(|this| match self.sidebar() {
+                Sidebar::FileTree => this.child(
                     div()
                         .flex_1()
                         .min_w_0()
                         .h_full()
                         .child(self.file_tree.clone()),
-                )
+                ),
+                Sidebar::Threads => this.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .child(self.threads.clone()),
+                ),
+                Sidebar::None => this,
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::{Result, anyhow};
+    use futures::{FutureExt as _, future::BoxFuture, stream::BoxStream};
+    use gpui::{TestAppContext, VisualTestContext};
+    use settings::SettingsStore;
+    use std::sync::Arc;
+    use t3_client::t3_api::{
+        tagged::{
+            OrchestrationV2Command, OrchestrationV2ShellStreamItem, OrchestrationV2ThreadStreamItem,
+        },
+        types::{
+            OrchestrationV2DispatchCommandResult, OrchestrationV2GetTurnItemInput,
+            OrchestrationV2GetTurnItemResult, OrchestrationV2ShellSnapshot,
+            OrchestrationV2SubscribeShellInput, OrchestrationV2SubscribeThreadInput,
+            OrchestrationV2ThreadDetailSnapshot, OrchestrationV2ThreadLaunchInput,
+            OrchestrationV2ThreadLaunchResult, ServerProvider,
+        },
+    };
+    use thread_chat::ThreadBackend;
+    use workspace::MultiWorkspace;
+
+    /// A T3 that isn't there: every read fails, and nothing can be written.
+    struct UnreachableBackend;
+
+    fn unreachable<T: Send + 'static>() -> BoxFuture<'static, Result<T>> {
+        futures::future::ready(Err(anyhow!("not connected"))).boxed()
+    }
+
+    impl ThreadBackend for UnreachableBackend {
+        fn shell_snapshot(&self) -> BoxFuture<'static, Result<OrchestrationV2ShellSnapshot>> {
+            unreachable()
+        }
+
+        fn subscribe_shell(
+            &self,
+            _: OrchestrationV2SubscribeShellInput,
+        ) -> Result<BoxStream<'static, Result<OrchestrationV2ShellStreamItem>>> {
+            Err(anyhow!("not connected"))
+        }
+
+        fn thread_snapshot(
+            &self,
+            _: String,
+        ) -> BoxFuture<'static, Result<OrchestrationV2ThreadDetailSnapshot>> {
+            unreachable()
+        }
+
+        fn subscribe_thread(
+            &self,
+            _: OrchestrationV2SubscribeThreadInput,
+        ) -> Result<BoxStream<'static, Result<OrchestrationV2ThreadStreamItem>>> {
+            Err(anyhow!("not connected"))
+        }
+
+        fn turn_item(
+            &self,
+            _: OrchestrationV2GetTurnItemInput,
+        ) -> BoxFuture<'static, Result<OrchestrationV2GetTurnItemResult>> {
+            unreachable()
+        }
+
+        fn providers(&self) -> BoxFuture<'static, Result<Vec<ServerProvider>>> {
+            unreachable()
+        }
+
+        fn dispatch(
+            &self,
+            _: OrchestrationV2Command,
+        ) -> BoxFuture<'static, Result<OrchestrationV2DispatchCommandResult>> {
+            unreachable()
+        }
+
+        fn launch_thread(
+            &self,
+            _: OrchestrationV2ThreadLaunchInput,
+        ) -> BoxFuture<'static, Result<OrchestrationV2ThreadLaunchResult>> {
+            unreachable()
+        }
+    }
+
+    async fn workspace_with_nav_panel(
+        cx: &mut TestAppContext,
+    ) -> (Entity<Workspace>, Entity<NavPanel>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            thread_chat::set_backend(Arc::new(UnreachableBackend), cx);
+        });
+        let fs = project::FakeFs::new(cx.executor());
+        let project = project::Project::test(fs, [], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace =
+            multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+        let nav_panel = workspace.update_in(cx, |workspace, window, cx| {
+            let workspace_handle = cx.entity();
+            let nav_panel = cx.new(|cx| NavPanel::new(&workspace_handle, window, cx));
+            workspace.add_panel(nav_panel.clone(), window, cx);
+            nav_panel
+        });
+        cx.run_until_parked();
+        (workspace, nav_panel, cx)
+    }
+
+    #[gpui::test]
+    async fn threads_open_from_the_sidebar_and_show_it(cx: &mut TestAppContext) {
+        let (workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;
+        nav_panel.read_with(cx, |nav_panel, _| {
+            assert_eq!(nav_panel.sidebar(), Sidebar::None)
+        });
+
+        // As a click on one of the sidebar's threads does: from inside the sidebar's update,
+        // which activating the new item reads.
+        let threads = nav_panel.read_with(cx, |nav_panel, _| nav_panel.threads.clone());
+        let weak_workspace = workspace.downgrade();
+        threads.update_in(cx, |_, window, cx| {
+            thread_chat::open_thread(
+                "thread-1".into(),
+                "Retry".into(),
+                weak_workspace.clone(),
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+
+        let active = workspace.read_with(cx, |workspace, cx| workspace.active_item(cx));
+        let thread = active
+            .and_then(|item| item.downcast::<ThreadView>())
+            .expect("the thread is active");
+        assert_eq!(
+            thread.read_with(cx, |thread, _| thread.thread_id().map(str::to_string)),
+            Some("thread-1".to_string())
+        );
+        nav_panel.read_with(cx, |nav_panel, _| {
+            assert_eq!(nav_panel.destination, Destination::Thread);
+            assert_eq!(nav_panel.sidebar(), Sidebar::Threads);
+        });
+    }
+
+    #[gpui::test]
+    async fn the_agents_button_toggles_the_threads(cx: &mut TestAppContext) {
+        let (_workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            nav_panel.toggle_threads(window, cx)
+        });
+        nav_panel.read_with(cx, |nav_panel, _| {
+            assert_eq!(nav_panel.sidebar(), Sidebar::Threads)
+        });
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            nav_panel.toggle_threads(window, cx)
+        });
+        nav_panel.read_with(cx, |nav_panel, _| {
+            assert_eq!(nav_panel.sidebar(), Sidebar::None)
+        });
     }
 }

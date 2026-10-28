@@ -20,6 +20,7 @@ mod t3_connection;
 #[cfg(test)]
 mod test_rpc;
 mod themes;
+mod thread_backend;
 mod title_bar;
 mod window;
 mod worktree_git;
@@ -68,11 +69,19 @@ struct Args {
 
     /// Opens a review of this agent thread's work once the threads load (for smoke tests).
     #[arg(long, hide = true, value_name = "THREAD_ID")]
-    open_thread: Option<String>,
+    review_thread: Option<String>,
 
-    /// The scope `--open-thread` opens: `changes` (the default) or `turn:N`.
+    /// The scope `--review-thread` opens: `changes` (the default) or `turn:N`.
     #[arg(long, hide = true, value_name = "SCOPE", value_parser = parse_review_scope)]
     thread_scope: Option<review::ReviewScope>,
+
+    /// Opens this agent thread's chat at startup (for smoke tests and screenshots).
+    #[arg(long, hide = true, value_name = "THREAD_ID")]
+    open_thread: Option<String>,
+
+    /// Opens a new agent thread's form at startup (for smoke tests and screenshots).
+    #[arg(long, hide = true)]
+    new_thread: bool,
 
     /// Relays a Git or SSH password prompt over a Unix socket, so git doesn't
     /// need netcat.
@@ -105,12 +114,16 @@ fn main() {
 
     let home_options = home::HomeOptions {
         open_first_pull_request: args.open_first_pr,
-        open_thread: args.open_thread.map(|thread_id| {
+        review_thread: args.review_thread.map(|thread_id| {
             (
                 thread_id,
                 args.thread_scope.unwrap_or(review::ReviewScope::Changes),
             )
         }),
+    };
+    let startup_threads = window::StartupThreads {
+        open_thread: args.open_thread.clone(),
+        new_thread: args.new_thread,
     };
     let data_dir = match data_dir::init(args.user_data_dir) {
         Ok(data_dir) => data_dir,
@@ -200,7 +213,12 @@ fn main() {
         };
         init_ui(&app_state, cx);
         cx.set_global(home_options);
+        cx.set_global(startup_threads);
         t3_connection::init(t3_server_url, cx);
+        let session = t3_connection::T3Connection::global(cx)
+            .read(cx)
+            .current_session();
+        thread_backend::init(session, cx);
         cx.activate(true);
         window::open_home_window(app_state, cx);
     });
@@ -381,5 +399,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     app_settings::observe_app_settings(cx);
     title_bar::init(cx);
     status_bar::init(cx);
+    thread_chat::init(cx);
     window::init(cx);
 }

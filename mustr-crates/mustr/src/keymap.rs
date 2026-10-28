@@ -162,11 +162,12 @@ fn load_default_keymap(cx: &mut App) {
     bind_builtin_keymap(SPECIFIC_OVERRIDES_KEYMAP_PATH, KeybindSource::Default, cx);
     // mustr's own bindings, after Zed's (so `c` in a review beats vim's `c`) and before the
     // user's (so they can be rebound).
-    let mut review_bindings = review::key_bindings();
-    for key_binding in &mut review_bindings {
+    let mut mustr_bindings = review::key_bindings();
+    mustr_bindings.extend(thread_chat::key_bindings());
+    for key_binding in &mut mustr_bindings {
         key_binding.set_meta(KeybindSource::Default.meta());
     }
-    cx.bind_keys(review_bindings);
+    cx.bind_keys(mustr_bindings);
 }
 
 /// Binds one of Zed's built-in keymaps.

@@ -11137,6 +11137,7 @@ dependencies = [
  "theme",
  "theme_selector",
  "theme_settings",
+ "thread_chat",
  "time",
  "ui",
  "ui_prompt",
@@ -18315,6 +18316,33 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "thread_chat"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "collections",
+ "editor",
+ "futures 0.3.34",
+ "gpui",
+ "language",
+ "log",
+ "markdown",
+ "mustr_ui",
+ "parking_lot",
+ "pretty_assertions",
+ "project",
+ "serde",
+ "serde_json",
+ "settings",
+ "t3_api",
+ "theme",
+ "theme_settings",
+ "ui",
+ "uuid",
+ "workspace",
 ]
 
 [[package]]
