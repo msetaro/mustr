@@ -96,6 +96,17 @@ const SERVICE_ACTIONS: &[&str] = &[
     "zed::ShowWelcome",
 ];
 
+/// Zed actions that mustr's own replace. They're hidden from the palette only, because their
+/// handlers belong to Zed's terminal panel, which mustr doesn't add, so from the palette they'd do
+/// nothing. Their key bindings stay: mustr's terminal panel handles `workspace::NewTerminal`.
+const SUPERSEDED_ACTIONS: &[&str] = &[
+    // mustr::ToggleThreadTerminal
+    "terminal_panel::Toggle",
+    "terminal_panel::ToggleFocus",
+    // mustr::NewThreadTerminal
+    "workspace::NewTerminal",
+];
+
 /// Whether mustr hides the action with this (canonical) name.
 pub fn is_hidden(action_name: &str) -> bool {
     let namespace = action_name.split("::").next().unwrap_or_default();
@@ -111,7 +122,7 @@ pub fn init(cx: &mut App) {
     // Every compiled-in action, including those that take arguments and so can't be built by
     // name.
     let action_types: Vec<TypeId> = gpui::generate_list_of_all_registered_actions()
-        .filter(|action| is_hidden(action.name))
+        .filter(|action| is_hidden(action.name) || SUPERSEDED_ACTIONS.contains(&action.name))
         .map(|action| action.type_id)
         .collect();
     CommandPaletteFilter::update_global(cx, |filter, _| {
@@ -284,6 +295,11 @@ pub(crate) mod tests {
                 .collect();
             for name in AI_ACTIONS.iter().chain(SERVICE_ACTIONS) {
                 assert!(registered.contains(name), "{name} no longer exists");
+            }
+            for name in SUPERSEDED_ACTIONS {
+                assert!(registered.contains(name), "{name} no longer exists");
+                let action = cx.build_action(name, None).unwrap();
+                assert!(filter.is_hidden(&*action), "the palette shows {name}");
             }
 
             // mustr's own agent features stay.
