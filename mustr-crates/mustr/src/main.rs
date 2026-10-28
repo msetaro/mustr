@@ -111,6 +111,9 @@ fn main() {
     log::info!("========== starting mustr {app_version} ==========");
     log::info!("Data directory: {}", data_dir.display());
 
+    app_settings::ensure_settings_file(paths::settings_file())
+        .context("creating the settings file")
+        .log_err();
     let settings_text = std::fs::read_to_string(paths::settings_file()).ok();
     let t3_server_url = t3_connection::resolve_server_url(args.t3_server, settings_text.as_deref());
     match &t3_server_url {

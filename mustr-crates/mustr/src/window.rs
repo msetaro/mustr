@@ -1,4 +1,4 @@
-use crate::home::HomeView;
+use crate::{app_settings::INITIAL_SETTINGS, home::HomeView};
 use gpui::{
     App, AppContext as _, Context, Entity, Menu, MenuItem, OsAction, PromptLevel, TaskExt as _,
     TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions, point, px,
@@ -23,7 +23,6 @@ use zed_actions::{OpenKeymapFile, OpenSettingsFile, Quit};
 /// The Wayland app ID and X11 `WM_CLASS`. It must match the `.desktop` file name.
 const APP_ID: &str = "dev.mustr.mustr";
 
-const INITIAL_SETTINGS: &str = "// mustr settings\n//\n// mustr uses Zed's settings format. For the available settings, see\n// https://zed.dev/docs/configuring-zed\n{\n}\n";
 const INITIAL_KEYMAP: &str = "// mustr key bindings\n//\n// mustr uses Zed's keymap format. See https://zed.dev/docs/key-bindings\n[\n]\n";
 
 #[cfg(target_os = "macos")]
