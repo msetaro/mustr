@@ -1,4 +1,4 @@
-use crate::{palette, tokens};
+use crate::{palette, tokens, tokens::scaled};
 use gpui::{
     Action, App, IntoElement, KeyContext, Modifiers, ParentElement as _, RenderOnce, SharedString,
     Styled as _, Window, div, px,
@@ -22,12 +22,12 @@ impl RenderOnce for Kbd {
         let palette = palette(cx);
         div()
             .flex_none()
-            .min_w(px(15.))
-            .px(px(4.))
+            .min_w(scaled(px(15.)))
+            .px(scaled(px(4.)))
             .border(tokens::BORDER_WIDTH)
-            .border_b(px(2.))
+            .border_b(scaled(px(2.)))
             .border_color(palette.border.hsla())
-            .rounded(tokens::KBD_RADIUS)
+            .rounded(scaled(tokens::KBD_RADIUS))
             .bg(palette.surface_2.hsla())
             .text_color(palette.text.hsla())
             .font_buffer(cx)
