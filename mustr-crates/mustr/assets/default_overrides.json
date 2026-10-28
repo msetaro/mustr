@@ -38,10 +38,13 @@
   },
   "suggest_extensions": false,
   "window_title_format": "mustr",
-  // The compact type scale of mustr's mockups (mustr-docs/PLAN.md §6). mustr's
-  // components size their text in rems of `ui_font_size`.
-  "ui_font_size": 13,
-  "buffer_font_size": 13,
+  // Twice the size of mustr's mockups (mustr-docs/PLAN.md §6), which are drawn
+  // at 13. mustr sizes its text and layout in rems of `ui_font_size`
+  // (`mustr_ui::tokens::scaled`), so the whole UI is twice the mockups' size,
+  // in the same proportions. Zoom In, Zoom Out, and Reset Zoom (⌘=, ⌘-, ⌘0)
+  // change both sizes from here.
+  "ui_font_size": 26,
+  "buffer_font_size": 26,
   // mustr's title bar shows a tab per open item, so the panes don't.
   "tab_bar": {
     "show": false

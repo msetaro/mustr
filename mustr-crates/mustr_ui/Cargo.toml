@@ -17,6 +17,7 @@ doctest = false
 anyhow.workspace = true
 gpui.workspace = true
 log.workspace = true
+settings.workspace = true
 smallvec.workspace = true
 theme.workspace = true
 theme_settings.workspace = true

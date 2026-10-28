@@ -3,7 +3,9 @@
 //! `assets/themes/mustr/mustr.json` is written from the same values, and the
 //! tests in this crate check that the two agree.
 
-use gpui::{Hsla, Pixels, Rems, Rgba, px, rems};
+use gpui::{App, Hsla, Pixels, Rems, Rgba, px, rems};
+use settings::Settings as _;
+use theme_settings::ThemeSettings;
 
 /// A color written as `0xRRGGBBAA`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -176,4 +178,12 @@ pub fn scaled(length: Pixels) -> Rems {
 /// One of the text sizes above, in rems, so it follows the user's `ui_font_size`.
 pub fn text_size(size: Pixels) -> Rems {
     scaled(size)
+}
+
+/// [`scaled`], in pixels at the user's `ui_font_size`, for APIs that take pixels outside of
+/// rendering, such as a dock panel's size. It's `scaled(length).to_pixels(window.rem_size())`,
+/// read from the settings rather than from a window, so it's right before a window's first
+/// frame too.
+pub fn scaled_pixels(length: Pixels, cx: &App) -> Pixels {
+    scaled(length).to_pixels(ThemeSettings::get_global(cx).ui_font_size(cx))
 }

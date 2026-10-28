@@ -1,4 +1,4 @@
-use crate::{components::ClickHandler, palette, tokens};
+use crate::{components::ClickHandler, palette, tokens, tokens::scaled};
 use gpui::{
     App, ClickEvent, ElementId, FontWeight, InteractiveElement as _, IntoElement, MouseButton,
     ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _,
@@ -66,11 +66,11 @@ impl RenderOnce for RailButton {
             .id(self.id)
             .relative()
             .flex_none()
-            .size(px(26.))
+            .size(scaled(px(26.)))
             .flex()
             .items_center()
             .justify_center()
-            .rounded(tokens::CONTROL_RADIUS)
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .when(self.active, |this| this.bg(palette.surface_2.hsla()))
             .child(
                 self.icon
@@ -81,16 +81,16 @@ impl RenderOnce for RailButton {
                 this.child(
                     div()
                         .absolute()
-                        .top(px(-2.))
-                        .right(px(-3.))
-                        .min_w(px(14.))
-                        .h(px(14.))
-                        .px(px(3.))
-                        .rounded(px(7.))
+                        .top(scaled(px(-2.)))
+                        .right(scaled(px(-3.)))
+                        .min_w(scaled(px(14.)))
+                        .h(scaled(px(14.)))
+                        .px(scaled(px(3.)))
+                        .rounded(scaled(px(7.)))
                         .bg(palette.accent.hsla())
                         .text_color(palette.accent_foreground.hsla())
                         .text_size(tokens::text_size(px(9.)))
-                        .line_height(px(14.))
+                        .line_height(scaled(px(14.)))
                         .font_weight(FontWeight::BOLD)
                         .text_center()
                         .child(badge),

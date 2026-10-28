@@ -1,7 +1,7 @@
 use crate::{app_settings::INITIAL_SETTINGS, home::HomeView, nav_panel::NavPanel};
 use gpui::{
     App, AppContext as _, Context, Entity, Global, Menu, MenuItem, OsAction, PromptLevel,
-    TaskExt as _, TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions, point, px,
+    TaskExt as _, TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions, px,
 };
 use review::{OpenThreadChat, ToggleFileTree};
 use settings::{Settings as _, SettingsStore};
@@ -188,7 +188,7 @@ static APP_ICON: std::sync::LazyLock<Option<Arc<image::RgbaImage>>> =
     });
 
 // Copied from crates/zed/src/zed.rs (`build_window_options`), with mustr's app
-// ID and icon.
+// ID and icon, and the traffic lights where mustr's title bar wants them.
 pub fn build_window_options(display_uuid: Option<Uuid>, cx: &mut App) -> WindowOptions {
     let display = display_uuid.and_then(|uuid| {
         cx.displays()
@@ -209,7 +209,8 @@ pub fn build_window_options(display_uuid: Option<Uuid>, cx: &mut App) -> WindowO
         titlebar: Some(TitlebarOptions {
             title: None,
             appears_transparent: true,
-            traffic_light_position: Some(point(px(9.0), px(9.0))),
+            // Centered in the title bar, whose height follows `ui_font_size`.
+            traffic_light_position: Some(crate::title_bar::traffic_light_position(cx)),
         }),
         window_bounds: None,
         focus: false,
@@ -281,6 +282,12 @@ pub fn app_menus() -> Vec<Menu> {
             ),
             MenuItem::separator(),
             MenuItem::action("Find", search::buffer_search::Deploy::find()),
+        ]),
+        // The shortcuts shown are the zoom actions' key bindings: ⌘+, ⌘-, and ⌘0.
+        Menu::new("View").items([
+            MenuItem::action("Zoom In", crate::zoom::ZoomIn),
+            MenuItem::action("Zoom Out", crate::zoom::ZoomOut),
+            MenuItem::action("Actual Size", crate::zoom::ResetZoom),
         ]),
         // AppKit lists the open windows at the end of the menu named "Window".
         #[cfg(target_os = "macos")]

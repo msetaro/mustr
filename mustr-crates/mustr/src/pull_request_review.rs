@@ -27,7 +27,7 @@ use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, IntoElement, ParentElement as _,
     Render, SharedString, Styled as _, Task, WeakEntity, Window,
 };
-use mustr_ui::{ButtonStyle, SplitButton, TextButton};
+use mustr_ui::{ButtonStyle, SplitButton, TextButton, tokens::scaled};
 use review::{
     ChecksState, ChecksSummary, DiffSide, FileViewedState, PullRequestHeader, PullRequestState,
     ReviewContents, ReviewHeader, ReviewPermissions, ReviewThread, ReviewVerdict, ReviewView,
@@ -1080,7 +1080,7 @@ impl PullRequestActions {
             })
         });
         self.menu
-            .deploy(menu_position(event), menu, window, cx, |this| {
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
                 &mut this.menu
             });
     }
@@ -1116,7 +1116,7 @@ impl PullRequestActions {
             menu
         });
         self.menu
-            .deploy(menu_position(event), menu, window, cx, |this| {
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
                 &mut this.menu
             });
     }
@@ -1188,7 +1188,7 @@ impl Render for PullRequestActions {
         h_flex()
             .id("pull-request-actions")
             .flex_none()
-            .gap(px(6.))
+            .gap(scaled(px(6.)))
             .when_some(self.running.clone(), |this, running| {
                 this.child(
                     Label::new(running)

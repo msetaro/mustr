@@ -11,7 +11,7 @@ use gpui::{
     App, AppContext as _, Context, Entity, Hsla, IntoElement, ParentElement as _, Render,
     SharedString, Styled as _, Subscription, Task, Window, div, px,
 };
-use mustr_ui::{StatusHint, tokens};
+use mustr_ui::{StatusHint, tokens, tokens::scaled};
 use review::ReviewView;
 use std::time::{Duration, Instant};
 use theme::ActiveTheme as _;
@@ -40,7 +40,7 @@ pub fn init(cx: &mut App) {
 
 fn status_text(color: Hsla, text: impl Into<SharedString>) -> impl IntoElement {
     div()
-        .px(px(5.))
+        .px(scaled(px(5.)))
         .text_size(tokens::text_size(tokens::TEXT_SIZE_XSMALL))
         .text_color(color)
         .whitespace_nowrap()
@@ -145,8 +145,14 @@ impl Render for SyncStatus {
             ConnectionStatus::Failed(_) => (cx.theme().status().error, "T3 offline".into()),
         };
         h_flex()
-            .pl(px(5.))
-            .child(div().flex_none().size(px(6.)).rounded_full().bg(dot))
+            .pl(scaled(px(5.)))
+            .child(
+                div()
+                    .flex_none()
+                    .size(scaled(px(6.)))
+                    .rounded_full()
+                    .bg(dot),
+            )
             .child(status_text(palette.text_muted.hsla(), text))
     }
 }
@@ -236,8 +242,8 @@ const REVIEW_HINTS: [(&[&str], &str); 4] = [
 impl Render for KeyHints {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
-            .gap(px(14.))
-            .pr(px(5.))
+            .gap(scaled(px(14.)))
+            .pr(scaled(px(5.)))
             .when(self.reviewing, |this| {
                 this.children(
                     REVIEW_HINTS
