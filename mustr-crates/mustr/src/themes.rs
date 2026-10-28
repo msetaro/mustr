@@ -1,7 +1,7 @@
 use anyhow::Context as _;
 use fs::Fs;
 use futures::StreamExt as _;
-use gpui::{App, AppContext as _, TaskExt as _};
+use gpui::{App, TaskExt as _};
 use language::LanguageRegistry;
 use std::{sync::Arc, time::Duration};
 use theme::{ActiveTheme as _, GlobalTheme, ThemeRegistry};
@@ -53,6 +53,8 @@ fn load_embedded_fonts(cx: &App) -> anyhow::Result<()> {
 // Copied from crates/zed/src/main.rs (`prewarm_fonts`).
 #[cfg(target_os = "linux")]
 fn prewarm_fonts(cx: &mut App) {
+    use gpui::AppContext as _;
+
     let theme_settings = theme::theme_settings(cx);
     let ui_font = theme_settings.ui_font(cx).clone();
     let buffer_font = theme_settings.buffer_font(cx).clone();
