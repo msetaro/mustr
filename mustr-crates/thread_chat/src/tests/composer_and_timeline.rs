@@ -560,9 +560,19 @@ async fn messages_and_tools_show_their_images(cx: &mut TestAppContext) {
     });
     cx.run_until_parked();
 
+    // The header's banners follow T3's server config too (`usage.rs`).
+    let asset_calls = || {
+        backend
+            .raw_calls
+            .lock()
+            .iter()
+            .filter(|call| call.tag == "assets.createUrl")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
     // The message's image loads by its attachment id alone, as T3's timeline asks for it.
     assert_eq!(
-        *backend.raw_calls.lock(),
+        asset_calls(),
         [asset_call(
             json!({ "_tag": "attachment", "attachmentId": "attachment-9" })
         )]
@@ -611,7 +621,7 @@ async fn messages_and_tools_show_their_images(cx: &mut TestAppContext) {
     cx.simulate_click(tool.center(), gpui::Modifiers::none());
     cx.run_until_parked();
     assert_eq!(
-        backend.raw_calls.lock()[1],
+        asset_calls()[1],
         asset_call(json!({
             "_tag": "tool-output-image",
             "threadId": THREAD,
@@ -625,7 +635,7 @@ async fn messages_and_tools_show_their_images(cx: &mut TestAppContext) {
     // Each image loads once.
     cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(1000.)));
     cx.run_until_parked();
-    assert_eq!(backend.raw_calls.lock().len(), 2);
+    assert_eq!(asset_calls().len(), 2);
     let _ = AssetKey::ToolImage {
         item_id: "i4b".into(),
         index: 0,

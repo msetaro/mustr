@@ -97,6 +97,8 @@ impl ThreadView {
         for (id, text) in texts {
             self.update_markdown(id, text, cx);
         }
+        // Where messages can be rewound to, and whether a rewind in flight has happened.
+        self.sync_history();
     }
 
     fn update_markdown(&mut self, id: String, text: String, cx: &mut Context<Self>) {
@@ -559,6 +561,7 @@ impl ThreadView {
             ItemKind::UserMessage { text, images, .. } => {
                 let thumbnails =
                     (!images.is_empty()).then(|| self.render_message_images(&item.id, images, cx));
+                let edit = self.render_edit_from_here(item, cx);
                 let copy = self.render_copy_message(item, text, cx);
                 h_flex()
                     .group(SharedString::from(format!("message-{}", item.id)))
@@ -579,13 +582,14 @@ impl ThreadView {
                             })
                             .children(thumbnails),
                     )
-                    .children(copy)
+                    .child(v_flex().flex_none().children(copy).children(edit))
                     .into_any_element()
             }
             ItemKind::AssistantMessage { streaming, text } => {
                 let copy = (!*streaming)
                     .then(|| self.render_copy_message(item, text, cx))
                     .flatten();
+                let fork = self.render_fork(item, cx);
                 h_flex()
                     .group(SharedString::from(format!("message-{}", item.id)))
                     .items_start()
@@ -606,7 +610,7 @@ impl ThreadView {
                                 )
                             }),
                     )
-                    .children(copy)
+                    .child(v_flex().flex_none().children(copy).children(fork))
                     .into_any_element()
             }
             ItemKind::Plan {

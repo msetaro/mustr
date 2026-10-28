@@ -88,6 +88,8 @@ pub struct ThreadView {
     pub(crate) images: crate::attachments::Images,
     /// The composer's and timeline's other state: copied messages, prompt history, drafts.
     pub(crate) composer_state: crate::composer::ComposerState,
+    /// Rewinds and forks in flight, and the agent's status and usage banners (`history.rs`).
+    pub(crate) history: crate::history::HistoryState,
     _load: Option<Task<()>>,
     _follow: Option<Task<()>>,
     pub(crate) _tasks: Vec<Task<()>>,
@@ -195,6 +197,7 @@ impl ThreadView {
             error: None,
             images: Default::default(),
             composer_state: Default::default(),
+            history: Default::default(),
             _load: None,
             _follow: None,
             _tasks: Vec::new(),
