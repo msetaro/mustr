@@ -11118,6 +11118,7 @@ dependencies = [
  "node_runtime",
  "parking_lot",
  "paths",
+ "picker",
  "platform_title_bar",
  "pretty_assertions",
  "project",

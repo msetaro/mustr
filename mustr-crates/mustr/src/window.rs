@@ -335,6 +335,9 @@ fn add_toolbar_items(
             // Work packages add their toolbar items here, each package under its own label
             // (`mustr-docs/PARITY.md` §3).
             // WP4, ship the work:
+            let thread_toolbar =
+                cx.new(|_| crate::thread_toolbar::ThreadToolbar::new(workspace.weak_handle()));
+            toolbar.add_item(thread_toolbar, window, cx);
         })
     });
 }

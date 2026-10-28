@@ -48,6 +48,7 @@ mustr_ui = { path = "../mustr_ui" }
 node_runtime.workspace = true
 parking_lot.workspace = true
 paths.workspace = true
+picker.workspace = true
 platform_title_bar.workspace = true
 project.workspace = true
 rayon.workspace = true
