@@ -1,0 +1,1 @@
+[{"_tag":"EnvironmentHttpForbiddenError","message":"[W"},{"_tag":"EnvironmentScopeRequiredError","code":"insufficient_scope","requiredScope":"source-control:write","requiredPermission":"-1","traceId":"�"},{"_tag":"EnvironmentScopeRequiredError","code":"insufficient_scope","requiredScope":"preview:operate","requiredPermission":"�","traceId":"😀"}]

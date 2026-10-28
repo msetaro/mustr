@@ -1,0 +1,5 @@
+# Build output of the generator (it is its own cargo workspace).
+/typify-gen/target/
+# Scratch space, if MUSTR_T3_CODEGEN_WORK points here.
+/work/
+node_modules/

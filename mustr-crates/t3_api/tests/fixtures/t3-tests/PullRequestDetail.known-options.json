@@ -1,0 +1,90 @@
+{
+  "provider": "github",
+  "host": "github.com",
+  "projectId": "project-1",
+  "projectTitle": "t3code",
+  "repository": "pingdotgg/t3code",
+  "number": 1,
+  "title": "Add a pull requests page",
+  "url": "https://github.com/pingdotgg/t3code/pull/1",
+  "author": {
+    "login": "octocat",
+    "name": null,
+    "avatarUrl": null
+  },
+  "headBranch": "feat/page",
+  "baseBranch": "main",
+  "state": "open",
+  "isDraft": false,
+  "mergeability": "mergeable",
+  "additions": 1,
+  "deletions": 0,
+  "createdAt": "2026-07-01T00:00:00Z",
+  "updatedAt": "2026-07-02T00:00:00Z",
+  "viewerReviewRequested": false,
+  "labels": [
+    {
+      "name": "backend",
+      "color": null
+    }
+  ],
+  "workspaceRoot": "/workspace/t3code",
+  "body": "",
+  "changedFiles": 1,
+  "mergedAt": null,
+  "closedAt": null,
+  "reviewers": [],
+  "checks": [],
+  "mergeCapabilities": {
+    "merge": true,
+    "squash": true,
+    "rebase": true
+  },
+  "capabilities": {
+    "diff": true,
+    "comment": true,
+    "actions": [
+      "close",
+      "merge"
+    ],
+    "mergeMethods": [
+      "squash",
+      "merge"
+    ],
+    "search": true,
+    "review": {
+      "inlineComment": true,
+      "reply": true,
+      "resolve": true,
+      "verdicts": [
+        "request-changes",
+        "approve"
+      ]
+    },
+    "reviewers": {
+      "request": true,
+      "listCandidates": true
+    },
+    "updateMethods": [
+      "rebase",
+      "merge"
+    ]
+  },
+  "viewerPermissions": {
+    "actions": [
+      "close",
+      "merge"
+    ],
+    "verdicts": [
+      "request-changes",
+      "approve"
+    ],
+    "updateMethods": [
+      "rebase",
+      "merge"
+    ],
+    "comment": true,
+    "resolve": true,
+    "requestReviewers": true
+  }
+}

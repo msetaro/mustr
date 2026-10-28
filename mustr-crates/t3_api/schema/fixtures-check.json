@@ -1,0 +1,9 @@
+{
+  "ExecutionEnvironmentDescriptor.future-manager.json": "INVALID: SchemaError(Expected JSON value   at [\"capabilities\"][\"serverInstallation\"])",
+  "ExecutionEnvironmentDescriptor.json": "ok",
+  "ExecutionEnvironmentDescriptor.npm-global.json": "ok",
+  "ExecutionEnvironmentDescriptor.npx.json": "ok",
+  "PullRequestDetail.known-options.json": "ok",
+  "PullRequestDetail.newer-server.json": "ok",
+  "PullRequestListResult.json": "ok"
+}

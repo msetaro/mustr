@@ -1,0 +1,1 @@
+[{"_tag":"EnvironmentAuthorizationError","message":"[W","requiredScope":"settings:write"},{"_tag":"EnvironmentAuthorizationError","message":"","requiredScope":"source-control:write","requiredPermission":"-1"},{"_tag":"EnvironmentAuthorizationError","message":"","requiredScope":"relay:write","requiredPermission":"�"}]

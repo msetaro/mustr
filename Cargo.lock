@@ -17819,6 +17819,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "t3_api"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "t3_client"
 version = "0.1.0"
 dependencies = [
