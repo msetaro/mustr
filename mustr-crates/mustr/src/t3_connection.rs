@@ -1,5 +1,7 @@
-//! mustr's connection to a T3 Code server: checking the server, pairing with it, keeping the
-//! bearer token, and holding the RPC socket open.
+//! mustr's connection to a T3 Code server: finding or starting the engine for the configured
+//! mode (`crate::t3_engine`), checking the server, signing in (pairing with the user's T3 Code,
+//! or the embedded engine's bootstrap token), keeping the bearer token, and holding the RPC
+//! socket open.
 //!
 //! mustr asks for exactly [`SCOPES`]: reading orchestration (pull requests, threads), driving
 //! agents (messages, approvals, new threads), and writing to pull requests (comments, reviews,
@@ -9,14 +11,13 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use futures::{AsyncReadExt as _, FutureExt as _, future::BoxFuture};
 use gpui::{
     App, AppContext as _, AsyncApp, BackgroundExecutor, Context, Entity, Global, SharedString,
-    Task, WeakEntity,
+    Subscription, Task, WeakEntity,
 };
 use http_client::{AsyncBody, HttpClient, Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
-    ffi::OsStr,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -25,13 +26,21 @@ use t3_client::{
     AccessToken, ClientMetadata, EnvironmentDescriptor, PullRequestFile, PullRequestRef,
     RpcConnection, Scope,
 };
+use t3_runtime::{
+    install::{InstallStep, Installer},
+    installed::{self, InstallState},
+    release::{Arch, Os, Target},
+};
 use util::ResultExt as _;
 
-use crate::inbox::PullRequestList;
+use crate::{
+    inbox::PullRequestList,
+    t3_engine::{EmbeddedEngine, EngineState, T3Mode, executor_sleep},
+};
 
 pub const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:3773";
 /// Overrides the server URL from settings (the `--t3-server` flag overrides both).
-const SERVER_URL_ENV: &str = "MUSTR_T3_SERVER";
+pub const SERVER_URL_ENV: &str = "MUSTR_T3_SERVER";
 /// Stores tokens in this JSON file instead of the OS keychain. For tests and headless runs
 /// only: the file is protected by file permissions alone.
 pub const CREDENTIALS_FILE_ENV: &str = "MUSTR_CREDENTIALS_FILE";
@@ -96,81 +105,6 @@ fn server_url_from_settings(text: &str) -> Option<String> {
     settings.get("t3")?.get("url")?.as_str().map(str::to_string)
 }
 
-/// Where T3 keeps its data: `$T3CODE_HOME`, or `~/.t3`.
-pub fn t3_home() -> Option<PathBuf> {
-    std::env::var_os("T3CODE_HOME")
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".t3")))
-}
-
-fn t3_executable_name() -> &'static str {
-    if cfg!(windows) { "t3.exe" } else { "t3" }
-}
-
-/// Finds a local T3 CLI to mint a pairing credential with.
-///
-/// The CLI opens T3's database with its own migrations, so the runtime matching the server's
-/// version comes first (`mustr-docs/T3-RUNTIME.md` §8). Then `t3` on `PATH`, which is T3's
-/// launcher, then the newest installed runtime.
-pub fn find_t3_cli(
-    t3_home: Option<&Path>,
-    path_env: Option<&OsStr>,
-    server_version: Option<&str>,
-) -> Option<PathBuf> {
-    let versions_dir = t3_home.map(|home| home.join("runtime").join("versions"));
-    if let (Some(versions_dir), Some(version)) = (&versions_dir, server_version)
-        // The version comes from the server, so it must not be able to name another directory.
-        && semver::Version::parse(version).is_ok()
-    {
-        let candidate = versions_dir.join(version).join(t3_executable_name());
-        if is_executable(&candidate) {
-            return Some(candidate);
-        }
-    }
-    if let Some(path_env) = path_env {
-        let on_path = std::env::split_paths(path_env)
-            .filter(|dir| dir.is_absolute())
-            .map(|dir| dir.join(t3_executable_name()))
-            .find(|candidate| is_executable(candidate));
-        if on_path.is_some() {
-            return on_path;
-        }
-    }
-    newest_runtime_cli(versions_dir.as_deref()?)
-}
-
-fn newest_runtime_cli(versions_dir: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(versions_dir)
-        .ok()?
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let version = semver::Version::parse(entry.file_name().to_str()?).ok()?;
-            let cli = entry.path().join(t3_executable_name());
-            is_executable(&cli).then_some((version, cli))
-        })
-        .max_by(|(left, _), (right, _)| left.cmp(right))
-        .map(|(_, cli)| cli)
-}
-
-fn is_executable(path: &Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
-}
-
 /// Runs `t3 auth pairing create` (argv only, no shell) and returns the one-time credential.
 async fn mint_pairing_credential(
     cli: &Path,
@@ -190,12 +124,8 @@ async fn mint_pairing_credential(
         .stdin(util::command::Stdio::null());
     // A mustr started from a T3 terminal inherits the T3 service's variables, which would make
     // the CLI act as the service (`mustr-docs/T3-RUNTIME.md` §10). `--base-dir` replaces them.
-    for (key, _) in std::env::vars_os() {
-        if let Some(key) = key.to_str()
-            && (key.starts_with("T3_") || key.starts_with("T3CODE_"))
-        {
-            command.env_remove(key);
-        }
+    for key in t3_runtime::scrubbed_env_keys(std::env::vars_os().map(|(key, _)| key)) {
+        command.env_remove(key);
     }
 
     let output = futures::select! {
@@ -433,6 +363,7 @@ pub struct T3Session {
     token: AccessToken,
     rpc: RpcConnection,
     descriptor: EnvironmentDescriptor,
+    kind: EngineKind,
 }
 
 impl T3Session {
@@ -702,14 +633,43 @@ fn parse_session_check(body: &[u8]) -> Result<SessionCheck> {
     })
 }
 
+/// Which engine a connection runs on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EngineKind {
+    /// The user's own T3 Code.
+    Installed,
+    /// mustr's own engine.
+    Embedded,
+    /// A T3 server at a URL.
+    External,
+}
+
+/// What the installed T3 Code needs before mustr can use it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EngineSetup {
+    /// No T3 Code on this computer. `unsupported` says why it can't be installed here.
+    NotInstalled { unsupported: Option<SharedString> },
+    /// Installed, but nothing runs it: no server, and no background service to start.
+    NotRunning { service_supported: bool },
+    /// It speaks another protocol than mustr.
+    Incompatible {
+        message: SharedString,
+        /// It's older than mustr, and `t3 update` can fix that.
+        can_update: bool,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConnectionStatus {
     Connecting(SharedString),
     /// Automatic pairing isn't possible; the user can paste a pairing credential.
     NeedsPairing(SharedString),
+    /// The installed T3 Code needs the user's go-ahead (install, start, update) first.
+    NeedsSetup(EngineSetup),
     Connected {
         environment: SharedString,
         server_version: Option<SharedString>,
+        engine: EngineKind,
     },
     Failed(SharedString),
 }
@@ -726,10 +686,30 @@ enum ConnectOutcome {
         driver: BoxFuture<'static, Result<()>>,
     },
     NeedsPairing(String),
+    NeedsSetup(EngineSetup),
 }
+
+/// How a connection gets its token.
+enum Auth {
+    /// A stored token, else pairing through the local `t3` CLI, else a pasted credential.
+    Pair(Option<String>),
+    /// The embedded engine's bootstrap token: no pairing, and nothing stored.
+    Bootstrap(String),
+}
+
+/// Makes the `t3` commands that change the user's T3 Code (`t3 service install`, `t3 service
+/// restart`, `t3 update`) fail locally instead of running, for test runs on a machine with a
+/// real T3 Code.
+pub const DRY_RUN_SERVICE_ENV: &str = "MUSTR_DRY_RUN_SERVICE";
+/// How long T3's service gets to come up after mustr starts, installs, or updates it.
+const SERVICE_START_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// The app's one T3 connection, shared by every window.
 pub struct T3Connection {
+    mode: T3Mode,
+    /// The installed T3 Code can't be used, so this launch runs mustr's own engine.
+    fallback: bool,
+    external_url: Result<Url, SharedString>,
     server_url: Option<Url>,
     status: ConnectionStatus,
     session: Option<Arc<T3Session>>,
@@ -740,6 +720,12 @@ pub struct T3Connection {
     driver_task: Option<Task<()>>,
     current_rpc: CurrentRpc,
     current_session: CurrentSession,
+    engine: Option<Entity<EmbeddedEngine>>,
+    /// The engine run the current session (or attempt) belongs to.
+    engine_run: Option<usize>,
+    /// mustr started the installed T3's service once already this launch.
+    service_started: bool,
+    _engine_subscription: Option<Subscription>,
 }
 
 /// The RPC connection of whichever session is current, for work that outlives a reconnect (such
@@ -776,9 +762,9 @@ struct GlobalT3Connection(Entity<T3Connection>);
 
 impl Global for GlobalT3Connection {}
 
-pub fn init(server_url: Result<Url>, cx: &mut App) {
+pub fn init(mode: T3Mode, external_url: Result<Url>, cx: &mut App) {
     let connection = cx.new(|cx| {
-        let mut connection = T3Connection::new(server_url);
+        let mut connection = T3Connection::new(mode, external_url);
         connection.connect(None, cx);
         connection
     });
@@ -790,20 +776,23 @@ impl T3Connection {
         cx.global::<GlobalT3Connection>().0.clone()
     }
 
-    fn new(server_url: Result<Url>) -> Self {
-        let (server_url, status) = match server_url {
-            Ok(url) => (Some(url), ConnectionStatus::Connecting("Starting".into())),
-            Err(error) => (None, ConnectionStatus::Failed(format!("{error:#}").into())),
-        };
+    fn new(mode: T3Mode, external_url: Result<Url>) -> Self {
         Self {
-            server_url,
-            status,
+            mode,
+            fallback: false,
+            external_url: external_url.map_err(|error| format!("{error:#}").into()),
+            server_url: None,
+            status: ConnectionStatus::Connecting("Starting".into()),
             session: None,
             generation: 0,
             connect_task: None,
             driver_task: None,
             current_rpc: CurrentRpc::default(),
             current_session: CurrentSession::default(),
+            engine: None,
+            engine_run: None,
+            service_started: false,
+            _engine_subscription: None,
         }
     }
 
@@ -811,8 +800,33 @@ impl T3Connection {
         &self.status
     }
 
+    /// The mode from settings.
+    pub fn mode(&self) -> T3Mode {
+        self.mode
+    }
+
+    /// The mode in use: the embedded engine when the installed T3 Code fell back to it.
+    pub fn effective_mode(&self) -> T3Mode {
+        if self.fallback {
+            T3Mode::Embedded
+        } else {
+            self.mode
+        }
+    }
+
+    pub fn is_fallback(&self) -> bool {
+        self.fallback
+    }
+
     pub fn server_url(&self) -> Option<&Url> {
         self.server_url.as_ref()
+    }
+
+    /// The embedded engine's log, once it has started.
+    pub fn engine_log_file(&self, cx: &App) -> Option<PathBuf> {
+        self.engine
+            .as_ref()
+            .map(|engine| engine.read(cx).log_file())
     }
 
     pub fn generation(&self) -> usize {
@@ -832,6 +846,12 @@ impl T3Connection {
     }
 
     pub fn reconnect(&mut self, cx: &mut Context<Self>) {
+        if self.effective_mode() == T3Mode::Embedded
+            && let Some(engine) = self.engine.clone()
+            && matches!(engine.read(cx).state(), EngineState::Failed(_))
+        {
+            engine.update(cx, |engine, cx| engine.restart(cx));
+        }
         self.connect(None, cx);
     }
 
@@ -839,22 +859,234 @@ impl T3Connection {
         self.connect(Some(credential), cx);
     }
 
-    fn connect(&mut self, pairing_credential: Option<String>, cx: &mut Context<Self>) {
+    /// Runs mustr's own engine for the rest of this launch, instead of the installed T3 Code.
+    pub fn use_embedded(&mut self, cx: &mut Context<Self>) {
+        self.fallback = true;
+        self.connect(None, cx);
+    }
+
+    /// Installs T3 Code (the version mustr is built for) the way T3's installer does, sets up its
+    /// background service with `t3 service install`, and connects to it.
+    pub fn install_engine(&mut self, cx: &mut Context<Self>) {
+        let generation = self.begin_attempt(cx);
+        self.set_status(
+            ConnectionStatus::Connecting("Installing T3 Code".into()),
+            cx,
+        );
+        let http = cx.http_client();
+        self.connect_task = Some(cx.spawn(async move |this, cx| {
+            let result = install_t3(&this, generation, http, cx).await;
+            this.update(cx, |this, cx| this.after_setup(generation, result, cx))
+                .ok();
+        }));
+    }
+
+    /// Sets up the installed T3 Code's background service (`t3 service install`), which also
+    /// starts it, and connects to it.
+    pub fn run_in_background(&mut self, cx: &mut Context<Self>) {
+        let generation = self.begin_attempt(cx);
+        self.set_status(
+            ConnectionStatus::Connecting("Setting up T3 Code's background service".into()),
+            cx,
+        );
+        let http = cx.http_client();
+        self.connect_task = Some(cx.spawn(async move |this, cx| {
+            let result = async {
+                let home = installed_home()?;
+                let cli =
+                    installed::find_t3_cli(Some(&home), std::env::var_os("PATH").as_deref(), None)
+                        .context("No T3 Code CLI found on this computer")?;
+                run_t3(&installed::CliCommand::service_install(&cli, &home), cx).await?;
+                wait_for_installed_server(&home, http.as_ref(), cx).await
+            }
+            .await;
+            this.update(cx, |this, cx| this.after_setup(generation, result, cx))
+                .ok();
+        }));
+    }
+
+    /// Updates the installed T3 Code to the version mustr is built for (`t3 update`), which also
+    /// restarts its service, and connects to it.
+    pub fn update_installed(&mut self, cx: &mut Context<Self>) {
+        let generation = self.begin_attempt(cx);
+        let version = t3_client::pinned_server_version();
+        self.set_status(
+            ConnectionStatus::Connecting(format!("Updating T3 Code to {version}").into()),
+            cx,
+        );
+        let http = cx.http_client();
+        self.connect_task = Some(cx.spawn(async move |this, cx| {
+            let result = async {
+                let home = installed_home()?;
+                let server_version =
+                    installed::read_server_record(&home).and_then(|record| record.server_version);
+                let cli = installed::find_t3_cli(
+                    Some(&home),
+                    std::env::var_os("PATH").as_deref(),
+                    server_version.as_deref(),
+                )
+                .context("No T3 Code CLI found on this computer")?;
+                run_t3(&installed::CliCommand::update(&cli, version, &home), cx).await?;
+                wait_for_installed_server(&home, http.as_ref(), cx).await
+            }
+            .await;
+            this.update(cx, |this, cx| this.after_setup(generation, result, cx))
+                .ok();
+        }));
+    }
+
+    /// After installing, starting, or updating the installed T3 Code: connect, or show why not.
+    fn after_setup(&mut self, generation: usize, result: Result<()>, cx: &mut Context<Self>) {
+        if self.generation != generation {
+            return;
+        }
+        match result {
+            Ok(()) => self.connect(None, cx),
+            Err(error) => {
+                log::error!("couldn't set up T3 Code: {error:#}");
+                self.set_status(ConnectionStatus::Failed(format!("{error:#}").into()), cx);
+            }
+        }
+    }
+
+    /// Starts a new attempt: drops the current session and supersedes running tasks.
+    fn begin_attempt(&mut self, cx: &mut Context<Self>) -> usize {
         self.generation += 1;
-        let generation = self.generation;
         self.current_rpc.set(None);
         self.current_session.set(None);
         if let Some(session) = self.session.take() {
             session.rpc.close();
         }
         self.driver_task = None;
-        let Some(server_url) = self.server_url.clone() else {
-            cx.notify();
+        self.connect_task = None;
+        cx.notify();
+        self.generation
+    }
+
+    fn set_status(&mut self, status: ConnectionStatus, cx: &mut Context<Self>) {
+        self.status = status;
+        cx.notify();
+    }
+
+    fn connect(&mut self, pasted_credential: Option<String>, cx: &mut Context<Self>) {
+        let generation = self.begin_attempt(cx);
+        let http = cx.http_client();
+        match self.effective_mode() {
+            T3Mode::Embedded => {
+                self.server_url = None;
+                self.engine_run = None;
+                let engine = self.ensure_engine(cx);
+                engine.update(cx, |engine, cx| engine.start(cx));
+                self.engine_changed(cx);
+            }
+            T3Mode::External => {
+                let server_url = match self.external_url.clone() {
+                    Ok(url) => url,
+                    Err(error) => {
+                        self.set_status(ConnectionStatus::Failed(error), cx);
+                        return;
+                    }
+                };
+                self.server_url = Some(server_url.clone());
+                self.set_status(
+                    ConnectionStatus::Connecting("Checking the T3 server".into()),
+                    cx,
+                );
+                self.connect_task = Some(cx.spawn(async move |this, cx| {
+                    let outcome = establish(
+                        &this,
+                        generation,
+                        server_url,
+                        http,
+                        CredentialStore::from_env(),
+                        Auth::Pair(pasted_credential),
+                        EngineKind::External,
+                        cx,
+                    )
+                    .await;
+                    this.update(cx, |this, cx| this.finish_attempt(generation, outcome, cx))
+                        .ok();
+                }));
+            }
+            T3Mode::Installed => {
+                self.set_status(
+                    ConnectionStatus::Connecting("Looking for T3 Code".into()),
+                    cx,
+                );
+                let start_service = !self.service_started;
+                self.connect_task = Some(cx.spawn(async move |this, cx| {
+                    let outcome = connect_installed(
+                        &this,
+                        generation,
+                        http,
+                        pasted_credential,
+                        start_service,
+                        cx,
+                    )
+                    .await;
+                    this.update(cx, |this, cx| this.finish_attempt(generation, outcome, cx))
+                        .ok();
+                }));
+            }
+        }
+    }
+
+    fn ensure_engine(&mut self, cx: &mut Context<Self>) -> Entity<EmbeddedEngine> {
+        if let Some(engine) = &self.engine {
+            return engine.clone();
+        }
+        let engine = cx.new(EmbeddedEngine::new);
+        self._engine_subscription =
+            Some(cx.observe(&engine, |this, _, cx| this.engine_changed(cx)));
+        self.engine = Some(engine.clone());
+        engine
+    }
+
+    /// Follows the embedded engine: connects to each run once it's ready, and shows its state
+    /// until then.
+    fn engine_changed(&mut self, cx: &mut Context<Self>) {
+        if self.effective_mode() != T3Mode::Embedded {
+            return;
+        }
+        let Some(engine) = self.engine.clone() else {
             return;
         };
-        self.status = ConnectionStatus::Connecting("Checking the T3 server".into());
-        cx.notify();
+        let state = engine.read(cx).state().clone();
+        let status = match state {
+            EngineState::Ready { url, run, .. } => {
+                if self.engine_run != Some(run) {
+                    self.engine_run = Some(run);
+                    let token = engine.read(cx).bootstrap_token();
+                    self.connect_embedded(url, token, cx);
+                }
+                return;
+            }
+            EngineState::Idle | EngineState::Starting => {
+                ConnectionStatus::Connecting("Starting the agents engine".into())
+            }
+            EngineState::Installing(step) => ConnectionStatus::Connecting(
+                format!("Setting up the agents engine · {step}").into(),
+            ),
+            EngineState::Restarting { attempt, reason } => ConnectionStatus::Connecting(
+                format!("Restarting the agents engine (attempt {attempt}) · {reason}").into(),
+            ),
+            EngineState::Failed(error) => ConnectionStatus::Failed(error),
+        };
+        // The session's engine is gone or restarting.
+        if self.session.is_some() {
+            self.begin_attempt(cx);
+        }
+        self.engine_run = None;
+        self.set_status(status, cx);
+    }
 
+    fn connect_embedded(&mut self, server_url: Url, token: String, cx: &mut Context<Self>) {
+        let generation = self.begin_attempt(cx);
+        self.server_url = Some(server_url.clone());
+        self.set_status(
+            ConnectionStatus::Connecting("Connecting to the agents engine".into()),
+            cx,
+        );
         let http = cx.http_client();
         self.connect_task = Some(cx.spawn(async move |this, cx| {
             let outcome = establish(
@@ -863,42 +1095,49 @@ impl T3Connection {
                 server_url,
                 http,
                 CredentialStore::from_env(),
-                pairing_credential,
+                Auth::Bootstrap(token),
+                EngineKind::Embedded,
                 cx,
             )
             .await;
-            this.update(cx, |this, cx| {
-                if this.generation != generation {
-                    return;
-                }
-                this.status = match outcome {
-                    Ok(ConnectOutcome::Connected { session, driver }) => {
-                        this.watch_driver(generation, driver, cx);
-                        let status = ConnectionStatus::Connected {
-                            environment: session.descriptor.label.clone().into(),
-                            server_version: session
-                                .descriptor
-                                .server_version
-                                .clone()
-                                .map(Into::into),
-                        };
-                        this.current_rpc.set(Some(session.rpc.clone()));
-                        this.current_session.set(Some(session.clone()));
-                        this.session = Some(session);
-                        status
-                    }
-                    Ok(ConnectOutcome::NeedsPairing(reason)) => {
-                        ConnectionStatus::NeedsPairing(reason.into())
-                    }
-                    Err(error) => {
-                        log::error!("couldn't connect to T3: {error:#}");
-                        ConnectionStatus::Failed(format!("{error:#}").into())
-                    }
-                };
-                cx.notify();
-            })
-            .ok();
+            this.update(cx, |this, cx| this.finish_attempt(generation, outcome, cx))
+                .ok();
         }));
+    }
+
+    fn finish_attempt(
+        &mut self,
+        generation: usize,
+        outcome: Result<ConnectOutcome>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.generation != generation {
+            return;
+        }
+        let status = match outcome {
+            Ok(ConnectOutcome::Connected { session, driver }) => {
+                self.watch_driver(generation, driver, cx);
+                let status = ConnectionStatus::Connected {
+                    environment: session.descriptor.label.clone().into(),
+                    server_version: session.descriptor.server_version.clone().map(Into::into),
+                    engine: session.kind,
+                };
+                self.server_url = Some(session.server_url.clone());
+                self.current_rpc.set(Some(session.rpc.clone()));
+                self.current_session.set(Some(session.clone()));
+                self.session = Some(session);
+                status
+            }
+            Ok(ConnectOutcome::NeedsPairing(reason)) => {
+                ConnectionStatus::NeedsPairing(reason.into())
+            }
+            Ok(ConnectOutcome::NeedsSetup(setup)) => ConnectionStatus::NeedsSetup(setup),
+            Err(error) => {
+                log::error!("couldn't connect to T3: {error:#}");
+                ConnectionStatus::Failed(format!("{error:#}").into())
+            }
+        };
+        self.set_status(status, cx);
     }
 
     fn watch_driver(
@@ -922,29 +1161,276 @@ impl T3Connection {
                 this.session = None;
                 this.current_rpc.set(None);
                 this.current_session.set(None);
-                this.status =
-                    ConnectionStatus::Failed(format!("Disconnected from T3: {reason}").into());
-                cx.notify();
+                if this.effective_mode() == T3Mode::Embedded {
+                    // Reconnect to the engine once; if it's restarting, its state shows.
+                    this.engine_run = None;
+                    this.engine_changed(cx);
+                } else {
+                    this.set_status(
+                        ConnectionStatus::Failed(format!("Disconnected from T3: {reason}").into()),
+                        cx,
+                    );
+                }
             })
             .ok();
         }));
     }
 
-    fn set_step(&mut self, generation: usize, step: &'static str, cx: &mut Context<Self>) {
+    fn set_step(
+        &mut self,
+        generation: usize,
+        step: impl Into<SharedString>,
+        cx: &mut Context<Self>,
+    ) {
         if self.generation == generation {
-            self.status = ConnectionStatus::Connecting(step.into());
-            cx.notify();
+            self.set_status(ConnectionStatus::Connecting(step.into()), cx);
         }
     }
 }
 
+fn installed_home() -> Result<PathBuf> {
+    installed::t3_home().context("couldn't find your home directory")
+}
+
+/// The platform to look for runtimes as. T3 ships nothing for Intel Macs, but an install there
+/// (from npm) still names its executable `t3`.
+fn detection_target() -> Target {
+    Target::current().unwrap_or(Target {
+        os: if cfg!(windows) {
+            Os::Windows
+        } else if cfg!(target_os = "macos") {
+            Os::MacOs
+        } else {
+            Os::Linux
+        },
+        arch: Arch::Arm64,
+    })
+}
+
+/// Runs a `t3` command that changes the user's T3 Code, unless [`DRY_RUN_SERVICE_ENV`] is set.
+async fn run_t3(command: &installed::CliCommand, cx: &mut AsyncApp) -> Result<()> {
+    if std::env::var_os(DRY_RUN_SERVICE_ENV).is_some_and(|value| !value.is_empty()) {
+        log::warn!("{DRY_RUN_SERVICE_ENV} is set: not running `{command}`");
+        bail!("{DRY_RUN_SERVICE_ENV} is set, so mustr didn't run `{command}`");
+    }
+    let sleep = executor_sleep(cx);
+    let command = command.clone();
+    let stdout = cx
+        .background_spawn(async move { command.run(&sleep).await })
+        .await?;
+    log::info!("{}", truncate(stdout.trim(), 500));
+    Ok(())
+}
+
+/// Waits until a server runs from `home` and answers.
+async fn wait_for_installed_server(
+    home: &Path,
+    http: &dyn HttpClient,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let sleep = executor_sleep(cx);
+    let started = std::time::Instant::now();
+    loop {
+        let home_dir = home.to_path_buf();
+        let record = cx
+            .background_spawn(async move { installed::running_server(&home_dir) })
+            .await;
+        if let Some(record) = record
+            && t3_runtime::engine::answers(http, &record.origin, &sleep).await
+        {
+            return Ok(());
+        }
+        if started.elapsed() >= SERVICE_START_TIMEOUT {
+            bail!(
+                "T3 Code's background service didn't start within {}s. Its log is {}.",
+                SERVICE_START_TIMEOUT.as_secs(),
+                home.join("userdata/logs/boot-service.log").display()
+            );
+        }
+        cx.background_executor()
+            .timer(Duration::from_millis(500))
+            .await;
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum InstalledStep {
+    /// A server runs from the user's T3 home at this URL.
+    Connect(Url),
+    /// Start T3's installed service with this CLI (`t3 service restart`).
+    StartService(PathBuf),
+    /// The user has to choose (install, run in the background, or use mustr's own engine).
+    Setup(EngineSetup),
+}
+
+/// What to do about what [`installed::detect`] found. mustr starts an installed service once
+/// per launch on its own; it installs T3 Code, or a service, only when the user asks.
+fn installed_step(
+    state: InstallState,
+    start_service: bool,
+    unsupported: Option<SharedString>,
+) -> InstalledStep {
+    match state {
+        InstallState::NotInstalled => {
+            InstalledStep::Setup(EngineSetup::NotInstalled { unsupported })
+        }
+        InstallState::Installed {
+            server: Some(server),
+            ..
+        } => InstalledStep::Connect(server.origin),
+        InstallState::Installed {
+            server: None,
+            service_installed: true,
+            cli: Some(cli),
+            ..
+        } if start_service => InstalledStep::StartService(cli),
+        InstallState::Installed {
+            service_supported, ..
+        } => InstalledStep::Setup(EngineSetup::NotRunning { service_supported }),
+    }
+}
+
+/// Why the installed T3 Code can't be used with this mustr, if it can't.
+fn incompatibility(descriptor: &EnvironmentDescriptor) -> Option<EngineSetup> {
+    let error = t3_client::check_protocol_compatibility(descriptor).err()?;
+    Some(EngineSetup::Incompatible {
+        message: format!("{error:#}").into(),
+        can_update: descriptor.protocol_version() < t3_client::ORCHESTRATION_PROTOCOL_VERSION,
+    })
+}
+
+/// Finds the user's own T3 Code and connects to its server, starting its service first when
+/// it's installed but stopped.
+async fn connect_installed(
+    this: &WeakEntity<T3Connection>,
+    generation: usize,
+    http: Arc<dyn HttpClient>,
+    pasted_credential: Option<String>,
+    start_service: bool,
+    cx: &mut AsyncApp,
+) -> Result<ConnectOutcome> {
+    let home = installed_home()?;
+    let state = cx
+        .background_spawn({
+            let home = home.clone();
+            async move {
+                installed::detect(
+                    &home,
+                    dirs::home_dir().as_deref(),
+                    std::env::var_os("PATH").as_deref(),
+                    detection_target(),
+                )
+            }
+        })
+        .await;
+    let unsupported = Target::current()
+        .err()
+        .map(|error| format!("{error:#}").into());
+    let server_url = match installed_step(state, start_service, unsupported) {
+        InstalledStep::Connect(url) => url,
+        InstalledStep::Setup(setup) => return Ok(ConnectOutcome::NeedsSetup(setup)),
+        InstalledStep::StartService(cli) => {
+            this.update(cx, |this, cx| {
+                this.service_started = true;
+                this.set_step(generation, "Starting T3 Code's background service", cx);
+            })?;
+            run_t3(&installed::CliCommand::service_restart(&cli, &home), cx).await?;
+            wait_for_installed_server(&home, http.as_ref(), cx).await?;
+            installed::running_server(&home)
+                .context("T3 Code's service started, but its server isn't running")?
+                .origin
+        }
+    };
+
+    let descriptor = cx
+        .background_spawn({
+            let http = http.clone();
+            let server_url = server_url.clone();
+            async move { t3_client::fetch_descriptor(http.as_ref(), &server_url).await }
+        })
+        .await
+        .with_context(|| format!("Couldn't reach T3 Code at {server_url}"))?;
+    if let Some(setup) = incompatibility(&descriptor) {
+        return Ok(ConnectOutcome::NeedsSetup(setup));
+    }
+    establish(
+        this,
+        generation,
+        server_url,
+        http,
+        CredentialStore::from_env(),
+        Auth::Pair(pasted_credential),
+        EngineKind::Installed,
+        cx,
+    )
+    .await
+}
+
+/// Installs the pinned T3 Code into the user's T3 home the way `install.sh` does, then sets up
+/// its service with T3's own `t3 service install`.
+async fn install_t3(
+    this: &WeakEntity<T3Connection>,
+    generation: usize,
+    http: Arc<dyn HttpClient>,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let home = installed_home()?;
+    let target = Target::current()?;
+    let version = t3_client::pinned_server_version();
+    let sleep = executor_sleep(cx);
+    let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<InstallStep>();
+    let install = cx.background_spawn({
+        let installer = Installer::new(http.clone(), target, sleep);
+        let versions_dir = installed::versions_dir(&home);
+        async move {
+            let progress = move |step: InstallStep| {
+                progress_tx.unbounded_send(step).ok();
+            };
+            installer.ensure(&versions_dir, version, &progress).await
+        }
+    });
+    let mut install = install.fuse();
+    let runtime = loop {
+        futures::select! {
+            step = futures::StreamExt::next(&mut progress_rx) => if let Some(step) = step {
+                this.update(cx, |this, cx| {
+                    this.set_step(generation, format!("Installing T3 Code {version} · {}", step.describe()), cx)
+                })?;
+            },
+            result = install => break result.context("installing T3 Code")?,
+        }
+    };
+    let bin_dir = installed::default_bin_dir().context("couldn't find your home directory")?;
+    let launcher = installed::link_launcher(&runtime, &bin_dir, &home)?;
+    log::info!(
+        "installed T3 Code {version}; `t3` is {}",
+        launcher.display()
+    );
+    if installed::ServiceManager::for_os(target.os).is_none() {
+        // Nothing to run it in the background; the setup card offers mustr's own engine.
+        return Ok(());
+    }
+    this.update(cx, |this, cx| {
+        this.service_started = true;
+        this.set_step(generation, "Setting up T3 Code's background service", cx)
+    })?;
+    run_t3(
+        &installed::CliCommand::service_install(&runtime.executable, &home),
+        cx,
+    )
+    .await?;
+    wait_for_installed_server(&home, http.as_ref(), cx).await
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn establish(
     this: &WeakEntity<T3Connection>,
     generation: usize,
     server_url: Url,
     http: Arc<dyn HttpClient>,
     store: CredentialStore,
-    pasted_credential: Option<String>,
+    auth: Auth,
+    kind: EngineKind,
     cx: &mut AsyncApp,
 ) -> Result<ConnectOutcome> {
     let set_step = |step: &'static str, cx: &mut AsyncApp| {
@@ -962,98 +1448,51 @@ async fn establish(
         .with_context(|| format!("Couldn't reach T3 Code at {server_url}"))?;
     t3_client::check_protocol_compatibility(&descriptor)?;
 
-    let mut token = None;
-    // A token T3 still accepts but that lacks some of `SCOPES`, used if pairing again fails, so
-    // mustr stays connected (without the missing scopes) instead of losing the connection.
-    let mut fallback_token = None;
-    if pasted_credential.is_none() {
-        match store.read(&server_url, cx).await {
-            Ok(Some(stored)) if stored.is_usable_for(&descriptor.environment_id, unix_now()) => {
-                set_step("Signing in", cx);
-                let mut candidate = stored.to_access_token(unix_now());
-                let session = cx
-                    .background_spawn({
-                        let http = http.clone();
-                        let server_url = server_url.clone();
-                        let candidate = candidate.clone();
-                        async move { check_session(http.as_ref(), &server_url, &candidate).await }
-                    })
-                    .await
-                    .context("checking mustr's stored T3 token")?;
-                let (stored_use, granted_scope) = stored_token_use(&session, &stored.scope);
-                candidate.scope = granted_scope;
-                match stored_use {
-                    StoredTokenUse::Use => token = Some(candidate),
-                    StoredTokenUse::PairAgain => {
-                        log::info!(
-                            "mustr's stored T3 token lacks {}; pairing again",
-                            scope_list(&missing_scopes(candidate.scope.split_whitespace()))
-                        );
-                        fallback_token = Some(candidate);
+    let token = match auth {
+        Auth::Bootstrap(bootstrap_token) => {
+            set_step("Signing in to the agents engine", cx);
+            let token = cx
+                .background_spawn({
+                    let http = http.clone();
+                    let server_url = server_url.clone();
+                    async move {
+                        t3_client::exchange_pairing_credential(
+                            http.as_ref(),
+                            &server_url,
+                            &bootstrap_token,
+                            &SCOPES,
+                            &ClientMetadata::default(),
+                        )
+                        .await
                     }
-                    StoredTokenUse::Discard => {
-                        log::info!("T3 no longer accepts mustr's stored token; pairing again");
-                        store.delete(&server_url, cx).await.log_err();
-                    }
-                }
-            }
-            Ok(Some(_)) => {
-                log::info!(
-                    "mustr's stored T3 token is expired or for another server; pairing again"
+                })
+                .await
+                .context("The agents engine didn't accept mustr's sign-in")?;
+            let missing = missing_scopes(token.scope.split_whitespace());
+            if !missing.is_empty() {
+                log::warn!(
+                    "the agents engine granted mustr only {:?}, without {}",
+                    token.scope,
+                    scope_list(&missing)
                 );
-                store.delete(&server_url, cx).await.log_err();
             }
-            Ok(None) => {}
-            Err(error) => log::warn!("couldn't read mustr's stored T3 token: {error:#}"),
+            token
         }
-    }
-
-    let token = match token {
-        Some(token) => token,
-        None => {
-            let paired = pair(
+        Auth::Pair(pasted_credential) => {
+            match stored_or_paired_token(
                 &server_url,
                 &http,
                 &descriptor,
+                &store,
                 pasted_credential,
                 &set_step,
                 cx,
             )
-            .await;
-            let access_token = match (paired, fallback_token) {
-                (Ok(access_token), _) => {
-                    let stored =
-                        StoredToken::new(&descriptor.environment_id, &access_token, unix_now());
-                    if let Err(error) = store.write(&server_url, &stored, cx).await {
-                        log::error!(
-                            "couldn't save the T3 token, so mustr will pair again next launch: \
-                             {error:#}"
-                        );
-                    }
-                    access_token
-                }
-                (Err(failure), Some(fallback)) => {
-                    log::warn!(
-                        "couldn't pair again ({}); staying connected without {}",
-                        failure.message(),
-                        scope_list(&missing_scopes(fallback.scope.split_whitespace()))
-                    );
-                    fallback
-                }
-                (Err(PairingFailure::NeedsPairing(reason)), None) => {
-                    return Ok(ConnectOutcome::NeedsPairing(reason));
-                }
-                (Err(PairingFailure::Failed(error)), None) => return Err(error),
-            };
-            let missing = missing_scopes(access_token.scope.split_whitespace());
-            if !missing.is_empty() {
-                log::warn!(
-                    "T3 granted mustr only {:?}, without {}",
-                    access_token.scope,
-                    scope_list(&missing)
-                );
+            .await?
+            {
+                Ok(token) => token,
+                Err(reason) => return Ok(ConnectOutcome::NeedsPairing(reason)),
             }
-            access_token
         }
     };
 
@@ -1072,7 +1511,7 @@ async fn establish(
         .await
         .context("opening the T3 connection")?;
     log::info!(
-        "Connected to T3 environment {} ({})",
+        "Connected to T3 environment {} ({}, {kind:?})",
         descriptor.label,
         descriptor
             .server_version
@@ -1086,9 +1525,107 @@ async fn establish(
             token,
             rpc,
             descriptor,
+            kind,
         }),
         driver,
     })
+}
+
+/// A token for [`SCOPES`]: the stored one if T3 still accepts it, else a new pairing. `Err` holds
+/// why the user has to paste a credential.
+async fn stored_or_paired_token(
+    server_url: &Url,
+    http: &Arc<dyn HttpClient>,
+    descriptor: &EnvironmentDescriptor,
+    store: &CredentialStore,
+    pasted_credential: Option<String>,
+    set_step: &impl Fn(&'static str, &mut AsyncApp),
+    cx: &mut AsyncApp,
+) -> Result<Result<AccessToken, String>> {
+    // A token T3 still accepts but that lacks some of `SCOPES`, used if pairing again fails, so
+    // mustr stays connected (without the missing scopes) instead of losing the connection.
+    let mut fallback_token = None;
+    if pasted_credential.is_none() {
+        match store.read(server_url, cx).await {
+            Ok(Some(stored)) if stored.is_usable_for(&descriptor.environment_id, unix_now()) => {
+                set_step("Signing in", cx);
+                let mut candidate = stored.to_access_token(unix_now());
+                let session = cx
+                    .background_spawn({
+                        let http = http.clone();
+                        let server_url = server_url.clone();
+                        let candidate = candidate.clone();
+                        async move { check_session(http.as_ref(), &server_url, &candidate).await }
+                    })
+                    .await
+                    .context("checking mustr's stored T3 token")?;
+                let (stored_use, granted_scope) = stored_token_use(&session, &stored.scope);
+                candidate.scope = granted_scope;
+                match stored_use {
+                    StoredTokenUse::Use => return Ok(Ok(candidate)),
+                    StoredTokenUse::PairAgain => {
+                        log::info!(
+                            "mustr's stored T3 token lacks {}; pairing again",
+                            scope_list(&missing_scopes(candidate.scope.split_whitespace()))
+                        );
+                        fallback_token = Some(candidate);
+                    }
+                    StoredTokenUse::Discard => {
+                        log::info!("T3 no longer accepts mustr's stored token; pairing again");
+                        store.delete(server_url, cx).await.log_err();
+                    }
+                }
+            }
+            Ok(Some(_)) => {
+                log::info!(
+                    "mustr's stored T3 token is expired or for another server; pairing again"
+                );
+                store.delete(server_url, cx).await.log_err();
+            }
+            Ok(None) => {}
+            Err(error) => log::warn!("couldn't read mustr's stored T3 token: {error:#}"),
+        }
+    }
+
+    let paired = pair(
+        server_url,
+        http,
+        descriptor,
+        pasted_credential,
+        set_step,
+        cx,
+    )
+    .await;
+    let access_token = match (paired, fallback_token) {
+        (Ok(access_token), _) => {
+            let stored = StoredToken::new(&descriptor.environment_id, &access_token, unix_now());
+            if let Err(error) = store.write(server_url, &stored, cx).await {
+                log::error!(
+                    "couldn't save the T3 token, so mustr will pair again next launch: {error:#}"
+                );
+            }
+            access_token
+        }
+        (Err(failure), Some(fallback)) => {
+            log::warn!(
+                "couldn't pair again ({}); staying connected without {}",
+                failure.message(),
+                scope_list(&missing_scopes(fallback.scope.split_whitespace()))
+            );
+            fallback
+        }
+        (Err(PairingFailure::NeedsPairing(reason)), None) => return Ok(Err(reason)),
+        (Err(PairingFailure::Failed(error)), None) => return Err(error),
+    };
+    let missing = missing_scopes(access_token.scope.split_whitespace());
+    if !missing.is_empty() {
+        log::warn!(
+            "T3 granted mustr only {:?}, without {}",
+            access_token.scope,
+            scope_list(&missing)
+        );
+    }
+    Ok(Ok(access_token))
 }
 
 enum PairingFailure {
@@ -1125,9 +1662,9 @@ async fn pair(
             let executor = cx.background_executor().clone();
             let minted = cx
                 .background_spawn(async move {
-                    let home = t3_home();
+                    let home = installed::t3_home();
                     let path_env = std::env::var_os("PATH");
-                    let cli = find_t3_cli(
+                    let cli = installed::find_t3_cli(
                         home.as_deref(),
                         path_env.as_deref(),
                         server_version.as_deref(),
@@ -1187,77 +1724,86 @@ fn scope_list(scopes: &[Scope]) -> String {
 mod tests {
     use super::*;
 
-    fn make_cli(dir: &Path) -> PathBuf {
-        std::fs::create_dir_all(dir).unwrap();
-        let cli = dir.join(t3_executable_name());
-        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        cli
-    }
-
     #[test]
-    fn finds_the_runtime_matching_the_server_first() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join(".t3");
-        let versions = home.join("runtime").join("versions");
-        let matching = make_cli(&versions.join("0.1.1"));
-        make_cli(&versions.join("0.1.10"));
-        let bin = temp.path().join("bin");
-        make_cli(&bin);
-
-        let path_env = std::env::join_paths([&bin]).unwrap();
+    fn the_installed_t3_is_used_started_or_set_up() {
+        let server = installed::ServerRecord {
+            pid: 1,
+            origin: Url::parse("http://127.0.0.1:3773").unwrap(),
+            server_version: Some("0.1.1".to_string()),
+            service_managed: true,
+        };
+        let cli = PathBuf::from("/home/someone/.t3/runtime/versions/0.1.1/t3");
+        let installed = |server: Option<installed::ServerRecord>, service_installed: bool| {
+            InstallState::Installed {
+                cli: Some(cli.clone()),
+                runtimes: Vec::new(),
+                server,
+                service_installed,
+                service_supported: true,
+            }
+        };
         assert_eq!(
-            find_t3_cli(Some(&home), Some(&path_env), Some("0.1.1")),
-            Some(matching)
+            installed_step(installed(Some(server.clone()), true), true, None),
+            InstalledStep::Connect(server.origin)
+        );
+        // A stopped service is started once per launch, then left to the user.
+        assert_eq!(
+            installed_step(installed(None, true), true, None),
+            InstalledStep::StartService(cli.clone())
+        );
+        assert_eq!(
+            installed_step(installed(None, true), false, None),
+            InstalledStep::Setup(EngineSetup::NotRunning {
+                service_supported: true
+            })
+        );
+        // No service: mustr never installs one without asking.
+        assert_eq!(
+            installed_step(installed(None, false), true, None),
+            InstalledStep::Setup(EngineSetup::NotRunning {
+                service_supported: true
+            })
+        );
+        assert_eq!(
+            installed_step(
+                InstallState::NotInstalled,
+                true,
+                Some("no Intel Macs".into())
+            ),
+            InstalledStep::Setup(EngineSetup::NotInstalled {
+                unsupported: Some("no Intel Macs".into())
+            })
         );
     }
 
     #[test]
-    fn falls_back_to_path_then_to_the_newest_runtime() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join(".t3");
-        let versions = home.join("runtime").join("versions");
-        make_cli(&versions.join("0.1.9"));
-        let newest = make_cli(&versions.join("0.1.10"));
-        make_cli(&versions.join("0.1.10-nightly.1"));
-        std::fs::create_dir_all(versions.join("not-a-version")).unwrap();
-        // A directory without the binary, e.g. an interrupted install.
-        std::fs::create_dir_all(versions.join("0.3.0")).unwrap();
-        let bin = temp.path().join("bin");
-        let on_path = make_cli(&bin);
-        let path_env = std::env::join_paths([temp.path().join("empty"), bin]).unwrap();
-
-        // The server's version isn't installed, so `t3` on PATH wins.
+    fn older_t3s_can_be_updated_and_newer_ones_need_a_newer_mustr() {
+        let descriptor = |protocol| EnvironmentDescriptor {
+            environment_id: "e".to_string(),
+            label: "ironforge".to_string(),
+            orchestration_protocol_version: protocol,
+            server_version: Some("0.0.40".to_string()),
+            capabilities: Value::Null,
+        };
         assert_eq!(
-            find_t3_cli(Some(&home), Some(&path_env), Some("0.4.0")),
-            Some(on_path)
+            incompatibility(&descriptor(Some(t3_client::ORCHESTRATION_PROTOCOL_VERSION))),
+            None
         );
-        // Without one on PATH: the newest by semver, not by string order ("0.1.9" > "0.1.10").
-        let empty_path = std::env::join_paths([temp.path().join("empty")]).unwrap();
-        assert_eq!(
-            find_t3_cli(Some(&home), Some(&empty_path), None),
-            Some(newest)
-        );
-    }
-
-    #[test]
-    fn ignores_server_versions_that_are_paths_and_non_executables() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path().join(".t3");
-        let versions = home.join("runtime").join("versions");
-        make_cli(&temp.path().join("evil"));
-        let not_executable = versions.join("0.1.1");
-        std::fs::create_dir_all(&not_executable).unwrap();
-        std::fs::write(not_executable.join(t3_executable_name()), "").unwrap();
-
-        assert_eq!(find_t3_cli(Some(&home), None, Some("../../evil")), None);
-        #[cfg(unix)]
-        assert_eq!(find_t3_cli(Some(&home), None, Some("0.1.1")), None);
-        assert_eq!(find_t3_cli(None, None, Some("0.1.1")), None);
+        let Some(EngineSetup::Incompatible {
+            message,
+            can_update,
+        }) = incompatibility(&descriptor(None))
+        else {
+            panic!("protocol 1 is incompatible");
+        };
+        assert!(can_update);
+        assert!(message.contains("Update T3 Code"), "{message}");
+        let Some(EngineSetup::Incompatible { can_update, .. }) = incompatibility(&descriptor(
+            Some(t3_client::ORCHESTRATION_PROTOCOL_VERSION + 1),
+        )) else {
+            panic!("a newer protocol is incompatible");
+        };
+        assert!(!can_update);
     }
 
     #[test]

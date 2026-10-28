@@ -13,7 +13,8 @@
 use crate::{
     home::HomeView,
     navigation,
-    t3_connection::{ConnectionStatus, T3Connection},
+    t3_connection::{ConnectionStatus, EngineKind, EngineSetup, T3Connection},
+    t3_engine::T3Mode,
 };
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, Hsla, InteractiveElement as _, IntoElement,
@@ -232,31 +233,73 @@ impl MustrTitleBar {
     fn render_connection_status(&self, cx: &App) -> impl IntoElement {
         let palette = mustr_ui::palette(cx);
         let status_colors = cx.theme().status();
-        let (dot, label, tooltip): (Hsla, SharedString, SharedString) =
-            match self.connection.read(cx).status() {
-                ConnectionStatus::Connected {
-                    environment,
-                    server_version,
-                } => (
-                    palette.ok.hsla(),
-                    format!("T3 · {environment}").into(),
-                    match server_version {
-                        Some(version) => format!("Connected to T3 Code {version}").into(),
-                        None => "Connected to T3 Code".into(),
-                    },
-                ),
-                ConnectionStatus::Connecting(step) => (
-                    palette.text_muted.hsla(),
-                    "Connecting…".into(),
-                    step.clone(),
-                ),
-                ConnectionStatus::NeedsPairing(reason) => {
-                    (palette.warning.hsla(), "Not paired".into(), reason.clone())
+        let connection = self.connection.read(cx);
+        let embedded = connection.effective_mode() == T3Mode::Embedded;
+        let server = connection
+            .server_url()
+            .map(|url| url.as_str().trim_end_matches('/').to_string())
+            .unwrap_or_default();
+        let (dot, label, tooltip): (Hsla, SharedString, SharedString) = match connection.status() {
+            ConnectionStatus::Connected {
+                environment,
+                server_version,
+                engine,
+            } => {
+                let version = server_version.as_ref().map_or_else(
+                    || "T3 Code".to_string(),
+                    |version| format!("T3 Code {version}"),
+                );
+                match engine {
+                    EngineKind::Embedded => (
+                        palette.ok.hsla(),
+                        match server_version {
+                            Some(version) => format!("Agents · {version}").into(),
+                            None => "Agents".into(),
+                        },
+                        format!("mustr's agents engine ({version}) at {server}").into(),
+                    ),
+                    EngineKind::Installed | EngineKind::External => (
+                        palette.ok.hsla(),
+                        format!("T3 · {environment}").into(),
+                        format!("Connected to {version} at {server}").into(),
+                    ),
                 }
-                ConnectionStatus::Failed(error) => {
-                    (status_colors.error, "T3 offline".into(), error.clone())
-                }
-            };
+            }
+            ConnectionStatus::Connecting(step) => (
+                palette.text_muted.hsla(),
+                if embedded {
+                    "Starting agents engine…".into()
+                } else {
+                    "Connecting…".into()
+                },
+                step.clone(),
+            ),
+            ConnectionStatus::NeedsPairing(reason) => {
+                (palette.warning.hsla(), "Not paired".into(), reason.clone())
+            }
+            ConnectionStatus::NeedsSetup(setup) => (
+                palette.warning.hsla(),
+                "Set up agents".into(),
+                match setup {
+                    EngineSetup::NotInstalled { .. } => {
+                        "The agents engine isn't installed. Open Home to set it up.".into()
+                    }
+                    EngineSetup::NotRunning { .. } => {
+                        "T3 Code isn't running. Open Home to start it.".into()
+                    }
+                    EngineSetup::Incompatible { message, .. } => message.clone(),
+                },
+            ),
+            ConnectionStatus::Failed(error) => (
+                status_colors.error,
+                if embedded {
+                    "Engine stopped".into()
+                } else {
+                    "T3 offline".into()
+                },
+                format!("{error} Open Home to try again.").into(),
+            ),
+        };
         let workspace = self.workspace.clone();
         Chip::new("title-bar-connection", label)
             .dot(dot)

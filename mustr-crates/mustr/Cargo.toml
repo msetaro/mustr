@@ -61,6 +61,7 @@ session.workspace = true
 settings.workspace = true
 shellexpand.workspace = true
 t3_client = { path = "../t3_client" }
+t3_runtime = { path = "../t3_runtime" }
 terminal_view.workspace = true
 theme.workspace = true
 theme_selector.workspace = true

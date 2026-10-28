@@ -7,7 +7,8 @@ use crate::{
     pull_request_review,
     review_backend::{self, DryRunRpc, T3ReviewBackend},
     review_drafts::{self, DraftStore},
-    t3_connection::{self, ConnectionStatus, T3Connection, T3Session},
+    t3_connection::{self, ConnectionStatus, EngineKind, EngineSetup, T3Connection, T3Session},
+    t3_engine::T3Mode,
     worktree_git::LocalGit,
 };
 use anyhow::{Context as _, anyhow};
@@ -446,32 +447,110 @@ impl HomeView {
             .server_url()
             .map(|url| url.as_str().trim_end_matches('/').to_string())
             .unwrap_or_default();
+        let mode = connection.effective_mode();
+        let pinned = t3_client::pinned_server_version();
         let (color, title, detail): (Color, SharedString, Option<SharedString>) =
             match connection.status() {
                 ConnectionStatus::Connected {
                     environment,
                     server_version,
-                } => (
-                    Color::Success,
-                    format!("Connected to {environment}").into(),
-                    Some(match server_version {
-                        Some(version) => format!("T3 Code {version} at {server}").into(),
-                        None => format!("T3 Code at {server}").into(),
-                    }),
-                ),
-                ConnectionStatus::Connecting(step) => (
-                    Color::Muted,
-                    "Connecting to T3 Code…".into(),
-                    Some(format!("{step} · {server}").into()),
-                ),
+                    engine,
+                } => {
+                    let version = server_version.as_ref().map_or_else(
+                        || "T3 Code".to_string(),
+                        |version| format!("T3 Code {version}"),
+                    );
+                    match engine {
+                        EngineKind::Embedded => (
+                            Color::Success,
+                            "Agents engine running".into(),
+                            Some(format!("mustr's own engine · {version} · {server}").into()),
+                        ),
+                        EngineKind::Installed => (
+                            Color::Success,
+                            format!("Connected to T3 Code on {environment}").into(),
+                            Some(format!("{version} at {server}").into()),
+                        ),
+                        EngineKind::External => (
+                            Color::Success,
+                            format!("Connected to {environment}").into(),
+                            Some(format!("{version} at {server}").into()),
+                        ),
+                    }
+                }
+                ConnectionStatus::Connecting(step) => match mode {
+                    T3Mode::Embedded => (
+                        Color::Muted,
+                        "Starting agents engine…".into(),
+                        Some(step.clone()),
+                    ),
+                    T3Mode::Installed => (
+                        Color::Muted,
+                        "Connecting to T3 Code…".into(),
+                        Some(step.clone()),
+                    ),
+                    T3Mode::External => (
+                        Color::Muted,
+                        "Connecting to T3 Code…".into(),
+                        Some(format!("{step} · {server}").into()),
+                    ),
+                },
                 ConnectionStatus::NeedsPairing(reason) => (
                     Color::Warning,
                     "Pair mustr with T3 Code".into(),
                     Some(reason.clone()),
                 ),
+                ConnectionStatus::NeedsSetup(EngineSetup::NotInstalled { unsupported: None }) => (
+                    Color::Warning,
+                    "Set up the agents engine".into(),
+                    Some(
+                        format!(
+                            "mustr runs agents on T3 Code's engine, which isn't on this computer \
+                             yet. mustr can install T3 Code {pinned} (about 100 MB) the way T3 \
+                             Code's own installer does, and run it in the background."
+                        )
+                        .into(),
+                    ),
+                ),
+                ConnectionStatus::NeedsSetup(EngineSetup::NotInstalled {
+                    unsupported: Some(reason),
+                }) => (
+                    Color::Error,
+                    "The agents engine isn't available here".into(),
+                    Some(reason.clone()),
+                ),
+                ConnectionStatus::NeedsSetup(EngineSetup::NotRunning { service_supported }) => (
+                    Color::Warning,
+                    "T3 Code isn't running".into(),
+                    Some(if *service_supported {
+                        "T3 Code is installed, but nothing is running it. mustr can set it up to \
+                         run in the background (t3 service install)."
+                            .into()
+                    } else {
+                        "T3 Code is installed, but it isn't running, and it has no background \
+                         service on this platform. Start it with `t3`, or use mustr's own engine."
+                            .into()
+                    }),
+                ),
+                ConnectionStatus::NeedsSetup(EngineSetup::Incompatible {
+                    message,
+                    can_update,
+                }) => (
+                    Color::Warning,
+                    "This T3 Code doesn't work with this mustr".into(),
+                    Some(if *can_update {
+                        format!("{message} Updating it to {pinned} (t3 update) fixes this.").into()
+                    } else {
+                        message.clone()
+                    }),
+                ),
                 ConnectionStatus::Failed(error) => (
                     Color::Error,
-                    "Couldn't connect to T3 Code".into(),
+                    if mode == T3Mode::Embedded {
+                        "The agents engine stopped".into()
+                    } else {
+                        "Couldn't connect to T3 Code".into()
+                    },
                     Some(error.clone()),
                 ),
             };
@@ -482,13 +561,63 @@ impl HomeView {
             .and_then(|session| session.write_blocked_reason());
         let needs_pairing =
             matches!(connection.status(), ConnectionStatus::NeedsPairing(_)) || read_only.is_some();
-        let can_retry = !matches!(connection.status(), ConnectionStatus::Connecting(_))
-            && connection.server_url().is_some();
-        let retry_label = if connection.status().is_connected() {
+        let status = connection.status();
+        let can_retry = !matches!(status, ConnectionStatus::Connecting(_))
+            && !matches!(
+                status,
+                ConnectionStatus::NeedsSetup(EngineSetup::NotInstalled { unsupported: None })
+            );
+        let retry_label = if status.is_connected() {
             "Reconnect"
         } else {
             "Try again"
         };
+        let primary: Option<(
+            &'static str,
+            &'static str,
+            fn(&mut T3Connection, &mut Context<T3Connection>),
+        )> = match status {
+            ConnectionStatus::NeedsSetup(EngineSetup::NotInstalled { unsupported: None }) => {
+                Some((
+                    "install-engine",
+                    "Install the agents engine",
+                    T3Connection::install_engine,
+                ))
+            }
+            ConnectionStatus::NeedsSetup(EngineSetup::NotRunning {
+                service_supported: true,
+            }) => Some((
+                "run-in-background",
+                "Run T3 Code in the background",
+                T3Connection::run_in_background,
+            )),
+            ConnectionStatus::NeedsSetup(EngineSetup::Incompatible {
+                can_update: true, ..
+            }) => Some((
+                "update-t3",
+                "Update T3 Code",
+                T3Connection::update_installed,
+            )),
+            _ => None,
+        };
+        // The installed T3 Code can't be used right now: mustr's own engine still can.
+        let offer_embedded = connection.mode() == T3Mode::Installed
+            && !connection.is_fallback()
+            && matches!(
+                status,
+                ConnectionStatus::NeedsSetup(_)
+                    | ConnectionStatus::Failed(_)
+                    | ConnectionStatus::NeedsPairing(_)
+            );
+        let fallback_note = connection.is_fallback().then_some(
+            "Using mustr's own engine for this session, because your T3 Code couldn't be used. \
+             Your T3 Code's projects and threads aren't shown here.",
+        );
+        let log_note = matches!(status, ConnectionStatus::Failed(_))
+            .then(|| connection.engine_log_file(cx))
+            .flatten()
+            .filter(|_| mode == T3Mode::Embedded)
+            .map(|log| format!("The engine's log is {}.", log.display()));
 
         card(cx)
             .gap_2()
@@ -512,6 +641,40 @@ impl HomeView {
                     Label::new(detail)
                         .size(LabelSize::Small)
                         .color(Color::Muted),
+                )
+            })
+            .when_some(log_note, |this, note| {
+                this.child(Label::new(note).size(LabelSize::Small).color(Color::Muted))
+            })
+            .when_some(fallback_note, |this, note| {
+                this.child(
+                    Label::new(note)
+                        .size(LabelSize::Small)
+                        .color(Color::Warning),
+                )
+            })
+            .when(primary.is_some() || offer_embedded, |this| {
+                this.child(
+                    h_flex()
+                        .gap_2()
+                        .when_some(primary, |this, (id, label, action)| {
+                            this.child(Button::new(id, label).style(ButtonStyle::Filled).on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    this.connection.update(cx, action)
+                                }),
+                            ))
+                        })
+                        .when(offer_embedded, |this| {
+                            this.child(
+                                Button::new("use-embedded", "Use mustr's own engine")
+                                    .style(ButtonStyle::Subtle)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.connection.update(cx, |connection, cx| {
+                                            connection.use_embedded(cx)
+                                        })
+                                    })),
+                            )
+                        }),
                 )
             })
             .when_some(read_only, |this, read_only| {

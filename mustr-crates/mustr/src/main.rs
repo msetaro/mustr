@@ -17,6 +17,7 @@ mod review_backend;
 mod review_drafts;
 mod status_bar;
 mod t3_connection;
+mod t3_engine;
 #[cfg(test)]
 mod test_rpc;
 mod themes;
@@ -58,8 +59,15 @@ struct Args {
     #[arg(long, value_name = "DIR", verbatim_doc_comment)]
     user_data_dir: Option<String>,
 
-    /// The T3 Code server to connect to. Overrides `MUSTR_T3_SERVER` and the
-    /// `"t3": {"url": ...}` setting. The default is http://127.0.0.1:3773.
+    /// Which T3 engine runs mustr's agents: `installed` (your T3 Code, the
+    /// default), `embedded` (mustr's own copy), or `external` (a server at a
+    /// URL). Overrides `MUSTR_T3_MODE` and the `"t3": {"mode": ...}` setting.
+    #[arg(long, value_name = "MODE", verbatim_doc_comment)]
+    t3_mode: Option<String>,
+
+    /// A T3 Code server to connect to, which means `--t3-mode external`.
+    /// Overrides `MUSTR_T3_SERVER` and the `"t3": {"url": ...}` setting. The
+    /// default is http://127.0.0.1:3773.
     #[arg(long, value_name = "URL", verbatim_doc_comment)]
     t3_server: Option<String>,
 
@@ -154,10 +162,22 @@ fn main() {
         .context("creating the settings file")
         .log_err();
     let settings_text = std::fs::read_to_string(paths::settings_file()).ok();
+    let server_url_given = args.t3_server.is_some()
+        || std::env::var(t3_connection::SERVER_URL_ENV).is_ok_and(|url| !url.trim().is_empty());
+    let t3_mode = t3_engine::resolve_mode(
+        args.t3_mode.as_deref(),
+        server_url_given,
+        settings_text.as_deref(),
+    )
+    .unwrap_or_else(|error| {
+        log::error!("{error:#}; using the installed T3 Code");
+        t3_engine::T3Mode::default()
+    });
     let t3_server_url = t3_connection::resolve_server_url(args.t3_server, settings_text.as_deref());
-    match &t3_server_url {
-        Ok(url) => log::info!("T3 server: {url}"),
-        Err(error) => log::error!("{error:#}"),
+    match (t3_mode, &t3_server_url) {
+        (t3_engine::T3Mode::External, Ok(url)) => log::info!("T3: external server {url}"),
+        (t3_engine::T3Mode::External, Err(error)) => log::error!("{error:#}"),
+        (mode, _) => log::info!("T3: {} engine", mode.as_str()),
     }
 
     // Copied from crates/zed/src/main.rs: `rope` and `sum_tree` build large
@@ -214,7 +234,7 @@ fn main() {
         init_ui(&app_state, cx);
         cx.set_global(home_options);
         cx.set_global(startup_threads);
-        t3_connection::init(t3_server_url, cx);
+        t3_connection::init(t3_mode, t3_server_url, cx);
         let session = t3_connection::T3Connection::global(cx)
             .read(cx)
             .current_session();

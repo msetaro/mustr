@@ -11132,6 +11132,7 @@ dependencies = [
  "settings",
  "shellexpand",
  "t3_client",
+ "t3_runtime",
  "tempfile",
  "terminal_view",
  "theme",

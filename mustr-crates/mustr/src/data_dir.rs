@@ -38,7 +38,7 @@ fn default_data_dir() -> Result<PathBuf> {
 
 // `paths::logs_dir()` is `~/Library/Logs/Zed` on macOS, so mustr keeps its
 // logs under its own data directory on every platform.
-fn logs_dir() -> &'static PathBuf {
+pub fn logs_dir() -> &'static PathBuf {
     static LOGS_DIR: OnceLock<PathBuf> = OnceLock::new();
     LOGS_DIR.get_or_init(|| paths::data_dir().join("logs"))
 }
