@@ -16,7 +16,7 @@ use t3_api::{
         OrchestrationV2ProviderThread, OrchestrationV2ProviderTurn, OrchestrationV2Run,
         OrchestrationV2RunStatus, OrchestrationV2RuntimeRequest, OrchestrationV2RuntimeRequestKind,
         OrchestrationV2RuntimeRequestKindString, OrchestrationV2RuntimeRequestStatus,
-        OrchestrationV2ThreadProjection,
+        OrchestrationV2Subagent, OrchestrationV2ThreadProjection,
         OrchestrationV2ThreadProjectionVisibleTurnItemsItemVisibility,
         OrchestrationV2TurnItemStatus, OrchestrationV2UserMessageInputIntent,
         ProviderApprovalDecision,
@@ -589,6 +589,8 @@ pub struct ThreadState {
     messages: Vec<OrchestrationV2ConversationMessage>,
     provider_turns: Vec<OrchestrationV2ProviderTurn>,
     provider_threads: Vec<OrchestrationV2ProviderThread>,
+    /// The thread's subagents and delegated tasks, for its family bar (`family_bar.rs`).
+    subagents: Vec<OrchestrationV2Subagent>,
 }
 
 impl ThreadState {
@@ -607,7 +609,13 @@ impl ThreadState {
             messages: projection.messages,
             provider_turns: projection.provider_turns,
             provider_threads: projection.provider_threads,
+            subagents: projection.subagents,
         }
+    }
+
+    /// The thread's subagents and delegated tasks, as T3 last sent them.
+    pub fn subagents(&self) -> &[OrchestrationV2Subagent] {
+        &self.subagents
     }
 
     /// Every item of the timeline, including ones [`Self::rows`] hides.
@@ -671,6 +679,11 @@ impl ThreadState {
             OrchestrationV2DomainEvent::Variant3 { payload, .. }
             | OrchestrationV2DomainEvent::Variant4 { payload, .. } => {
                 upsert(&mut self.runs, payload, |run| &run.id);
+                changed
+            }
+            // `subagent.updated`, for the family bar.
+            OrchestrationV2DomainEvent::Variant9 { payload, .. } => {
+                upsert(&mut self.subagents, payload, |subagent| &subagent.id);
                 changed
             }
             OrchestrationV2DomainEvent::Variant12 { payload, .. } => {
