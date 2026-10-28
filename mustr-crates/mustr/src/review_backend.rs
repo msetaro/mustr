@@ -422,73 +422,12 @@ pub fn write_error(tag: &str, error: &RpcError) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_rpc::RecordingRpc;
     use gpui::TestAppContext;
-    use parking_lot::Mutex;
     use pretty_assertions::assert_eq;
     use review::DraftComment;
     use serde_json::json;
     use t3_client::t3_api::types::PullRequestReviewPositionContext as Context;
-
-    /// Plays T3: records each call's tag and payload, and answers with the next scripted
-    /// response (success with `null` when none is left).
-    #[derive(Default)]
-    struct RecordingRpc {
-        calls: Mutex<Vec<(String, Value)>>,
-        responses: Mutex<Vec<Result<Value, RpcError>>>,
-    }
-
-    impl RecordingRpc {
-        fn respond(&self, response: Result<Value, RpcError>) {
-            self.responses.lock().push(response);
-        }
-
-        fn next_response(&self) -> Result<Value, RpcError> {
-            let mut responses = self.responses.lock();
-            if responses.is_empty() {
-                Ok(Value::Null)
-            } else {
-                responses.remove(0)
-            }
-        }
-
-        /// The one recorded call, decoded as `M`'s payload.
-        fn only_call<M: RpcMethod>(&self) -> M::Payload {
-            let calls = self.calls.lock();
-            assert_eq!(calls.len(), 1, "expected one call, got {calls:#?}");
-            let (tag, payload) = &calls[0];
-            assert_eq!(tag, M::TAG);
-            serde_json::from_value(payload.clone()).expect("the payload should be M's")
-        }
-    }
-
-    impl PullRequestRpc for RecordingRpc {
-        fn call<M>(&self, payload: M::Payload) -> BoxFuture<'static, Result<M::Success, RpcError>>
-        where
-            M: RpcMethod + 'static,
-            M::Payload: Send + 'static,
-            M::Success: Send + 'static,
-        {
-            let payload = serde_json::to_value(&payload).expect("payloads encode");
-            self.calls.lock().push((M::TAG.to_string(), payload));
-            let response = self.next_response().and_then(|value| {
-                serde_json::from_value(value).map_err(|error| RpcError::Decode {
-                    tag: M::TAG.to_string(),
-                    message: error.to_string(),
-                })
-            });
-            async move { response }.boxed()
-        }
-
-        fn request(
-            &self,
-            tag: &'static str,
-            payload: Value,
-        ) -> BoxFuture<'static, Result<Value, RpcError>> {
-            self.calls.lock().push((tag.to_string(), payload));
-            let response = self.next_response();
-            async move { response }.boxed()
-        }
-    }
 
     fn pull_request() -> PullRequestRef {
         PullRequestRef {

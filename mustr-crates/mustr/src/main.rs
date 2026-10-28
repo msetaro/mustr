@@ -1,6 +1,10 @@
 // Copied from crates/zed/src/main.rs: release builds on Windows don't open a console.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent_diff;
+mod agent_review;
+mod agent_review_store;
+mod agent_threads;
 mod app_settings;
 mod data_dir;
 mod home;
@@ -13,9 +17,12 @@ mod review_backend;
 mod review_drafts;
 mod status_bar;
 mod t3_connection;
+#[cfg(test)]
+mod test_rpc;
 mod themes;
 mod title_bar;
 mod window;
+mod worktree_git;
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
@@ -59,6 +66,14 @@ struct Args {
     #[arg(long, hide = true)]
     open_first_pr: bool,
 
+    /// Opens a review of this agent thread's work once the threads load (for smoke tests).
+    #[arg(long, hide = true, value_name = "THREAD_ID")]
+    open_thread: Option<String>,
+
+    /// The scope `--open-thread` opens: `changes` (the default) or `turn:N`.
+    #[arg(long, hide = true, value_name = "SCOPE", value_parser = parse_review_scope)]
+    thread_scope: Option<review::ReviewScope>,
+
     /// Relays a Git or SSH password prompt over a Unix socket, so git doesn't
     /// need netcat.
     #[cfg(not(target_os = "windows"))]
@@ -90,6 +105,12 @@ fn main() {
 
     let home_options = home::HomeOptions {
         open_first_pull_request: args.open_first_pr,
+        open_thread: args.open_thread.map(|thread_id| {
+            (
+                thread_id,
+                args.thread_scope.unwrap_or(review::ReviewScope::Changes),
+            )
+        }),
     };
     let data_dir = match data_dir::init(args.user_data_dir) {
         Ok(data_dir) => data_dir,
@@ -183,6 +204,17 @@ fn main() {
         cx.activate(true);
         window::open_home_window(app_state, cx);
     });
+}
+
+fn parse_review_scope(scope: &str) -> Result<review::ReviewScope, String> {
+    match scope {
+        "changes" => Ok(review::ReviewScope::Changes),
+        _ => scope
+            .strip_prefix("turn:")
+            .and_then(|turn| turn.parse().ok())
+            .map(review::ReviewScope::Turn)
+            .ok_or_else(|| format!("{scope:?} isn't `changes` or `turn:N`")),
+    }
 }
 
 // Copied from crates/zed/src/main.rs. Apps launched from a desktop don't get the

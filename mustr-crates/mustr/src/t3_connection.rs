@@ -28,7 +28,7 @@ use t3_client::{
 };
 use util::ResultExt as _;
 
-use crate::inbox::{PullRequestList, ThreadRow};
+use crate::inbox::PullRequestList;
 
 pub const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:3773";
 /// Overrides the server URL from settings (the `--t3-server` flag overrides both).
@@ -474,7 +474,29 @@ impl T3Session {
         Ok(crate::inbox::parse_pull_request_list(list))
     }
 
-    pub async fn recent_threads(&self, limit: usize) -> Result<Vec<ThreadRow>> {
+    /// Why messages can't be sent to agent threads with this session, if they can't.
+    pub fn agent_send_blocked_reason(&self) -> Option<String> {
+        self.missing_scopes()
+            .contains(&Scope::OrchestrationOperate)
+            .then(|| {
+                format!(
+                    "mustr's pairing with T3 can't send messages to agents (it lacks {}). Pair \
+                     again from the home view: {}",
+                    Scope::OrchestrationOperate.as_str(),
+                    pairing_command()
+                )
+            })
+    }
+
+    /// Whether T3 runs on this machine, so the paths it reports (such as a thread's worktree)
+    /// are this machine's.
+    pub fn server_is_local(&self) -> bool {
+        server_is_local(&self.server_url)
+    }
+
+    /// T3's shell snapshot (`GET /api/orchestration/shell`): every thread and project, without
+    /// their histories. Decoded leniently by its readers.
+    pub async fn shell_snapshot(&self) -> Result<Value> {
         let url = self
             .server_url
             .join("/api/orchestration/shell")
@@ -498,9 +520,27 @@ impl T3Session {
                 truncate(&String::from_utf8_lossy(&body), 300)
             );
         }
-        let snapshot: Value =
-            serde_json::from_slice(&body).context("T3 sent a shell snapshot that isn't JSON")?;
-        Ok(crate::inbox::recent_threads(snapshot, limit))
+        serde_json::from_slice(&body).context("T3 sent a shell snapshot that isn't JSON")
+    }
+
+    /// One thread's snapshot with a bounded history (`/bounded`, about a megabyte where the
+    /// full snapshot of a long thread can be tens), which still lists every checkpoint.
+    pub async fn thread_snapshot(&self, thread_id: &str) -> Result<Value> {
+        t3_client::call_endpoint_as::<
+            t3_client::t3_api::http::OrchestrationThreadBoundedSnapshot,
+            Value,
+        >(
+            self.http.as_ref(),
+            &self.server_url,
+            Some(&self.token),
+            &t3_client::t3_api::types::HttpOrchestrationThreadBoundedSnapshotParams {
+                thread_id: thread_id.to_string(),
+            },
+            &Default::default(),
+            &(),
+        )
+        .await
+        .with_context(|| format!("loading thread {thread_id}"))
     }
 
     pub async fn pull_request_files(
@@ -519,6 +559,16 @@ impl T3Session {
 
     fn authorization(&self) -> String {
         format!("Bearer {}", self.token.access_token)
+    }
+}
+
+/// Whether a server URL names this machine.
+pub fn server_is_local(url: &Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
     }
 }
 
@@ -1252,6 +1302,16 @@ mod tests {
             ])
             .is_empty()
         );
+    }
+
+    #[test]
+    fn local_servers() {
+        let local = |url: &str| server_is_local(&Url::parse(url).unwrap());
+        assert!(local("http://127.0.0.1:3773"));
+        assert!(local("http://localhost:3773"));
+        assert!(local("http://[::1]:3773"));
+        assert!(!local("https://box.tailnet.ts.net"));
+        assert!(!local("http://10.0.0.2:3773"));
     }
 
     #[test]

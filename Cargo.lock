@@ -11121,6 +11121,7 @@ dependencies = [
  "project",
  "rayon",
  "release_channel",
+ "remote_connection",
  "reqwest_client",
  "review",
  "search",

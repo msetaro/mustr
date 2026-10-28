@@ -3,7 +3,7 @@ use gpui::{
     App, AppContext as _, Context, Entity, Menu, MenuItem, OsAction, PromptLevel, TaskExt as _,
     TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions, point, px,
 };
-use review::ToggleFileTree;
+use review::{OpenThreadChat, ToggleFileTree};
 use settings::{Settings as _, SettingsStore};
 use std::{
     path::Path,
@@ -15,8 +15,8 @@ use std::{
 use util::ResultExt as _;
 use uuid::Uuid;
 use workspace::{
-    AppState, CloseWindow, MultiWorkspace, OpenOptions, Pane, Workspace, WorkspaceSettings,
-    create_and_open_local_file, with_active_or_new_workspace,
+    AppState, CloseWindow, MultiWorkspace, OpenOptions, Pane, Toast, Workspace, WorkspaceSettings,
+    create_and_open_local_file, notifications::NotificationId, with_active_or_new_workspace,
 };
 use zed_actions::{OpenKeymapFile, OpenSettingsFile, Quit};
 
@@ -102,6 +102,18 @@ pub fn init(cx: &mut App) {
         });
         workspace.register_action(|workspace, _: &ToggleFileTree, window, cx| {
             workspace.toggle_panel_focus::<NavPanel>(window, cx);
+        });
+        // The agent thread's chat view (timeline, composer, approvals) replaces this
+        // placeholder; until then the review's "Open chat" says where the thread lives.
+        workspace.register_action(|workspace, action: &OpenThreadChat, _, cx| {
+            workspace.show_toast(
+                Toast::new(
+                    NotificationId::composite::<OpenThreadChat>(action.thread_id.clone()),
+                    "mustr can't show agent threads' chats yet. Open this thread in T3 Code to \
+                     talk to the agent.",
+                ),
+                cx,
+            );
         });
 
         cx.subscribe_in(
