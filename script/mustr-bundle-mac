@@ -53,6 +53,25 @@ EOF
     exit 1
 fi
 
+# Zed's editor builds tree-sitter with WebAssembly grammar support, whose build script (in
+# wasmtime-c-api-impl) runs `cmake`. Find Homebrew's or CMake.app's when they aren't on PATH.
+for dir in /opt/homebrew/bin /usr/local/bin /Applications/CMake.app/Contents/bin; do
+    if ! command -v cmake >/dev/null && [[ -x "$dir/cmake" ]]; then
+        PATH="$PATH:$dir"
+    fi
+done
+if ! command -v cmake >/dev/null; then
+    cat >&2 <<'EOF'
+mustr-bundle-mac: cmake isn't installed. Install it, then run this script again:
+
+    brew install cmake
+
+Without Homebrew, download the macOS .dmg from https://cmake.org/download/ and drag
+CMake into Applications; this script finds it there.
+EOF
+    exit 1
+fi
+
 cargo build -p mustr ${cargo_flags[@]+"${cargo_flags[@]}"}
 
 target_dir=${CARGO_TARGET_DIR:-$root/target}

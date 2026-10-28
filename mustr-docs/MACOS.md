@@ -17,8 +17,13 @@ first run, and what hasn't been checked on a real Mac yet.
   `. "$HOME/.cargo/env"` (new terminals pick it up on their own). `rust-toolchain.toml` pins the
   toolchain (1.98.1), and the first `cargo` command installs it, with the extra targets the file
   lists.
-- **Not needed:** CMake, Homebrew, or `protoc`. The C dependencies (SQLite, zstd, tree-sitter,
-  aws-lc) build with the Command Line Tools' `clang`, and Zed's protobuf code is generated in Rust.
+- **CMake:** `brew install cmake`, or CMake.app from [cmake.org](https://cmake.org/download/) in
+  Applications (`script/mustr-bundle-mac` finds it there; for `cargo run`, add
+  `/Applications/CMake.app/Contents/bin` to `PATH`). Zed's `language` crate turns on tree-sitter's WebAssembly grammar support, and its
+  runtime's build script (`wasmtime-c-api-impl`) runs `cmake`. That's in Zed's crates, so mustr
+  can't turn it off.
+- **Not needed:** `protoc`. The other C dependencies (SQLite, zstd, tree-sitter, aws-lc) build
+  with the Command Line Tools' `clang`, and Zed's protobuf code is generated in Rust (`protox`).
 - **Disk:** a debug build compiles about 1,000 crates, and `target/` grows to about 20 GB.
 
 ## Build and run
