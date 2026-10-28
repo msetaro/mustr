@@ -17874,6 +17874,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "t3_runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "async-tar",
+ "dirs",
+ "futures 0.3.34",
+ "hex",
+ "http_client",
+ "libc",
+ "log",
+ "parking_lot",
+ "rand 0.9.4",
+ "reqwest_client",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "smol",
+ "sysinfo 0.39.6",
+ "t3_client",
+ "tempfile",
+ "url",
+ "util",
+]
+
+[[package]]
 name = "tab_switcher"
 version = "0.1.0"
 dependencies = [

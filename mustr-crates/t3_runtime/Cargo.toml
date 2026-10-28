@@ -1,0 +1,42 @@
+[package]
+name = "t3_runtime"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+license = "GPL-3.0-or-later"
+description = "Installs, verifies, and runs T3 Code's engine for mustr, and finds the user's own T3 Code"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/t3_runtime.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-compression.workspace = true
+async-tar.workspace = true
+dirs.workspace = true
+futures.workspace = true
+hex.workspace = true
+http_client.workspace = true
+log.workspace = true
+rand.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+smol.workspace = true
+sysinfo.workspace = true
+t3_client = { path = "../t3_client" }
+url.workspace = true
+util.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+http_client = { workspace = true, features = ["test-support"] }
+parking_lot.workspace = true
+reqwest_client.workspace = true
+tempfile.workspace = true
