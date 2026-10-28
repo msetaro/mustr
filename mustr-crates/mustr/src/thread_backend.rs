@@ -135,7 +135,7 @@ impl ThreadBackend for T3ThreadBackend {
         let session = self.session();
         async move {
             session?
-                .call_endpoint::<http::OrchestrationShellSnapshot>(&(), &(), &())
+                .call_endpoint::<http::OrchestrationShellSnapshot>(&(), &Default::default(), &())
                 .await
                 .context("loading the thread list")
         }

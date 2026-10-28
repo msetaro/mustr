@@ -549,6 +549,8 @@ impl ThreadView {
             fresh: Some(true),
             instance_id: Some(instance_id),
             refresh_models: None,
+            usage_limits_command: None,
+            workspace_snapshots_on_demand: None,
         };
         let backend = self.backend.clone();
         self.history.restarting = true;

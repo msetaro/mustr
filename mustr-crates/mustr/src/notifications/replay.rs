@@ -402,6 +402,8 @@ mod tests {
         let mut stream = replay
             .subscribe_shell(OrchestrationV2SubscribeShellInput {
                 after_sequence: Some(snapshot.snapshot_sequence),
+                omit_idle_subagents: None,
+                omit_older_settled: None,
                 request_completion_marker: None,
             })
             .unwrap();

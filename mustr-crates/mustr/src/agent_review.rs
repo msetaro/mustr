@@ -428,6 +428,8 @@ pub fn message_dispatch(
                 type_: OrchestrationV2CommandDispatchModeQueueAfterActiveType::QueueAfterActive,
             },
         ),
+        guest_message_id: None,
+        idle_compaction: None,
         manual_continuation_of_run_id: None,
         message_id,
         model_selection: None,

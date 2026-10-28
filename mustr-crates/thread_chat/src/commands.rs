@@ -190,6 +190,8 @@ pub fn message(
         delegated_completion: None,
         delivery_intent,
         dispatch_mode,
+        guest_message_id: None,
+        idle_compaction: None,
         manual_continuation_of_run_id: None,
         message_id: ids.message_id,
         model_selection: message.model_selection,
@@ -406,6 +408,7 @@ pub fn stop(thread_id: &str, command_id: String) -> OrchestrationV2Command {
     OrchestrationV2Command::ThreadStop(OrchestrationV2CommandThreadStop {
         command_id,
         reason: None,
+        stop_delegated_tasks: None,
         thread_id: thread_id.to_string(),
         type_: OrchestrationV2CommandThreadStopType::ThreadStop,
     })
@@ -423,6 +426,7 @@ pub fn respond_to_approval(
         attachments_by_question_id: None,
         command_id,
         decision: Some(decision),
+        feedback: None,
         request_id: request_id.to_string(),
         thread_id: thread_id.to_string(),
         type_: OrchestrationV2CommandRuntimeRequestRespondType::RuntimeRequestRespond,
@@ -445,6 +449,7 @@ pub fn answer_questions(
         attachments_by_question_id: None,
         command_id,
         decision: None,
+        feedback: None,
         request_id: request_id.to_string(),
         thread_id: thread_id.to_string(),
         type_: OrchestrationV2CommandRuntimeRequestRespondType::RuntimeRequestRespond,
@@ -938,6 +943,7 @@ mod tests {
         });
         let message = Message {
             context: Some(OrchestrationMessageContext {
+                guest: None,
                 records: vec![record.clone()],
                 version: 1.0.try_into().unwrap(),
             }),

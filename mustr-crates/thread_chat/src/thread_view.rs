@@ -308,7 +308,9 @@ impl ThreadView {
             loop {
                 let input = OrchestrationV2SubscribeThreadInput {
                     accept_bounded_snapshot: None,
+                    accept_compact_ids: None,
                     accept_compact_turn_items: None,
+                    accept_deduped_bodies: None,
                     after_sequence,
                     request_completion_marker: None,
                     thread_id: thread_id.clone(),

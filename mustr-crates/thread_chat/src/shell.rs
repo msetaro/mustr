@@ -199,6 +199,8 @@ async fn follow_shell(
     })?;
     let mut stream = backend.subscribe_shell(OrchestrationV2SubscribeShellInput {
         after_sequence: Some(sequence),
+        omit_idle_subagents: None,
+        omit_older_settled: None,
         request_completion_marker: None,
     })?;
     while let Some(item) = stream.next().await {
