@@ -41,6 +41,9 @@ use ui::{
 };
 use workspace::Workspace;
 
+const ROW_HEIGHT: f32 = 26.;
+/// Rows of children and tasks shown at once; more scroll.
+const MAX_ROWS_SHOWN: f32 = 8.;
 /// Children listed before "Show more".
 const VISIBLE_CHILDREN: usize = 5;
 /// Background subagents with a button of their own; the rest are in the title's count.
@@ -473,19 +476,27 @@ impl ThreadFamilyBar {
                 .w_full()
                 .child(header)
                 .when(expanded, |this| {
-                    this.children(
-                        self.family
-                            .tasks
-                            .iter()
-                            .enumerate()
-                            .map(|(index, task)| self.render_task(index, task, cx)),
-                    )
-                    .children(
-                        children
-                            .iter()
-                            .take(shown)
-                            .enumerate()
-                            .map(|(index, child)| self.render_child(index, child, cx)),
+                    this.child(
+                        // All of a long family scrolls, leaving room for the timeline.
+                        v_flex()
+                            .id("family-children-list")
+                            .w_full()
+                            .max_h(px(ROW_HEIGHT * MAX_ROWS_SHOWN))
+                            .overflow_y_scroll()
+                            .children(
+                                self.family
+                                    .tasks
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, task)| self.render_task(index, task, cx)),
+                            )
+                            .children(
+                                children
+                                    .iter()
+                                    .take(shown)
+                                    .enumerate()
+                                    .map(|(index, child)| self.render_child(index, child, cx)),
+                            ),
                     )
                     .when(hidden > 0, |this| {
                         this.child(
@@ -516,8 +527,9 @@ impl ThreadFamilyBar {
         h_flex()
             .id(id)
             .debug_selector(|| selector)
+            .flex_none()
             .w_full()
-            .h(px(26.))
+            .h(px(ROW_HEIGHT))
             .pl(px(20.))
             .pr_1()
             .gap_2()
