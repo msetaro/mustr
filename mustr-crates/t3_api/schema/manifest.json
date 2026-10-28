@@ -2,6 +2,23 @@
   "rpc": [
     {
       "group": "WsRpcGroup",
+      "tag": "guestShare.create",
+      "stream": false,
+      "payload": {
+        "kind": "ref",
+        "def": "GuestShareCreateInput"
+      },
+      "success": {
+        "kind": "ref",
+        "def": "GuestShareCreateResult"
+      },
+      "error": {
+        "kind": "ref",
+        "def": "GuestShareCreateRpcError"
+      }
+    },
+    {
+      "group": "WsRpcGroup",
       "tag": "server.probe",
       "stream": false,
       "payload": {
@@ -1158,6 +1175,23 @@
     },
     {
       "group": "WsRpcGroup",
+      "tag": "pullRequests.filterOptions",
+      "stream": false,
+      "payload": {
+        "kind": "ref",
+        "def": "PullRequestFilterOptionsInput"
+      },
+      "success": {
+        "kind": "ref",
+        "def": "PullRequestFilterOptions"
+      },
+      "error": {
+        "kind": "ref",
+        "def": "PullRequestsFilterOptionsRpcError"
+      }
+    },
+    {
+      "group": "WsRpcGroup",
       "tag": "pullRequests.summary",
       "stream": false,
       "payload": {
@@ -2255,7 +2289,7 @@
       "stream": false,
       "payload": {
         "kind": "ref",
-        "def": "VcsStatusInput"
+        "def": "VcsRefreshStatusPayload"
       },
       "success": {
         "kind": "ref",
@@ -3176,11 +3210,11 @@
       "stream": false,
       "payload": {
         "kind": "ref",
-        "def": "OrchestrationSearchThreadsInput"
+        "def": "OrchestrationV2SearchThreadsInput"
       },
       "success": {
         "kind": "ref",
-        "def": "OrchestrationSearchThreadsResult"
+        "def": "OrchestrationV2SearchThreadsResult"
       },
       "error": {
         "kind": "ref",
@@ -3236,6 +3270,57 @@
       "error": {
         "kind": "ref",
         "def": "OrchestrationGetArchivedShellSnapshotRpcError"
+      }
+    },
+    {
+      "group": "WsRpcGroup",
+      "tag": "orchestration.getThreadFamily",
+      "stream": false,
+      "payload": {
+        "kind": "ref",
+        "def": "OrchestrationV2GetThreadFamilyInput"
+      },
+      "success": {
+        "kind": "ref",
+        "def": "OrchestrationV2ThreadFamily"
+      },
+      "error": {
+        "kind": "ref",
+        "def": "OrchestrationGetThreadFamilyRpcError"
+      }
+    },
+    {
+      "group": "WsRpcGroup",
+      "tag": "orchestration.getWorktreeThreadIds",
+      "stream": false,
+      "payload": {
+        "kind": "ref",
+        "def": "OrchestrationV2GetWorktreeThreadIdsInput"
+      },
+      "success": {
+        "kind": "ref",
+        "def": "OrchestrationV2WorktreeThreadIds"
+      },
+      "error": {
+        "kind": "ref",
+        "def": "OrchestrationGetWorktreeThreadIdsRpcError"
+      }
+    },
+    {
+      "group": "WsRpcGroup",
+      "tag": "orchestration.getOlderSettledThreads",
+      "stream": false,
+      "payload": {
+        "kind": "ref",
+        "def": "OrchestrationV2GetOlderSettledThreadsInput"
+      },
+      "success": {
+        "kind": "ref",
+        "def": "OrchestrationV2OlderSettledThreadsPage"
+      },
+      "error": {
+        "kind": "ref",
+        "def": "OrchestrationGetOlderSettledThreadsRpcError"
       }
     },
     {
@@ -3504,6 +3589,48 @@
       "headers": {
         "kind": "ref",
         "def": "HttpAuthWebSocketTicketHeaders"
+      },
+      "payload": [],
+      "success": [
+        {
+          "status": 200,
+          "type": {
+            "kind": "ref",
+            "def": "AuthWebSocketTicketResult"
+          }
+        }
+      ],
+      "errors": [
+        {
+          "status": 500,
+          "type": {
+            "kind": "ref",
+            "def": "EnvironmentInternalError"
+          }
+        },
+        {
+          "status": 401,
+          "type": {
+            "kind": "ref",
+            "def": "EnvironmentAuthInvalidError"
+          }
+        }
+      ]
+    },
+    {
+      "api": "EnvironmentHttpApi",
+      "group": "auth",
+      "endpoint": "webSocketTicketFor",
+      "method": "POST",
+      "path": "/api/auth/websocket-ticket/:use",
+      "params": {
+        "kind": "ref",
+        "def": "AuthWebSocketTicketParams"
+      },
+      "query": null,
+      "headers": {
+        "kind": "ref",
+        "def": "HttpAuthWebSocketTicketForHeaders"
       },
       "payload": [],
       "success": [
@@ -4077,7 +4204,10 @@
       "method": "GET",
       "path": "/api/orchestration/shell",
       "params": null,
-      "query": null,
+      "query": {
+        "kind": "ref",
+        "def": "HttpOrchestrationShellSnapshotQuery"
+      },
       "headers": {
         "kind": "ref",
         "def": "HttpOrchestrationShellSnapshotHeaders"
@@ -6390,7 +6520,7 @@
         },
         {
           "value": "AssetGitHubMediaUrlValidationError",
-          "def": "AssetGitHubMediaUrlValidationError"
+          "def": "AssetSourceControlMediaUrlValidationError"
         },
         {
           "value": "AssetSigningKeyLoadError",
@@ -6492,7 +6622,7 @@
         },
         {
           "value": "AssetGitHubMediaUrlValidationError",
-          "def": "AssetGitHubMediaUrlValidationError"
+          "def": "AssetSourceControlMediaUrlValidationError"
         },
         {
           "value": "AssetSigningKeyLoadError",
@@ -7278,6 +7408,21 @@
       "open": false,
       "recursive": false
     },
+    "GuestShareCreateRpcError": {
+      "tag": "_tag",
+      "variants": [
+        {
+          "value": "GuestShareCreateError",
+          "def": "GuestShareCreateError"
+        },
+        {
+          "value": "EnvironmentAuthorizationError",
+          "def": "EnvironmentAuthorizationError"
+        }
+      ],
+      "open": false,
+      "recursive": false
+    },
     "HttpAuthRevokeClientError403": {
       "tag": "_tag",
       "variants": [
@@ -7785,6 +7930,36 @@
       "open": false,
       "recursive": false
     },
+    "OrchestrationGetOlderSettledThreadsRpcError": {
+      "tag": "_tag",
+      "variants": [
+        {
+          "value": "OrchestrationV2GetShellSnapshotError",
+          "def": "OrchestrationV2GetShellSnapshotError"
+        },
+        {
+          "value": "EnvironmentAuthorizationError",
+          "def": "EnvironmentAuthorizationError"
+        }
+      ],
+      "open": false,
+      "recursive": false
+    },
+    "OrchestrationGetThreadFamilyRpcError": {
+      "tag": "_tag",
+      "variants": [
+        {
+          "value": "OrchestrationV2GetShellSnapshotError",
+          "def": "OrchestrationV2GetShellSnapshotError"
+        },
+        {
+          "value": "EnvironmentAuthorizationError",
+          "def": "EnvironmentAuthorizationError"
+        }
+      ],
+      "open": false,
+      "recursive": false
+    },
     "OrchestrationGetThreadProjectionRpcError": {
       "tag": "_tag",
       "variants": [
@@ -7836,6 +8011,21 @@
         {
           "value": "OrchestrationGetWorkflowScriptError",
           "def": "OrchestrationGetWorkflowScriptError"
+        },
+        {
+          "value": "EnvironmentAuthorizationError",
+          "def": "EnvironmentAuthorizationError"
+        }
+      ],
+      "open": false,
+      "recursive": false
+    },
+    "OrchestrationGetWorktreeThreadIdsRpcError": {
+      "tag": "_tag",
+      "variants": [
+        {
+          "value": "OrchestrationV2GetShellSnapshotError",
+          "def": "OrchestrationV2GetShellSnapshotError"
         },
         {
           "value": "EnvironmentAuthorizationError",
@@ -8015,6 +8205,14 @@
           "def": "OrchestrationV2CommandThreadArchive"
         },
         {
+          "value": "thread.guest-share.close",
+          "def": "OrchestrationV2CommandThreadGuestShareClose"
+        },
+        {
+          "value": "thread.guest-message.dismiss",
+          "def": "OrchestrationV2CommandThreadGuestMessageDismiss"
+        },
+        {
           "value": "thread.unarchive",
           "def": "OrchestrationV2CommandThreadUnarchive"
         },
@@ -8153,6 +8351,10 @@
         {
           "value": "queue.resume",
           "def": "OrchestrationV2CommandQueueResume"
+        },
+        {
+          "value": "queued-run.start",
+          "def": "OrchestrationV2CommandQueuedRunStart"
         },
         {
           "value": "queued-run.reorder",
@@ -9391,6 +9593,25 @@
       "recursive": false
     },
     "PullRequestsFilesViewedRpcError": {
+      "tag": "_tag",
+      "variants": [
+        {
+          "value": "PullRequestUnavailableError",
+          "def": "PullRequestUnavailableError"
+        },
+        {
+          "value": "PullRequestOperationError",
+          "def": "PullRequestOperationError"
+        },
+        {
+          "value": "EnvironmentAuthorizationError",
+          "def": "EnvironmentAuthorizationError"
+        }
+      ],
+      "open": false,
+      "recursive": false
+    },
+    "PullRequestsFilterOptionsRpcError": {
       "tag": "_tag",
       "variants": [
         {
@@ -12829,6 +13050,25 @@
       "open": false,
       "recursive": false
     },
+    "PullRequestReviewCommentDraftStartPosition": {
+      "tag": "kind",
+      "variants": [
+        {
+          "value": "added",
+          "def": "PullRequestReviewCommentDraftStartPositionAdded"
+        },
+        {
+          "value": "deleted",
+          "def": "PullRequestReviewCommentDraftStartPositionDeleted"
+        },
+        {
+          "value": "context",
+          "def": "PullRequestReviewCommentDraftStartPositionContext"
+        }
+      ],
+      "open": false,
+      "recursive": false
+    },
     "PullRequestReviewGuideResultRun": {
       "tag": "_tag",
       "variants": [
@@ -15250,10 +15490,22 @@
       "how": "drops unknown _tag"
     },
     {
+      "def": "OrchestrationV2AppThread",
+      "property": "opens",
+      "kind": "option",
+      "how": "undecodable -> null"
+    },
+    {
       "def": "OrchestrationV2ThreadProjection",
       "property": "turnItems",
       "kind": "array",
       "how": "drops unknown type"
+    },
+    {
+      "def": "OrchestrationV2ThreadShell",
+      "property": "opens",
+      "kind": "option",
+      "how": "undecodable -> null"
     },
     {
       "def": "ProjectSettingsOverrides",

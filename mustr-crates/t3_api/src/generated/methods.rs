@@ -4,6 +4,16 @@ use crate::{types, HttpEndpoint, RpcMethod};
 /// WebSocket RPC methods (Effect RPC over `RpcSerialization.layerJson`).
 pub mod rpc {
     use super::*;
+    /// `guestShare.create`
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct GuestShareCreate;
+    impl RpcMethod for GuestShareCreate {
+        const TAG: &'static str = "guestShare.create";
+        const STREAM: bool = false;
+        type Payload = types::GuestShareCreateInput;
+        type Success = types::GuestShareCreateResult;
+        type Error = crate::tagged::GuestShareCreateRpcError;
+    }
     /// `server.probe`
     #[derive(Debug, Clone, Copy, Default)]
     pub struct ServerProbe;
@@ -684,6 +694,16 @@ pub mod rpc {
         type Success = types::PullRequestListStatsResult;
         type Error = crate::tagged::PullRequestsListStatsRpcError;
     }
+    /// `pullRequests.filterOptions`
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct PullRequestsFilterOptions;
+    impl RpcMethod for PullRequestsFilterOptions {
+        const TAG: &'static str = "pullRequests.filterOptions";
+        const STREAM: bool = false;
+        type Payload = types::PullRequestFilterOptionsInput;
+        type Success = types::PullRequestFilterOptions;
+        type Error = crate::tagged::PullRequestsFilterOptionsRpcError;
+    }
     /// `pullRequests.summary`
     #[derive(Debug, Clone, Copy, Default)]
     pub struct PullRequestsSummary;
@@ -1340,7 +1360,7 @@ pub mod rpc {
     impl RpcMethod for VcsRefreshStatus {
         const TAG: &'static str = "vcs.refreshStatus";
         const STREAM: bool = false;
-        type Payload = types::VcsStatusInput;
+        type Payload = types::VcsRefreshStatusPayload;
         type Success = types::VcsStatusResult;
         type Error = crate::tagged::VcsRefreshStatusRpcError;
     }
@@ -1890,8 +1910,8 @@ pub mod rpc {
     impl RpcMethod for OrchestrationSearchThreads {
         const TAG: &'static str = "orchestration.searchThreads";
         const STREAM: bool = false;
-        type Payload = types::OrchestrationSearchThreadsInput;
-        type Success = types::OrchestrationSearchThreadsResult;
+        type Payload = types::OrchestrationV2SearchThreadsInput;
+        type Success = types::OrchestrationV2SearchThreadsResult;
         type Error = crate::tagged::OrchestrationSearchThreadsRpcError;
     }
     /// `orchestration.searchThread`
@@ -1923,6 +1943,36 @@ pub mod rpc {
         type Payload = types::OrchestrationGetArchivedShellSnapshotPayload;
         type Success = types::OrchestrationV2ArchivedShellSnapshot;
         type Error = crate::tagged::OrchestrationGetArchivedShellSnapshotRpcError;
+    }
+    /// `orchestration.getThreadFamily`
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct OrchestrationGetThreadFamily;
+    impl RpcMethod for OrchestrationGetThreadFamily {
+        const TAG: &'static str = "orchestration.getThreadFamily";
+        const STREAM: bool = false;
+        type Payload = types::OrchestrationV2GetThreadFamilyInput;
+        type Success = types::OrchestrationV2ThreadFamily;
+        type Error = crate::tagged::OrchestrationGetThreadFamilyRpcError;
+    }
+    /// `orchestration.getWorktreeThreadIds`
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct OrchestrationGetWorktreeThreadIds;
+    impl RpcMethod for OrchestrationGetWorktreeThreadIds {
+        const TAG: &'static str = "orchestration.getWorktreeThreadIds";
+        const STREAM: bool = false;
+        type Payload = types::OrchestrationV2GetWorktreeThreadIdsInput;
+        type Success = types::OrchestrationV2WorktreeThreadIds;
+        type Error = crate::tagged::OrchestrationGetWorktreeThreadIdsRpcError;
+    }
+    /// `orchestration.getOlderSettledThreads`
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct OrchestrationGetOlderSettledThreads;
+    impl RpcMethod for OrchestrationGetOlderSettledThreads {
+        const TAG: &'static str = "orchestration.getOlderSettledThreads";
+        const STREAM: bool = false;
+        type Payload = types::OrchestrationV2GetOlderSettledThreadsInput;
+        type Success = types::OrchestrationV2OlderSettledThreadsPage;
+        type Error = crate::tagged::OrchestrationGetOlderSettledThreadsRpcError;
     }
     /// `orchestration.getThreadProjection`
     #[derive(Debug, Clone, Copy, Default)]
@@ -1986,6 +2036,7 @@ pub mod rpc {
     }
     /// Every RPC tag the server's `WsRpcGroup` exposes, in declaration order.
     pub const ALL_TAGS: &[&str] = &[
+        "guestShare.create",
         "server.probe",
         "server.getConfig",
         "server.refreshProviders",
@@ -2054,6 +2105,7 @@ pub mod rpc {
         "cloud.installRelayClient",
         "pullRequests.list",
         "pullRequests.listStats",
+        "pullRequests.filterOptions",
         "pullRequests.summary",
         "pullRequests.routing",
         "pullRequests.routingIdentity",
@@ -2178,6 +2230,9 @@ pub mod rpc {
         "orchestration.searchThread",
         "orchestration.searchThreadStream",
         "orchestration.getArchivedShellSnapshot",
+        "orchestration.getThreadFamily",
+        "orchestration.getWorktreeThreadIds",
+        "orchestration.getOlderSettledThreads",
         "orchestration.getThreadProjection",
         "orchestration.launchThread",
         "orchestration.subscribeArchivedShell",
@@ -2279,6 +2334,24 @@ pub mod http {
     }
     pub type AuthWebSocketTicketError500 = types::EnvironmentInternalError;
     pub type AuthWebSocketTicketError401 = types::EnvironmentAuthInvalidError;
+    /// `POST /api/auth/websocket-ticket/:use`
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct AuthWebSocketTicketFor;
+    impl HttpEndpoint for AuthWebSocketTicketFor {
+        const METHOD: &'static str = "POST";
+        const PATH: &'static str = "/api/auth/websocket-ticket/:use";
+        const REQUEST_CONTENT_TYPE: Option<&'static str> = None;
+        const SUCCESS_STATUS: u16 = 200;
+        const ERROR_STATUSES: &'static [u16] = &[500, 401];
+        const CONSTANT_HEADERS: &'static [(&'static str, &'static str)] = &[];
+        type Params = types::AuthWebSocketTicketParams;
+        type Query = ();
+        type Headers = types::HttpAuthWebSocketTicketForHeaders;
+        type Request = ();
+        type Response = types::AuthWebSocketTicketResult;
+    }
+    pub type AuthWebSocketTicketForError500 = types::EnvironmentInternalError;
+    pub type AuthWebSocketTicketForError401 = types::EnvironmentAuthInvalidError;
     /// `POST /api/auth/pairing-token`
     #[derive(Debug, Clone, Copy, Default)]
     pub struct AuthPairingCredential;
@@ -2541,7 +2614,7 @@ pub mod http {
             ("x-t3-orchestration-protocol", "2"),
         ];
         type Params = ();
-        type Query = ();
+        type Query = types::HttpOrchestrationShellSnapshotQuery;
         type Headers = types::HttpOrchestrationShellSnapshotHeaders;
         type Request = ();
         type Response = types::OrchestrationV2ShellSnapshot;

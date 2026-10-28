@@ -91,9 +91,6 @@ pub fn roundtrip(
             }
             "AssetCreateUrlInput" => rt::<t3_api::types::AssetCreateUrlInput>(v),
             "AssetCreateUrlResult" => rt::<t3_api::types::AssetCreateUrlResult>(v),
-            "AssetGitHubMediaUrlValidationError" => {
-                rt::<t3_api::types::AssetGitHubMediaUrlValidationError>(v)
-            }
             "AssetPreviewTypeValidationError" => {
                 rt::<t3_api::types::AssetPreviewTypeValidationError>(v)
             }
@@ -129,6 +126,9 @@ pub fn roundtrip(
             }
             "AssetSigningKeyLoadError" => {
                 rt::<t3_api::types::AssetSigningKeyLoadError>(v)
+            }
+            "AssetSourceControlMediaUrlValidationError" => {
+                rt::<t3_api::types::AssetSourceControlMediaUrlValidationError>(v)
             }
             "AssetWorkspaceAssetInspectionError" => {
                 rt::<t3_api::types::AssetWorkspaceAssetInspectionError>(v)
@@ -252,6 +252,9 @@ pub fn roundtrip(
             "AuthSessionState" => rt::<t3_api::types::AuthSessionState>(v),
             "AuthTokenExchangeRequest" => {
                 rt::<t3_api::types::AuthTokenExchangeRequest>(v)
+            }
+            "AuthWebSocketTicketParams" => {
+                rt::<t3_api::types::AuthWebSocketTicketParams>(v)
             }
             "AuthWebSocketTicketResult" => {
                 rt::<t3_api::types::AuthWebSocketTicketResult>(v)
@@ -568,6 +571,12 @@ pub fn roundtrip(
             "GitRunStackedActionRpcError" => {
                 rt::<t3_api::tagged::GitRunStackedActionRpcError>(v)
             }
+            "GuestShareCreateError" => rt::<t3_api::types::GuestShareCreateError>(v),
+            "GuestShareCreateInput" => rt::<t3_api::types::GuestShareCreateInput>(v),
+            "GuestShareCreateResult" => rt::<t3_api::types::GuestShareCreateResult>(v),
+            "GuestShareCreateRpcError" => {
+                rt::<t3_api::tagged::GuestShareCreateRpcError>(v)
+            }
             "HostPowerSnapshot" => rt::<t3_api::types::HostPowerSnapshot>(v),
             "HostResourcesSnapshot" => rt::<t3_api::types::HostResourcesSnapshot>(v),
             "HttpAuthClientsHeaders" => rt::<t3_api::types::HttpAuthClientsHeaders>(v),
@@ -595,6 +604,9 @@ pub fn roundtrip(
             }
             "HttpAuthSessionHeaders" => rt::<t3_api::types::HttpAuthSessionHeaders>(v),
             "HttpAuthTokenHeaders" => rt::<t3_api::types::HttpAuthTokenHeaders>(v),
+            "HttpAuthWebSocketTicketForHeaders" => {
+                rt::<t3_api::types::HttpAuthWebSocketTicketForHeaders>(v)
+            }
             "HttpAuthWebSocketTicketHeaders" => {
                 rt::<t3_api::types::HttpAuthWebSocketTicketHeaders>(v)
             }
@@ -711,6 +723,9 @@ pub fn roundtrip(
             }
             "HttpOrchestrationShellSnapshotHeaders" => {
                 rt::<t3_api::types::HttpOrchestrationShellSnapshotHeaders>(v)
+            }
+            "HttpOrchestrationShellSnapshotQuery" => {
+                rt::<t3_api::types::HttpOrchestrationShellSnapshotQuery>(v)
             }
             "HttpOrchestrationThreadBoundedSnapshotHeaders" => {
                 rt::<t3_api::types::HttpOrchestrationThreadBoundedSnapshotHeaders>(v)
@@ -843,6 +858,12 @@ pub fn roundtrip(
             "OrchestrationGetFullThreadDiffRpcError" => {
                 rt::<t3_api::tagged::OrchestrationGetFullThreadDiffRpcError>(v)
             }
+            "OrchestrationGetOlderSettledThreadsRpcError" => {
+                rt::<t3_api::tagged::OrchestrationGetOlderSettledThreadsRpcError>(v)
+            }
+            "OrchestrationGetThreadFamilyRpcError" => {
+                rt::<t3_api::tagged::OrchestrationGetThreadFamilyRpcError>(v)
+            }
             "OrchestrationGetThreadProjectionRpcError" => {
                 rt::<t3_api::tagged::OrchestrationGetThreadProjectionRpcError>(v)
             }
@@ -863,6 +884,9 @@ pub fn roundtrip(
             }
             "OrchestrationGetWorkflowScriptRpcError" => {
                 rt::<t3_api::tagged::OrchestrationGetWorkflowScriptRpcError>(v)
+            }
+            "OrchestrationGetWorktreeThreadIdsRpcError" => {
+                rt::<t3_api::tagged::OrchestrationGetWorktreeThreadIdsRpcError>(v)
             }
             "OrchestrationLaunchThreadRpcError" => {
                 rt::<t3_api::tagged::OrchestrationLaunchThreadRpcError>(v)
@@ -891,12 +915,6 @@ pub fn roundtrip(
             "OrchestrationSearchThreadsError" => {
                 rt::<t3_api::types::OrchestrationSearchThreadsError>(v)
             }
-            "OrchestrationSearchThreadsInput" => {
-                rt::<t3_api::types::OrchestrationSearchThreadsInput>(v)
-            }
-            "OrchestrationSearchThreadsResult" => {
-                rt::<t3_api::types::OrchestrationSearchThreadsResult>(v)
-            }
             "OrchestrationSearchThreadsRpcError" => {
                 rt::<t3_api::tagged::OrchestrationSearchThreadsRpcError>(v)
             }
@@ -917,6 +935,9 @@ pub fn roundtrip(
             }
             "OrchestrationSubscribeThreadRpcError" => {
                 rt::<t3_api::tagged::OrchestrationSubscribeThreadRpcError>(v)
+            }
+            "OrchestrationV2AppThread" => {
+                rt::<t3_api::types::OrchestrationV2AppThread>(v)
             }
             "OrchestrationV2AppThreadForkedFrom" => {
                 rt::<t3_api::tagged::OrchestrationV2AppThreadForkedFrom>(v)
@@ -1056,6 +1077,9 @@ pub fn roundtrip(
             "OrchestrationV2CommandQueuedRunReorder" => {
                 rt::<t3_api::types::OrchestrationV2CommandQueuedRunReorder>(v)
             }
+            "OrchestrationV2CommandQueuedRunStart" => {
+                rt::<t3_api::types::OrchestrationV2CommandQueuedRunStart>(v)
+            }
             "OrchestrationV2CommandRunInterrupt" => {
                 rt::<t3_api::types::OrchestrationV2CommandRunInterrupt>(v)
             }
@@ -1088,6 +1112,12 @@ pub fn roundtrip(
             }
             "OrchestrationV2CommandThreadFork" => {
                 rt::<t3_api::types::OrchestrationV2CommandThreadFork>(v)
+            }
+            "OrchestrationV2CommandThreadGuestMessageDismiss" => {
+                rt::<t3_api::types::OrchestrationV2CommandThreadGuestMessageDismiss>(v)
+            }
+            "OrchestrationV2CommandThreadGuestShareClose" => {
+                rt::<t3_api::types::OrchestrationV2CommandThreadGuestShareClose>(v)
             }
             "OrchestrationV2CommandThreadInteractionModeSet" => {
                 rt::<t3_api::types::OrchestrationV2CommandThreadInteractionModeSet>(v)
@@ -1236,8 +1266,14 @@ pub fn roundtrip(
             "OrchestrationV2DispatchCommandResult" => {
                 rt::<t3_api::types::OrchestrationV2DispatchCommandResult>(v)
             }
+            "OrchestrationV2GetOlderSettledThreadsInput" => {
+                rt::<t3_api::types::OrchestrationV2GetOlderSettledThreadsInput>(v)
+            }
             "OrchestrationV2GetShellSnapshotError" => {
                 rt::<t3_api::types::OrchestrationV2GetShellSnapshotError>(v)
+            }
+            "OrchestrationV2GetThreadFamilyInput" => {
+                rt::<t3_api::types::OrchestrationV2GetThreadFamilyInput>(v)
             }
             "OrchestrationV2GetThreadProjectionError" => {
                 rt::<t3_api::types::OrchestrationV2GetThreadProjectionError>(v)
@@ -1790,6 +1826,12 @@ pub fn roundtrip(
             "OrchestrationV2GetWorkflowScriptResult" => {
                 rt::<t3_api::types::OrchestrationV2GetWorkflowScriptResult>(v)
             }
+            "OrchestrationV2GetWorktreeThreadIdsInput" => {
+                rt::<t3_api::types::OrchestrationV2GetWorktreeThreadIdsInput>(v)
+            }
+            "OrchestrationV2OlderSettledThreadsPage" => {
+                rt::<t3_api::types::OrchestrationV2OlderSettledThreadsPage>(v)
+            }
             "OrchestrationV2PlanArtifact" => {
                 rt::<t3_api::tagged::OrchestrationV2PlanArtifact>(v)
             }
@@ -1840,6 +1882,12 @@ pub fn roundtrip(
             "OrchestrationV2SearchThreadResult" => {
                 rt::<t3_api::types::OrchestrationV2SearchThreadResult>(v)
             }
+            "OrchestrationV2SearchThreadsInput" => {
+                rt::<t3_api::types::OrchestrationV2SearchThreadsInput>(v)
+            }
+            "OrchestrationV2SearchThreadsResult" => {
+                rt::<t3_api::types::OrchestrationV2SearchThreadsResult>(v)
+            }
             "OrchestrationV2ShellSnapshot" => {
                 rt::<t3_api::types::OrchestrationV2ShellSnapshot>(v)
             }
@@ -1884,6 +1932,9 @@ pub fn roundtrip(
             }
             "OrchestrationV2ThreadDetailSnapshot" => {
                 rt::<t3_api::types::OrchestrationV2ThreadDetailSnapshot>(v)
+            }
+            "OrchestrationV2ThreadFamily" => {
+                rt::<t3_api::types::OrchestrationV2ThreadFamily>(v)
             }
             "OrchestrationV2ThreadForkSourcePoint" => {
                 rt::<t3_api::tagged::OrchestrationV2ThreadForkSourcePoint>(v)
@@ -3793,6 +3844,9 @@ pub fn roundtrip(
                     t3_api::types::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemWebSearch,
                 >(v)
             }
+            "OrchestrationV2ThreadShell" => {
+                rt::<t3_api::types::OrchestrationV2ThreadShell>(v)
+            }
             "OrchestrationV2ThreadShellForkedFrom" => {
                 rt::<t3_api::tagged::OrchestrationV2ThreadShellForkedFrom>(v)
             }
@@ -4198,6 +4252,9 @@ pub fn roundtrip(
             "OrchestrationV2TurnItemWebSearch" => {
                 rt::<t3_api::types::OrchestrationV2TurnItemWebSearch>(v)
             }
+            "OrchestrationV2WorktreeThreadIds" => {
+                rt::<t3_api::types::OrchestrationV2WorktreeThreadIds>(v)
+            }
             "OtlpEndpointCheckInput" => rt::<t3_api::types::OtlpEndpointCheckInput>(v),
             "OtlpEndpointCheckResult" => rt::<t3_api::tagged::OtlpEndpointCheckResult>(v),
             "OtlpEndpointCheckResultAccepted" => {
@@ -4570,6 +4627,12 @@ pub fn roundtrip(
             "PullRequestFilesViewedResult" => {
                 rt::<t3_api::types::PullRequestFilesViewedResult>(v)
             }
+            "PullRequestFilterOptions" => {
+                rt::<t3_api::types::PullRequestFilterOptions>(v)
+            }
+            "PullRequestFilterOptionsInput" => {
+                rt::<t3_api::types::PullRequestFilterOptionsInput>(v)
+            }
             "PullRequestInvalidateInput" => {
                 rt::<t3_api::types::PullRequestInvalidateInput>(v)
             }
@@ -4606,6 +4669,18 @@ pub fn roundtrip(
             }
             "PullRequestReviewCapabilities" => {
                 rt::<t3_api::types::PullRequestReviewCapabilities>(v)
+            }
+            "PullRequestReviewCommentDraftStartPosition" => {
+                rt::<t3_api::tagged::PullRequestReviewCommentDraftStartPosition>(v)
+            }
+            "PullRequestReviewCommentDraftStartPositionAdded" => {
+                rt::<t3_api::types::PullRequestReviewCommentDraftStartPositionAdded>(v)
+            }
+            "PullRequestReviewCommentDraftStartPositionContext" => {
+                rt::<t3_api::types::PullRequestReviewCommentDraftStartPositionContext>(v)
+            }
+            "PullRequestReviewCommentDraftStartPositionDeleted" => {
+                rt::<t3_api::types::PullRequestReviewCommentDraftStartPositionDeleted>(v)
             }
             "PullRequestReviewGuideResult" => {
                 rt::<t3_api::types::PullRequestReviewGuideResult>(v)
@@ -4707,6 +4782,9 @@ pub fn roundtrip(
             }
             "PullRequestsFilesViewedRpcError" => {
                 rt::<t3_api::tagged::PullRequestsFilesViewedRpcError>(v)
+            }
+            "PullRequestsFilterOptionsRpcError" => {
+                rt::<t3_api::tagged::PullRequestsFilterOptionsRpcError>(v)
             }
             "PullRequestsGenerateReviewGuideRpcError" => {
                 rt::<t3_api::tagged::PullRequestsGenerateReviewGuideRpcError>(v)
@@ -5793,6 +5871,7 @@ pub fn roundtrip(
             "VcsPullInput" => rt::<t3_api::types::VcsPullInput>(v),
             "VcsPullResult" => rt::<t3_api::types::VcsPullResult>(v),
             "VcsPullRpcError" => rt::<t3_api::tagged::VcsPullRpcError>(v),
+            "VcsRefreshStatusPayload" => rt::<t3_api::types::VcsRefreshStatusPayload>(v),
             "VcsRefreshStatusRpcError" => {
                 rt::<t3_api::tagged::VcsRefreshStatusRpcError>(v)
             }
@@ -5803,7 +5882,6 @@ pub fn roundtrip(
             "VcsRepositoryDetectionError" => {
                 rt::<t3_api::types::VcsRepositoryDetectionError>(v)
             }
-            "VcsStatusInput" => rt::<t3_api::types::VcsStatusInput>(v),
             "VcsStatusResult" => rt::<t3_api::types::VcsStatusResult>(v),
             "VcsStatusStreamEvent" => rt::<t3_api::tagged::VcsStatusStreamEvent>(v),
             "VcsStatusStreamEventLocalUpdated" => {

@@ -35,7 +35,7 @@ crate::tagged_union! {
         "AssetProjectFaviconResolutionError" => AssetProjectFaviconResolutionError(types::AssetProjectFaviconResolutionError),
         "AssetProjectFaviconInspectionError" => AssetProjectFaviconInspectionError(types::AssetProjectFaviconInspectionError),
         "AssetProjectFaviconNotFoundError" => AssetProjectFaviconNotFoundError(types::AssetProjectFaviconNotFoundError),
-        "AssetGitHubMediaUrlValidationError" => AssetGitHubMediaUrlValidationError(types::AssetGitHubMediaUrlValidationError),
+        "AssetGitHubMediaUrlValidationError" => AssetGitHubMediaUrlValidationError(types::AssetSourceControlMediaUrlValidationError),
         "AssetSigningKeyLoadError" => AssetSigningKeyLoadError(types::AssetSigningKeyLoadError),
     }
 }
@@ -69,7 +69,7 @@ crate::tagged_union! {
         "AssetProjectFaviconResolutionError" => AssetProjectFaviconResolutionError(types::AssetProjectFaviconResolutionError),
         "AssetProjectFaviconInspectionError" => AssetProjectFaviconInspectionError(types::AssetProjectFaviconInspectionError),
         "AssetProjectFaviconNotFoundError" => AssetProjectFaviconNotFoundError(types::AssetProjectFaviconNotFoundError),
-        "AssetGitHubMediaUrlValidationError" => AssetGitHubMediaUrlValidationError(types::AssetGitHubMediaUrlValidationError),
+        "AssetGitHubMediaUrlValidationError" => AssetGitHubMediaUrlValidationError(types::AssetSourceControlMediaUrlValidationError),
         "AssetSigningKeyLoadError" => AssetSigningKeyLoadError(types::AssetSigningKeyLoadError),
         "EnvironmentAuthorizationError" => EnvironmentAuthorizationError(types::EnvironmentAuthorizationError),
     }
@@ -405,6 +405,14 @@ crate::tagged_union! {
 }
 
 crate::tagged_union! {
+    /// `GuestShareCreateRpcError`, discriminated by `_tag`.
+    pub enum GuestShareCreateRpcError: "_tag", open = false {
+        "GuestShareCreateError" => GuestShareCreateError(types::GuestShareCreateError),
+        "EnvironmentAuthorizationError" => EnvironmentAuthorizationError(types::EnvironmentAuthorizationError),
+    }
+}
+
+crate::tagged_union! {
     /// `HttpAuthRevokeClientError403`, discriminated by `_tag`.
     pub enum HttpAuthRevokeClientError403: "_tag", open = false {
         "EnvironmentScopeRequiredError" => EnvironmentScopeRequiredError(types::EnvironmentScopeRequiredError),
@@ -672,6 +680,22 @@ crate::tagged_union! {
 }
 
 crate::tagged_union! {
+    /// `OrchestrationGetOlderSettledThreadsRpcError`, discriminated by `_tag`.
+    pub enum OrchestrationGetOlderSettledThreadsRpcError: "_tag", open = false {
+        "OrchestrationV2GetShellSnapshotError" => OrchestrationV2GetShellSnapshotError(types::OrchestrationV2GetShellSnapshotError),
+        "EnvironmentAuthorizationError" => EnvironmentAuthorizationError(types::EnvironmentAuthorizationError),
+    }
+}
+
+crate::tagged_union! {
+    /// `OrchestrationGetThreadFamilyRpcError`, discriminated by `_tag`.
+    pub enum OrchestrationGetThreadFamilyRpcError: "_tag", open = false {
+        "OrchestrationV2GetShellSnapshotError" => OrchestrationV2GetShellSnapshotError(types::OrchestrationV2GetShellSnapshotError),
+        "EnvironmentAuthorizationError" => EnvironmentAuthorizationError(types::EnvironmentAuthorizationError),
+    }
+}
+
+crate::tagged_union! {
     /// `OrchestrationGetThreadProjectionRpcError`, discriminated by `_tag`.
     pub enum OrchestrationGetThreadProjectionRpcError: "_tag", open = false {
         "OrchestrationV2GetThreadProjectionError" => OrchestrationV2GetThreadProjectionError(types::OrchestrationV2GetThreadProjectionError),
@@ -699,6 +723,14 @@ crate::tagged_union! {
     /// `OrchestrationGetWorkflowScriptRpcError`, discriminated by `_tag`.
     pub enum OrchestrationGetWorkflowScriptRpcError: "_tag", open = false {
         "OrchestrationGetWorkflowScriptError" => OrchestrationGetWorkflowScriptError(types::OrchestrationGetWorkflowScriptError),
+        "EnvironmentAuthorizationError" => EnvironmentAuthorizationError(types::EnvironmentAuthorizationError),
+    }
+}
+
+crate::tagged_union! {
+    /// `OrchestrationGetWorktreeThreadIdsRpcError`, discriminated by `_tag`.
+    pub enum OrchestrationGetWorktreeThreadIdsRpcError: "_tag", open = false {
+        "OrchestrationV2GetShellSnapshotError" => OrchestrationV2GetShellSnapshotError(types::OrchestrationV2GetShellSnapshotError),
         "EnvironmentAuthorizationError" => EnvironmentAuthorizationError(types::EnvironmentAuthorizationError),
     }
 }
@@ -808,6 +840,8 @@ crate::tagged_union! {
         "thread.stop" => ThreadStop(types::OrchestrationV2CommandThreadStop),
         "thread.create" => ThreadCreate(types::OrchestrationV2CommandThreadCreate),
         "thread.archive" => ThreadArchive(types::OrchestrationV2CommandThreadArchive),
+        "thread.guest-share.close" => ThreadGuestShareClose(types::OrchestrationV2CommandThreadGuestShareClose),
+        "thread.guest-message.dismiss" => ThreadGuestMessageDismiss(types::OrchestrationV2CommandThreadGuestMessageDismiss),
         "thread.unarchive" => ThreadUnarchive(types::OrchestrationV2CommandThreadUnarchive),
         "thread.delete" => ThreadDelete(types::OrchestrationV2CommandThreadDelete),
         "thread.settle" => ThreadSettle(types::OrchestrationV2CommandThreadSettle),
@@ -843,6 +877,7 @@ crate::tagged_union! {
         "run.interrupt" => RunInterrupt(types::OrchestrationV2CommandRunInterrupt),
         "queued-message.promote-to-steer" => QueuedMessagePromoteToSteer(types::OrchestrationV2CommandQueuedMessagePromoteToSteer),
         "queue.resume" => QueueResume(types::OrchestrationV2CommandQueueResume),
+        "queued-run.start" => QueuedRunStart(types::OrchestrationV2CommandQueuedRunStart),
         "queued-run.reorder" => QueuedRunReorder(types::OrchestrationV2CommandQueuedRunReorder),
         "queued-run.cancel" => QueuedRunCancel(types::OrchestrationV2CommandQueuedRunCancel),
         "queued-run.edit" => QueuedRunEdit(types::OrchestrationV2CommandQueuedRunEdit),
@@ -2695,6 +2730,15 @@ crate::tagged_union! {
 }
 
 crate::tagged_union! {
+    /// `PullRequestReviewCommentDraftStartPosition`, discriminated by `kind`.
+    pub enum PullRequestReviewCommentDraftStartPosition: "kind", open = false {
+        "added" => Added(types::PullRequestReviewCommentDraftStartPositionAdded),
+        "deleted" => Deleted(types::PullRequestReviewCommentDraftStartPositionDeleted),
+        "context" => Context(types::PullRequestReviewCommentDraftStartPositionContext),
+    }
+}
+
+crate::tagged_union! {
     /// `PullRequestReviewGuideResultRun`, discriminated by `_tag`.
     pub enum PullRequestReviewGuideResultRun: "_tag", open = false {
         "Running" => Running(types::PullRequestReviewGuideResultRunRunning),
@@ -2776,6 +2820,15 @@ crate::tagged_union! {
 crate::tagged_union! {
     /// `PullRequestsFilesViewedRpcError`, discriminated by `_tag`.
     pub enum PullRequestsFilesViewedRpcError: "_tag", open = false {
+        "PullRequestUnavailableError" => PullRequestUnavailableError(types::PullRequestUnavailableError),
+        "PullRequestOperationError" => PullRequestOperationError(types::PullRequestOperationError),
+        "EnvironmentAuthorizationError" => EnvironmentAuthorizationError(types::EnvironmentAuthorizationError),
+    }
+}
+
+crate::tagged_union! {
+    /// `PullRequestsFilterOptionsRpcError`, discriminated by `_tag`.
+    pub enum PullRequestsFilterOptionsRpcError: "_tag", open = false {
         "PullRequestUnavailableError" => PullRequestUnavailableError(types::PullRequestUnavailableError),
         "PullRequestOperationError" => PullRequestOperationError(types::PullRequestOperationError),
         "EnvironmentAuthorizationError" => EnvironmentAuthorizationError(types::EnvironmentAuthorizationError),

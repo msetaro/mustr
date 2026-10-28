@@ -1,3 +1,3 @@
-t3_server_version=0.1.1
+t3_server_version=0.1.3
 orchestration_protocol=2
-contracts_commit=fe27e8e3dc
+contracts_commit=d2c440312e5f39d59827ed466838a623516454d6

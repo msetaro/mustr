@@ -1,1 +1,1 @@
-[{"_tag":"PullRequestUnavailableError","reason":"provider-unsupported","provider":"uiau"},{"_tag":"PullRequestUnavailableError","reason":"provider-unsupported","provider":"g"},{"_tag":"PullRequestUnavailableError","reason":"cli-missing","provider":"qzk"}]
+[{"_tag":"PullRequestUnavailableError","reason":"cli-missing","provider":null},{"_tag":"PullRequestUnavailableError","reason":"cli-missing","provider":null,"requirement":"P"},{"_tag":"PullRequestUnavailableError","reason":"cli-missing","provider":"zkhi","requirement":null}]
