@@ -3,7 +3,10 @@
 //! `initialize_workspace`, crates/zed/src/zed.rs), and the dock buttons that `Workspace::new`
 //! adds, which mustr removes; the icon rail replaces them.
 
-use crate::t3_connection::{ConnectionStatus, T3Connection};
+use crate::{
+    t3_connection::{ConnectionStatus, T3Connection},
+    t3_engine::T3Mode,
+};
 use gpui::{
     App, AppContext as _, Context, Entity, Hsla, IntoElement, ParentElement as _, Render,
     SharedString, Styled as _, Subscription, Task, Window, div, px,
@@ -125,11 +128,19 @@ impl Render for SyncStatus {
                     None => "Synced".into(),
                 },
             ),
-            ConnectionStatus::Connecting(_) => {
-                (palette.text_muted.hsla(), "Connecting to T3…".into())
-            }
+            ConnectionStatus::Connecting(_) => (
+                palette.text_muted.hsla(),
+                if self.connection.read(cx).effective_mode() == T3Mode::Embedded {
+                    "Starting agents engine…".into()
+                } else {
+                    "Connecting to T3…".into()
+                },
+            ),
             ConnectionStatus::NeedsPairing(_) => {
                 (palette.warning.hsla(), "Not paired with T3".into())
+            }
+            ConnectionStatus::NeedsSetup(_) => {
+                (palette.warning.hsla(), "Agents engine needs setup".into())
             }
             ConnectionStatus::Failed(_) => (cx.theme().status().error, "T3 offline".into()),
         };
