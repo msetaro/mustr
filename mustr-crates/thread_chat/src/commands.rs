@@ -17,8 +17,8 @@ use t3_api::{
         OrchestrationV2ThreadLaunchWorkspaceStrategy, SecretRequestAnswerInputAnswer,
     },
     types::{
-        ChatImageAttachment, ChatImageAttachmentType, ModelSelection, OrchestrationV2Actor,
-        OrchestrationV2CommandDispatchModeQueueAfterActive,
+        ChatImageAttachment, ChatImageAttachmentType, ModelSelection, OrchestrationMessageContext,
+        OrchestrationV2Actor, OrchestrationV2CommandDispatchModeQueueAfterActive,
         OrchestrationV2CommandDispatchModeQueueAfterActiveType,
         OrchestrationV2CommandDispatchModeStartImmediately,
         OrchestrationV2CommandDispatchModeStartImmediatelyType,
@@ -114,6 +114,8 @@ pub struct Message {
     pub source_plan: Option<PlanRef>,
     /// A title for T3 to name the thread from, if it has none yet.
     pub title_seed: Option<String>,
+    /// The threads and pull requests it mentions (`mentions.rs`).
+    pub context: Option<OrchestrationMessageContext>,
 }
 
 impl Message {
@@ -182,7 +184,7 @@ pub fn message(
     OrchestrationV2Command::MessageDispatch(OrchestrationV2CommandMessageDispatch {
         attachments: message.attachments,
         command_id: ids.command_id,
-        context: None,
+        context: message.context,
         created_by: OrchestrationV2Actor::User,
         creation_source: CREATION_SOURCE,
         delegated_completion: None,
@@ -922,6 +924,37 @@ mod tests {
                 "modelSelection": { "instanceId": "claudeAgent", "model": "claude-sonnet" },
                 "sourcePlanRef": { "threadId": "thread-1", "planId": "plan-1" },
                 "titleSeed": "Retries",
+                "deliveryIntent": "auto",
+                "dispatchMode": { "type": "start_immediately" }
+            })
+        );
+    }
+
+    #[test]
+    fn messages_carry_the_context_of_their_mentions() {
+        let record = json!({
+            "version": 1, "kind": "thread", "contextId": "thread_thread-2", "label": "Retries",
+            "environmentId": "env-1", "threadId": "thread-2", "title": "Retries"
+        });
+        let message = Message {
+            context: Some(OrchestrationMessageContext {
+                records: vec![record.clone()],
+                version: 1.0.try_into().unwrap(),
+            }),
+            ..Message::text("Like [Retries](t3-context://v1/thread/thread_thread-2) did")
+        };
+        assert_eq!(
+            wire(&super::message("thread-1", message, Delivery::Auto, ids())),
+            json!({
+                "type": "message.dispatch",
+                "commandId": "command-1",
+                "createdBy": "user",
+                "creationSource": "web",
+                "threadId": "thread-1",
+                "messageId": "message-1",
+                "text": "Like [Retries](t3-context://v1/thread/thread_thread-2) did",
+                "attachments": [],
+                "context": { "version": 1.0, "records": [record] },
                 "deliveryIntent": "auto",
                 "dispatchMode": { "type": "start_immediately" }
             })

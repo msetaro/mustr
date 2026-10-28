@@ -58,6 +58,8 @@ pub struct ComposerState {
     /// Running commands' output as it streams, by item id.
     pub(crate) live_outputs: collections::HashMap<String, LiveOutput>,
     pub(crate) output_streams: collections::HashMap<String, gpui::Task<()>>,
+    /// The menu of mentions, commands, and skills, and the chips in the text (`mentions.rs`).
+    pub(crate) menu: crate::mentions::ComposerMenu,
     _save_draft: Option<gpui::Task<()>>,
 }
 
@@ -90,7 +92,15 @@ struct ComposerDrafts(collections::HashMap<String, String>);
 
 impl gpui::Global for ComposerDrafts {}
 
+/// The records of the threads and pull requests a draft mentions, by thread, kept like its
+/// text, so its chips send the same context after a restart.
+#[derive(Default)]
+struct DraftContexts(collections::HashMap<String, Vec<serde_json::Value>>);
+
+impl gpui::Global for DraftContexts {}
+
 const DRAFT_KEY_PREFIX: &str = "mustr-thread-draft:";
+const DRAFT_CONTEXT_KEY_PREFIX: &str = "mustr-thread-draft-context:";
 const DRAFT_SAVE_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// The draft saved for a thread, if there is one.
@@ -111,6 +121,27 @@ pub(crate) fn saved_draft(thread_id: &str, cx: &App) -> Option<String> {
         .filter(|draft| !draft.trim().is_empty())
 }
 
+/// The records a thread's draft mentions, as [`saved_draft`] keeps its text.
+fn saved_draft_context(thread_id: &str, cx: &App) -> Vec<(String, serde_json::Value)> {
+    let records = match cx
+        .try_global::<DraftContexts>()
+        .and_then(|contexts| contexts.0.get(thread_id))
+    {
+        Some(records) => records.clone(),
+        None if cx.has_global::<db::AppDatabase>() => db::kvp::KeyValueStore::global(cx)
+            .read_kvp(&format!("{DRAFT_CONTEXT_KEY_PREFIX}{thread_id}"))
+            .ok()
+            .flatten()
+            .and_then(|records| serde_json::from_str(&records).ok())
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    records
+        .into_iter()
+        .filter_map(|record| Some((record["contextId"].as_str()?.to_string(), record)))
+        .collect()
+}
+
 impl ThreadView {
     /// Puts back the draft saved for this thread, if the composer is empty.
     pub(crate) fn restore_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -121,8 +152,10 @@ impl ThreadView {
             return;
         };
         if self.composer_text(cx).is_empty() {
+            self.composer_state.menu.records = saved_draft_context(thread_id, cx);
             self.composer
                 .update(cx, |editor, cx| editor.set_text(draft, window, cx));
+            self.draw_mention_chips(window, cx);
         }
     }
 
@@ -132,6 +165,16 @@ impl ThreadView {
             return;
         };
         let text = self.composer_text(cx);
+        let records = crate::mentions::referenced_records(&text, &self.composer_state.menu.records)
+            .into_iter()
+            .map(|(_, record)| record)
+            .collect::<Vec<_>>();
+        let contexts = &mut cx.default_global::<DraftContexts>().0;
+        if records.is_empty() {
+            contexts.remove(&thread_id);
+        } else {
+            contexts.insert(thread_id.clone(), records.clone());
+        }
         let drafts = &mut cx.default_global::<ComposerDrafts>().0;
         let unchanged = drafts.get(&thread_id).map(String::as_str).unwrap_or("") == text;
         if text.trim().is_empty() {
@@ -144,6 +187,7 @@ impl ThreadView {
         }
         let store = db::kvp::KeyValueStore::global(cx);
         let key = format!("{DRAFT_KEY_PREFIX}{thread_id}");
+        let context_key = format!("{DRAFT_CONTEXT_KEY_PREFIX}{thread_id}");
         // Saved once typing pauses; a newer edit replaces the pending save.
         self.composer_state._save_draft = Some(cx.spawn(async move |_, cx| {
             cx.background_executor().timer(DRAFT_SAVE_DELAY).await;
@@ -154,6 +198,17 @@ impl ThreadView {
             };
             if let Err(error) = saved {
                 log::warn!("couldn't save the thread's draft: {error:#}");
+            }
+            let saved = if records.is_empty() {
+                store.delete_kvp(context_key).await
+            } else {
+                match serde_json::to_string(&records) {
+                    Ok(records) => store.write_kvp(context_key, records).await,
+                    Err(error) => Err(error.into()),
+                }
+            };
+            if let Err(error) = saved {
+                log::warn!("couldn't save what the thread's draft mentions: {error:#}");
             }
         }));
     }
@@ -207,6 +262,7 @@ impl ThreadView {
             editor.set_text(text, window, cx);
             editor.move_to_end(&editor::actions::MoveToEnd, window, cx);
         });
+        self.draw_mention_chips(window, cx);
     }
 
     /// ArrowUp in an empty composer recalls the last prompt sent, then earlier ones. Like T3, it
@@ -217,6 +273,11 @@ impl ThreadView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.composer_state.menu.items.is_empty() {
+            cx.stop_propagation();
+            self.move_menu_highlight(-1, cx);
+            return;
+        }
         if !self.images.composer.is_empty() || self.cursor_row(cx).0 != 0 {
             return;
         }
@@ -248,6 +309,11 @@ impl ThreadView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.composer_state.menu.items.is_empty() {
+            cx.stop_propagation();
+            self.move_menu_highlight(1, cx);
+            return;
+        }
         let (row, last_row) = self.cursor_row(cx);
         let text = self.composer_text(cx);
         let Some((index, recalled)) = self.composer_state.recalled.clone() else {
@@ -265,6 +331,22 @@ impl ThreadView {
                 .map(|prompt| (previous, prompt.clone()))
         });
         self.show_recalled(recalled, window, cx);
+    }
+
+    /// Tab picks the menu's highlighted item, as Enter does.
+    fn on_tab(&mut self, _: &editor::actions::Tab, window: &mut Window, cx: &mut Context<Self>) {
+        if self.composer_state.menu.highlighted_item().is_some() {
+            cx.stop_propagation();
+            self.pick_highlighted(window, cx);
+        }
+    }
+
+    /// Escape closes the menu until the word that opened it changes.
+    fn on_cancel(&mut self, _: &editor::actions::Cancel, _: &mut Window, cx: &mut Context<Self>) {
+        if self.composer_state.menu.is_open() {
+            cx.stop_propagation();
+            self.dismiss_menu(cx);
+        }
     }
 }
 
@@ -296,7 +378,11 @@ pub(crate) fn observe_composer(
     cx: &mut Context<ThreadView>,
 ) -> Subscription {
     cx.subscribe(composer, |this, _, event: &EditorEvent, cx| {
+        if matches!(event, EditorEvent::SelectionsChanged { .. }) {
+            this.refresh_menu(cx);
+        }
         if matches!(event, EditorEvent::BufferEdited { .. }) {
+            this.refresh_menu(cx);
             this.save_draft(cx);
             let text = this.composer_text(cx);
             if this
@@ -345,6 +431,18 @@ impl ThreadView {
         if (text.trim().is_empty() && !has_images) || self.sending {
             return;
         }
+        let context = self.mention_context(&text);
+        // `/plan` or `/default` alone switches the mode instead of sending.
+        if !has_images
+            && context.is_none()
+            && let Some(command) = crate::slash_commands::standalone_mode_command(&text)
+        {
+            self.switch_interaction_mode(command, cx);
+            self.composer
+                .update(cx, |editor, cx| editor.clear(window, cx));
+            cx.notify();
+            return;
+        }
         // Like T3's Send: it waits for images still going up, and retries failed ones first.
         if self.images.uploading() {
             self.images.send_when_uploaded = Some(delivery);
@@ -371,6 +469,7 @@ impl ThreadView {
             .collect::<Vec<_>>();
         let message = Message {
             attachments: self.images.attachments(),
+            context,
             ..Message::text(text.trim())
         };
         let command = commands::message(&thread_id, message, delivery, CommandIds::new());
@@ -487,6 +586,7 @@ impl ThreadView {
             editor.set_text(message.text, window, cx);
             editor.move_to_end(&editor::actions::MoveToEnd, window, cx);
         });
+        self.draw_mention_chips(window, cx);
         window.focus(&self.composer.focus_handle(cx), cx);
         cx.notify();
     }
@@ -919,6 +1019,11 @@ impl ThreadView {
     }
 
     fn on_send(&mut self, _: &SendMessage, window: &mut Window, cx: &mut Context<Self>) {
+        // While the menu shows something, Enter picks it (`composerCommandKey.ts` in T3).
+        if self.composer_state.menu.highlighted_item().is_some() {
+            self.pick_highlighted(window, cx);
+            return;
+        }
         let running = self.thread_state().is_some_and(|state| state.is_running());
         self.send(
             if running {
@@ -1670,6 +1775,7 @@ impl ThreadView {
                                 ),
                         )
                     })
+                    .children(self.render_composer_menu(cx))
                     .child(
                         v_flex()
                             .id("thread-composer")
@@ -1681,6 +1787,8 @@ impl ThreadView {
                             .capture_action(cx.listener(Self::on_paste))
                             .capture_action(cx.listener(Self::on_move_up))
                             .capture_action(cx.listener(Self::on_move_down))
+                            .capture_action(cx.listener(Self::on_tab))
+                            .capture_action(cx.listener(Self::on_cancel))
                             .drag_over::<ExternalPaths>(|style, _, _, cx| {
                                 let palette = mustr_ui::palette(cx);
                                 style

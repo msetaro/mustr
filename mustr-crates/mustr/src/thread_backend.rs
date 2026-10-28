@@ -294,6 +294,7 @@ impl ThreadBackend for T3ThreadBackend {
             Access::Read => None,
             Access::Operate => session.operate_blocked_reason(),
             Access::SourceControlWrite => session.write_blocked_reason(),
+            Access::FilesystemRead => session.filesystem_blocked_reason(),
         }
     }
 }

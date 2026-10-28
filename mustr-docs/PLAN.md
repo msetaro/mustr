@@ -146,7 +146,7 @@ mustr runs on T3 Code's engine, unmodified. The setting `"t3": {"mode": …}` pi
 ### Pairing
 - **Installed and external modes** use the same path as T3's mobile app. A one-time pairing credential (from `t3 auth pairing create --json` run with the installed runtime, or a pasted pairing link) is exchanged at `POST /oauth/token` (OAuth token exchange) for a bearer token that lasts about 30 days.
 - **The embedded engine needs no pairing.** mustr hands it a random secret in its bootstrap envelope. It then exchanges the token the secret derives (HMAC-SHA256 over 12-hour windows, as T3's desktop app does) at the same endpoint, with the `environment-bootstrap` grant. Nothing is stored; each launch signs in again.
-- mustr asks only for the scopes it needs: `orchestration:read`, `orchestration:operate`, `source-control:write`, and later `terminal:read`/`terminal:operate`. Never `access:write` or `relay:*`.
+- mustr asks only for the scopes it needs: `orchestration:read`, `orchestration:operate`, `source-control:write`, `filesystem:read` (the composer's `@` on threads whose folder is on T3's machine), and later `terminal:read`/`terminal:operate`. Never `access:write` or `relay:*`.
 - The bearer token is stored in the OS keychain and is the only secret mustr holds. Forge tokens stay in T3.
 - **Verified in the M0 spike** (`mustr-docs/T3-PROTOCOL.md`):
   - Connecting: `POST /api/auth/websocket-ticket`, then `ws://…/ws?orchestrationProtocol=2&wsTicket=…`.

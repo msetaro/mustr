@@ -462,4 +462,7 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     macos::init(cx);
     // WP8, notifications:
     notifications::init(cx);
+    // WP9, composer mentions and slash commands: `@` searches a thread's folder on this machine
+    // only when T3's folders are here.
+    thread_chat::set_local_folders(worktrees::worktrees_are_local, cx);
 }

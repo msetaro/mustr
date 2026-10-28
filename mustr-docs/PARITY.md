@@ -102,8 +102,8 @@ T3's engine inside mustr is in progress on `m3/embedded-engine` and isn't counte
 | Send, queue, steer, stop | Enter sends; follow-up behavior; `mod+Enter` does the opposite | `message.dispatch` (`dispatchMode`, `deliveryIntent`), `thread.stop` | Done (`thread_chat/src/thread_view.rs`, `commands.rs`) | — | P0 |
 | Image attachments | Paste, drag or pick images, up to 10 MiB each (`chat/ComposerAttachmentStrip.tsx`, `chat/useComposerAttachmentIntake.ts`) | `attachments.createUploadUrl`, then `POST /api/attachments/upload/:token`, then `message.dispatch.attachments` | Missing: `attachments: Vec::new()` (`commands.rs`) | M | P0: screenshots are a daily input |
 | File attachments, big pastes | Up to 100 files at 50 MiB each; pastes of 32 KiB or more become files (`chat/composerAttachmentFiles.ts`) | Same, with `type: "file"` | Missing | S (after images) | P1 |
-| @-mentions and context chips | `@` for files, folders and threads, and `#` for PRs; terminal excerpts and review comments show as inline chips (`chat/useComposerMenuItems.ts`, `components/ContextChip.tsx`) | `projects.searchEntries` (needs `filesystem:read`), `pullRequests.list`; `message.dispatch.context` | Missing | M | P1 (needs a new scope) |
-| Slash commands, skills | A `/` menu and `$skill`. T3's own commands are `/model`, `/plan` and `/default`; providers add `/compact` and `/goal` (`chat/ComposerCommandMenu.tsx`, `providerSkillSearch.ts`) | Skills and commands in `server.getConfig` providers; `message.dispatch` | Partial: raw text reaches the provider, so its own commands at the start of a message work; no menu, no `/model` or `/plan` | M | P1 |
+| @-mentions and context chips | `@` for files, folders and threads, and `#` for PRs; terminal excerpts and review comments show as inline chips (`chat/useComposerMenuItems.ts`, `components/ContextChip.tsx`) | `projects.searchEntries` (needs `filesystem:read`), `pullRequests.list`; `message.dispatch.context` | Done (`thread_chat/src/mentions.rs`): files are searched on this machine with Zed's fuzzy matcher, and through `projects.searchEntries` only when T3's folders are elsewhere. Terminal and review-comment chips are still missing | M | P1 |
+| Slash commands, skills | A `/` menu and `$skill`. T3's own commands are `/model`, `/plan` and `/default`; providers add `/compact` and `/goal` (`chat/ComposerCommandMenu.tsx`, `providerSkillSearch.ts`) | Skills and commands in `server.getConfig` providers; `message.dispatch` | Done (`thread_chat/src/slash_commands.rs`) | M | P1 |
 | Drafts kept per thread | Drafts survive closing and reloading (`composerDraftStore.ts`) | Local | Missing: the text lives in the view | S | P1: PLAN's "drafts are never lost" |
 | Recall a sent prompt | ArrowUp in an empty composer (`chat/composerPromptHistory.ts`) | Local | Missing | S | P1 |
 | Prompt stash | `mod+S` saves a prompt for later (`promptStashStore.ts`) | Local | Missing | S | P2 |
@@ -293,10 +293,11 @@ until the pin moves:
 - **Skip:** 11.
 - **No priority:** 2 done rows.
 
-**Scopes:** P0 fits mustr's current grant (`orchestration:read`, `orchestration:operate`,
+**Scopes:** P0 fits mustr's grant (`orchestration:read`, `orchestration:operate`,
 `source-control:write`), except T3's terminals for remote threads, which need `terminal:read` and
-`terminal:operate`. Local threads use Zed's terminal and need no scope. P1 adds `filesystem:read`
-(@-mentions), `settings:write` and `providers:manage`. `access:*` and `relay:*` stay out.
+`terminal:operate`. Local threads use Zed's terminal and need no scope. mustr now also asks for
+`filesystem:read`, which `@` uses only when a thread's folder is on T3's machine. P1 adds
+`settings:write` and `providers:manage`. `access:*` and `relay:*` stay out.
 
 ## 3. Recommended build order
 
