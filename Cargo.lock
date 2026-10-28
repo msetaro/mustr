@@ -11111,6 +11111,7 @@ dependencies = [
  "lsp_locations",
  "menu",
  "migrator",
+ "mustr_ui",
  "node_runtime",
  "parking_lot",
  "paths",

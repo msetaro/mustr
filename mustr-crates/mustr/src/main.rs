@@ -296,6 +296,7 @@ fn watch_node_options(cx: &mut App) -> watch::Receiver<Option<NodeBinaryOptions>
 /// Initializes the Zed features mustr keeps. See the init inventory in
 /// mustr-docs/ZED-INTEGRATION.md for what's left out and why.
 fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
+    mustr_ui::init(cx);
     command_palette::init(cx);
     themes::init(app_state.fs.clone(), app_state.languages.clone(), cx);
     editor::init(cx);
