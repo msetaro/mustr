@@ -24,6 +24,10 @@ mod timeline;
 // Work packages add their `mod` and `pub use` lines here, each package under its own label, so
 // their branches merge without conflicts (`mustr-docs/PARITY.md` §3).
 // WP1, thread settings and new threads:
+pub mod thread_settings;
+pub use settings_bar::{
+    ToggleModelOptions, ToggleModelPicker, TogglePermissionMode, TogglePlanMode,
+};
 // WP2, composer and timeline:
 // WP3, thread list and projects:
 
@@ -57,6 +61,11 @@ pub fn init(cx: &mut App) {
     // Work packages call their `init` here, each package under its own label
     // (`mustr-docs/PARITY.md` §3).
     // WP1, thread settings and new threads:
+    cx.observe_new(|workspace: &mut Workspace, _, _| {
+        settings_bar::register(workspace);
+        new_thread::register(workspace);
+    })
+    .detach();
     // WP2, composer and timeline:
     // WP3, thread list and projects:
     // WP5, subagents and workflows:
@@ -76,7 +85,15 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-shift-enter", SteerMessage, composer),
         // Work packages add their bindings here, each package under its own label
         // (`mustr-docs/PARITY.md` §3).
-        // WP1, thread settings and new threads:
+        // WP1, thread settings and new threads: T3's `mod+shift+m` (model), `mod+shift+e`
+        // (effort and the model's other options), and `mod+shift+a` (permission mode).
+        KeyBinding::new("secondary-shift-m", ToggleModelPicker, Some("ThreadView")),
+        KeyBinding::new("secondary-shift-e", ToggleModelOptions, Some("ThreadView")),
+        KeyBinding::new(
+            "secondary-shift-a",
+            TogglePermissionMode,
+            Some("ThreadView"),
+        ),
         // WP2, composer and timeline:
         // WP3, thread list and projects:
     ]
