@@ -154,18 +154,37 @@ impl StatusItemView for SyncStatus {
     }
 }
 
-/// The active review's pending comments. Drafts aren't written yet, so this only says there
-/// are none, while a review is active.
+/// The active review's pending comments: the drafts that go with the review when it's submitted.
 #[derive(Default)]
 pub struct DraftsStatus {
-    reviewing: bool,
+    review: Option<Entity<ReviewView>>,
+    _observe_review: Option<Subscription>,
+}
+
+impl DraftsStatus {
+    fn label(count: usize) -> SharedString {
+        match count {
+            0 => "No drafts".into(),
+            1 => "1 pending comment".into(),
+            count => format!("{count} pending comments").into(),
+        }
+    }
 }
 
 impl Render for DraftsStatus {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = mustr_ui::palette(cx);
-        div().when(self.reviewing, |this| {
-            this.child(status_text(palette.text_muted.hsla(), "No drafts"))
+        let count = self
+            .review
+            .as_ref()
+            .map(|review| review.read(cx).added_draft_count(cx));
+        div().when_some(count, |this, count| {
+            let color = if count == 0 {
+                palette.text_muted.hsla()
+            } else {
+                palette.accent.hsla()
+            };
+            this.child(status_text(color, Self::label(count)))
         })
     }
 }
@@ -177,7 +196,11 @@ impl StatusItemView for DraftsStatus {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.reviewing = is_review(item);
+        let review = item.and_then(|item| item.downcast::<ReviewView>());
+        self._observe_review = review
+            .as_ref()
+            .map(|review| cx.observe(review, |_, _, cx| cx.notify()));
+        self.review = review;
         cx.notify();
     }
 
@@ -244,6 +267,13 @@ mod tests {
         assert_eq!(ago(Duration::from_secs(12)), "12s ago");
         assert_eq!(ago(Duration::from_secs(185)), "3m ago");
         assert_eq!(ago(Duration::from_secs(7300)), "2h ago");
+    }
+
+    #[test]
+    fn drafts_labels() {
+        assert_eq!(DraftsStatus::label(0), "No drafts");
+        assert_eq!(DraftsStatus::label(1), "1 pending comment");
+        assert_eq!(DraftsStatus::label(3), "3 pending comments");
     }
 
     #[test]
