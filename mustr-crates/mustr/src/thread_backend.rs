@@ -59,6 +59,10 @@ pub fn init(session: CurrentSession, cx: &mut App) {
     } else {
         backend
     };
+    // Debug builds can play scripted thread changes over the shell, for checking notifications
+    // without an agent run (`MUSTR_DEBUG_SHELL_REPLAY`).
+    #[cfg(debug_assertions)]
+    let backend = crate::notifications::replay::wrap(backend);
     thread_chat::set_backend(backend, cx);
 }
 
