@@ -885,8 +885,11 @@ impl NewThreadForm {
     }
 }
 
+/// A labeled row of the form. A control too wide to go beside its label (a big
+/// `ui_font_size` in a small window) goes below it.
 fn field(label: &'static str, control: impl IntoElement) -> impl IntoElement {
     h_flex()
+        .flex_wrap()
         .gap_3()
         .child(
             div()
@@ -894,7 +897,7 @@ fn field(label: &'static str, control: impl IntoElement) -> impl IntoElement {
                 .flex_none()
                 .child(Label::new(label).size(LabelSize::Small).color(Color::Muted)),
         )
-        .child(h_flex().flex_1().min_w_0().child(control))
+        .child(h_flex().flex_auto().min_w_0().child(control))
 }
 
 fn note(text: impl Into<SharedString>, color: Color) -> impl IntoElement {

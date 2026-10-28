@@ -571,6 +571,7 @@ impl Render for ThreadSettingsBar {
             .id("thread-settings-bar")
             .gap_0p5()
             .min_w_0()
+            .flex_wrap()
             .child(model)
             .children(options)
             .child(access)

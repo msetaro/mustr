@@ -1812,7 +1812,11 @@ impl ThreadView {
                             )
                             .child(self.composer.clone())
                             .child(
+                                // When the composer is narrow (a big ui_font_size in a small
+                                // window), the row wraps rather than overlapping, and the
+                                // buttons stay together at the end.
                                 h_flex()
+                                    .flex_wrap()
                                     .gap_1p5()
                                     .child(self.settings_bar.clone())
                                     .child(
@@ -1845,22 +1849,27 @@ impl ThreadView {
                                                 .tooltip(Tooltip::text(blocked)),
                                         )
                                     })
-                                    .child(div().flex_1())
-                                    .when(
-                                        self.sending || self.images.send_when_uploaded.is_some(),
-                                        |this| {
-                                            this.child(
-                                                Label::new(if self.sending {
-                                                    "Sending…"
-                                                } else {
-                                                    "Sending once the images are up…"
-                                                })
-                                                .size(LabelSize::XSmall)
-                                                .color(Color::Muted),
+                                    .child(
+                                        h_flex()
+                                            .ml_auto()
+                                            .gap_1p5()
+                                            .when(
+                                                self.sending
+                                                    || self.images.send_when_uploaded.is_some(),
+                                                |this| {
+                                                    this.child(
+                                                        Label::new(if self.sending {
+                                                            "Sending…"
+                                                        } else {
+                                                            "Sending once the images are up…"
+                                                        })
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::Muted),
+                                                    )
+                                                },
                                             )
-                                        },
-                                    )
-                                    .children(buttons),
+                                            .children(buttons),
+                                    ),
                             ),
                     ),
             )
