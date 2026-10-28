@@ -31,6 +31,8 @@ mod zed_services;
 // Work packages add their `mod` lines here, each package under its own label, so their branches
 // merge without conflicts (`mustr-docs/PARITY.md` §3).
 // WP4, ship the work:
+mod thread_git;
+mod thread_toolbar;
 // WP5, scheduled tasks:
 // WP6, terminals and worktrees:
 
@@ -439,6 +441,7 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     // Work packages call their `init` here, each package under its own label
     // (`mustr-docs/PARITY.md` §3).
     // WP4, ship the work:
+    thread_toolbar::init(cx);
     // WP5, scheduled tasks:
     // WP6, terminals and worktrees:
 }

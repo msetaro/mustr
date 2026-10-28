@@ -75,7 +75,7 @@ use editor::{
     scroll::Autoscroll,
 };
 use gpui::{
-    AnyElement, App, AppContext as _, AsyncWindowContext, Context, Entity, EventEmitter,
+    AnyElement, AnyView, App, AppContext as _, AsyncWindowContext, Context, Entity, EventEmitter,
     FocusHandle, Focusable, Font, IntoElement, KeyContext, ParentElement as _, Render,
     SharedString, Styled as _, Subscription, Task, WeakEntity, Window, px,
 };
@@ -303,6 +303,9 @@ struct ThreadBlocks {
 pub struct ReviewView {
     editor: Entity<SplittableEditor>,
     header: Option<ReviewHeader>,
+    /// The app's actions for what's under review, at the start of the header's actions: for
+    /// example, merging the pull request, or committing the agent's work.
+    header_actions: Option<AnyView>,
     /// The project's worktrees, when the review shows real files: Zed's Restricted Mode applies
     /// to them.
     worktree_store: Option<Entity<WorktreeStore>>,
@@ -630,6 +633,7 @@ impl ReviewView {
             viewed_in_flight: HashMap::default(),
             blocks: ThreadBlocks::default(),
             toolbar,
+            header_actions: None,
             save_task: None,
             reload_task: None,
             _subscriptions: subscriptions,
@@ -745,6 +749,12 @@ impl ReviewView {
 
     pub fn header(&self) -> Option<&ReviewHeader> {
         self.header.as_ref()
+    }
+
+    /// Puts the app's own actions in the header, before the review's (`None` removes them).
+    pub fn set_header_actions(&mut self, actions: Option<AnyView>, cx: &mut Context<Self>) {
+        self.header_actions = actions;
+        cx.notify();
     }
 
     /// Whether this is a review of an agent's work, whose comments go to the agent rather than
@@ -1960,7 +1970,17 @@ impl Item for ReviewView {
 impl Render for ReviewView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let unshown_threads = self.render_unshown_threads(cx);
-        let actions = self.render_review_actions(cx);
+        let actions = match (self.header_actions.clone(), self.render_review_actions(cx)) {
+            (None, actions) => actions,
+            (Some(header_actions), actions) => Some(
+                h_flex()
+                    .flex_none()
+                    .gap_2()
+                    .child(header_actions)
+                    .children(actions)
+                    .into_any_element(),
+            ),
+        };
         let submit_form = self.render_submit_form(cx);
         let extra = (unshown_threads.is_some() || submit_form.is_some()).then(|| {
             v_flex()

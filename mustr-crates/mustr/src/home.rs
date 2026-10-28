@@ -3,10 +3,7 @@ use crate::{
     agent_review_store::{ReviewedMarks, agent_reviews_dir},
     agent_threads::{AgentThread, agent_threads, agent_work_candidates},
     inbox::{self, ProjectRow, PullRequestEntry, PullRequestList, ThreadRow, ThreadStatus},
-    nav_panel::NavPanel,
-    pull_request_review,
-    review_backend::{self, DryRunRpc, T3ReviewBackend},
-    review_drafts::{self, DraftStore},
+    pull_request_review, review_backend,
     t3_connection::{self, ConnectionStatus, EngineKind, EngineSetup, T3Connection, T3Session},
     t3_engine::T3Mode,
     worktree_git::LocalGit,
@@ -19,7 +16,7 @@ use gpui::{
     Task, WeakEntity,
 };
 use mustr_ui::{MustrIcon, Pill, SegmentedControl, tokens};
-use review::{ReviewContents, ReviewHeader, ReviewScope, ReviewView};
+use review::ReviewScope;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -27,9 +24,8 @@ use std::{
 use t3_client::t3_api::{rpc, tagged, types};
 use ui::{Button, ButtonStyle, DiffStat, Divider, Indicator, prelude::*};
 use workspace::{
-    Toast, Workspace,
+    Workspace,
     item::{Item, ItemEvent},
-    notifications::NotificationId,
 };
 
 const RECENT_THREADS: usize = 20;
@@ -311,103 +307,12 @@ impl HomeView {
         let Some(entry) = list.entries.get(index).cloned() else {
             return;
         };
-        let Some(session) = self.connection.read(cx).session() else {
-            self.open_error = Some("mustr isn't connected to T3".into());
-            cx.notify();
-            return;
-        };
         self.open_error = None;
-        let workspace = self.workspace.clone();
-        let current_rpc = self.connection.read(cx).current_rpc();
-        let task = cx.spawn_in(window, async move |this, cx| {
-            let display_ref = entry.display_ref();
-            let result = async {
-                let reference = entry.reference();
-                let rpc = current_rpc;
-                let drafts = DraftStore::new(&review_drafts::drafts_dir(), &reference);
-                // The files, the data around them (header, threads, viewed marks), and the
-                // saved drafts load side by side; the files take longest.
-                let files = cx.background_spawn({
-                    let session = session.clone();
-                    let reference = reference.clone();
-                    async move { session.pull_request_files(&reference).await }
-                });
-                let review_data = cx.background_spawn({
-                    let rpc = rpc.clone();
-                    let reference = reference.clone();
-                    async move { pull_request_review::load(&rpc, &reference).await }
-                });
-                let pending = cx.background_spawn({
-                    let drafts = drafts.clone();
-                    async move { drafts.load() }
-                });
-                let (files, mut review_data, pending) = futures::join!(files, review_data, pending);
-                let pending = pending.unwrap_or_else(|error| {
-                    log::error!("couldn't load the pending review: {error:#}");
-                    review_data.problems.push(format!("{error:#}"));
-                    Default::default()
-                });
-                let files = files.with_context(|| format!("loading {display_ref}"))?;
-                let review = inbox::review_files(files);
-                if review.files.is_empty() {
-                    return Err(anyhow!(
-                        inbox::unavailable_note(&display_ref, &review.unavailable)
-                            .unwrap_or_else(|| format!("{display_ref} has no changed files"))
-                    ));
-                }
-                log::info!(
-                    "Opening {display_ref}: {} files, {} not shown, {} review threads, {} drafts \
-                     (kept in {})",
-                    review.files.len(),
-                    review.unavailable.len(),
-                    review_data.threads.len(),
-                    pending.comments.len(),
-                    drafts.path().display(),
-                );
-                let mut permissions = review_data.permissions;
-                permissions.blocked = session.write_blocked_reason().map(Into::into);
-                let contents = ReviewContents {
-                    header: review_data.header.map(ReviewHeader::PullRequest),
-                    worktree: None,
-                    files: review.files,
-                    // The file tree lists these, dimmed, with the reason they aren't shown.
-                    unavailable: review.unavailable,
-                    threads: review_data.threads,
-                    viewed: review_data.viewed,
-                    backend: Some(if review_backend::dry_run_requested() {
-                        log::warn!(
-                            "{} is set: the review won't write to {display_ref}",
-                            review_backend::DRY_RUN_ENV
-                        );
-                        Arc::new(T3ReviewBackend::new(
-                            Arc::new(DryRunRpc(rpc)),
-                            reference,
-                            drafts,
-                        ))
-                    } else {
-                        Arc::new(T3ReviewBackend::new(Arc::new(rpc), reference, drafts))
-                    }),
-                    permissions,
-                    pending,
-                };
-                let open_review = workspace.update_in(cx, |workspace, window, cx| {
-                    ReviewView::open(contents, workspace, window, cx)
-                })?;
-                open_review.await?;
-                workspace.update_in(cx, |workspace, window, cx| {
-                    workspace.open_panel::<NavPanel>(window, cx);
-                    if !review_data.problems.is_empty() {
-                        let id = NotificationId::composite::<HomeView>(display_ref.clone());
-                        let note = format!(
-                            "{display_ref}: couldn't load {}",
-                            review_data.problems.join("; ")
-                        );
-                        workspace.show_toast(Toast::new(id, note), cx);
-                    }
-                })?;
-                anyhow::Ok(())
-            }
-            .await;
+        let display_ref = entry.display_ref();
+        let open =
+            pull_request_review::open_review(self.workspace.clone(), entry.reference(), window, cx);
+        let task = cx.spawn(async move |this, cx| {
+            let result = open.await;
             this.update(cx, |this, cx| {
                 this.opening = None;
                 if let Err(error) = result {
