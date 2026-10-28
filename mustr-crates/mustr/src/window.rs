@@ -15,8 +15,8 @@ use std::{
 use util::ResultExt as _;
 use uuid::Uuid;
 use workspace::{
-    AppState, CloseWindow, MultiWorkspace, OpenOptions, Pane, Toast, Workspace, WorkspaceSettings,
-    create_and_open_local_file, notifications::NotificationId, with_active_or_new_workspace,
+    AppState, CloseWindow, MultiWorkspace, OpenOptions, Pane, Workspace, WorkspaceSettings,
+    create_and_open_local_file, with_active_or_new_workspace,
 };
 use zed_actions::{OpenKeymapFile, OpenSettingsFile, Quit};
 
@@ -103,17 +103,13 @@ pub fn init(cx: &mut App) {
         workspace.register_action(|workspace, _: &ToggleFileTree, window, cx| {
             workspace.toggle_panel_focus::<NavPanel>(window, cx);
         });
-        // The agent thread's chat view (timeline, composer, approvals) replaces this
-        // placeholder; until then the review's "Open chat" says where the thread lives.
-        workspace.register_action(|workspace, action: &OpenThreadChat, _, cx| {
-            workspace.show_toast(
-                Toast::new(
-                    NotificationId::composite::<OpenThreadChat>(action.thread_id.clone()),
-                    "mustr can't show agent threads' chats yet. Open this thread in T3 Code to \
-                     talk to the agent.",
-                ),
-                cx,
-            );
+        workspace.register_action(|workspace, action: &OpenThreadChat, window, cx| {
+            let title = if action.title.is_empty() {
+                "Agent thread".into()
+            } else {
+                action.title.clone().into()
+            };
+            thread_chat::ThreadView::open(action.thread_id.clone(), title, workspace, window, cx);
         });
 
         cx.subscribe_in(

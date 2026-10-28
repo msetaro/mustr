@@ -24,6 +24,9 @@ use crate::{ReviewView, header::pill};
 #[serde(deny_unknown_fields)]
 pub struct OpenThreadChat {
     pub thread_id: String,
+    /// The thread's title, shown on the chat's tab until the thread loads.
+    #[serde(default)]
+    pub title: String,
 }
 
 /// Which changes of an agent thread a review shows.
@@ -214,6 +217,7 @@ pub(crate) fn render_agent_header(
     }
 
     let thread_id = header.thread_id.clone();
+    let thread_title = header.title.clone();
     v_flex()
         .id("review-header")
         .flex_none()
@@ -275,6 +279,7 @@ pub(crate) fn render_agent_header(
                             window.dispatch_action(
                                 Box::new(OpenThreadChat {
                                     thread_id: thread_id.clone(),
+                                    title: thread_title.to_string(),
                                 }),
                                 cx,
                             )
