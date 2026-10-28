@@ -283,6 +283,12 @@ pub fn app_menus() -> Vec<Menu> {
             MenuItem::separator(),
             MenuItem::action("Find", search::buffer_search::Deploy::find()),
         ]),
+        // The shortcuts shown are the zoom actions' key bindings: ⌘+, ⌘-, and ⌘0.
+        Menu::new("View").items([
+            MenuItem::action("Zoom In", crate::zoom::ZoomIn),
+            MenuItem::action("Zoom Out", crate::zoom::ZoomOut),
+            MenuItem::action("Actual Size", crate::zoom::ResetZoom),
+        ]),
         // AppKit lists the open windows at the end of the menu named "Window".
         #[cfg(target_os = "macos")]
         Menu::new("Window").items([

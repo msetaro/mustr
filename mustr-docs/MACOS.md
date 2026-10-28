@@ -57,15 +57,22 @@ cargo run -p mustr
   - **mustr:** About mustr, Settings… (⌘,), Key Bindings…, Select Theme…, Select Icon Theme…,
     Services, Hide mustr (⌘H), Hide Others (⌥⌘H), Show All, and Quit mustr (⌘Q).
   - **Edit:** Undo, Redo, Cut, Copy, Paste, Select All, and Find.
+  - **View:** Zoom In (⌘+), Zoom Out (⌘-), and Actual Size (⌘0).
   - **Window:** Minimize (⌘M), Zoom, and the open windows.
-- **Title bar.** The traffic lights sit at the left, and mustr's tabs start after them. Drag an
-  empty part of the bar to move the window. Double-clicking it does what System Settings ›
-  Desktop & Dock › "Double-click a window's title bar to" says. mustr draws no window buttons of
-  its own on macOS.
+- **Title bar.** The traffic lights sit at the left, vertically centered in the bar, and mustr's
+  tabs start after them. The bar grows when you zoom in, and the traffic lights, which macOS draws
+  at a fixed size, move down to stay centered. Drag an empty part of the bar to move the window.
+  Double-clicking it does what System Settings › Desktop & Dock › "Double-click a window's title
+  bar to" says. mustr draws no window buttons of its own on macOS.
 - **Keys.** mustr loads Zed's macOS keymap (`assets/keymaps/default-macos.json`), so shortcuts use
   ⌘: ⌘⇧P opens the command palette, and ⌘, opens the settings file. In a thread's composer, ↩ or
   ⌘↩ sends, ⇧↩ adds a new line, and ⌘⇧↩ steers the running agent. In a review, `c` comments on
   the selected lines, ⌘↩ adds the comment, and ⎋ cancels it.
+- **Zoom.** ⌘= (or ⌘+) and ⌘- make all of mustr bigger or smaller, about 10% a step, the way a
+  browser zooms a page: text, code, and layout together. ⌘0 goes back to mustr's default size.
+  They work wherever the focus is. A zoom changes `ui_font_size` and `buffer_font_size` in your
+  settings file, by the same factor, so it lasts; ⌘0 removes both. The command palette has them
+  too: "mustr: zoom in", "mustr: zoom out", and "mustr: reset zoom".
 - **Closing the last window** keeps mustr running, as other Mac apps do. Click the Dock icon to
   open a window again. To quit instead, set `"on_last_window_closed": "quit_app"` in the settings.
 - **Files.** Everything is in `~/Library/Application Support/mustr/` (`--user-data-dir <dir>`
@@ -126,8 +133,9 @@ mustr's macOS support was written on Linux and type-checked there for `aarch64-a
 Nothing has run on a Mac yet.
 
 - **Not checked on a Mac:** linking, the runtime-compiled Metal shaders, the Dock icon, the About
-  panel, the menu bar, the title bar's layout around the traffic lights, keychain prompts, and
-  mustr's tests on macOS. The launch agent and `t3` command handling was reviewed against T3's
+  panel, the menu bar, the title bar's layout around the traffic lights and their moving when you
+  zoom, the zoom keys (only their bindings are tested, on Linux), keychain prompts, and mustr's
+  tests on macOS. The launch agent and `t3` command handling was reviewed against T3's
   CLI (`mustr-docs/T3-RUNTIME.md`), not run.
 - **What the cross check can't see.** It runs without the macOS SDK: C code from build scripts
   goes to a stand-in compiler, and GPUI's shader outputs are stubbed. So C-level build failures
@@ -136,6 +144,6 @@ Nothing has run on a Mac yet.
   GPUI's system notifications are off (they need a bundle identifier); mustr shows in-app toasts
   only. `script/mustr-bundle-mac` fixes that for this Mac. Packaging for other Macs (a Developer ID
   signed, notarized `.app` and `.dmg`) is M3 work (`mustr-docs/PLAN.md`).
-- **Font size shortcuts do nothing** (⌘=, ⌘-, ⌘0), on every platform. Zed's keymap binds them,
-  but their handlers are in Zed's `crates/zed`, which mustr doesn't include.
+- **System window tabs.** With Zed's `use_system_window_tabs` setting on, mustr shows Zed's own
+  title bar, which draws those tabs, and it grows less than the rest of mustr when you zoom in.
 - **Intel Macs** have no T3 engine (see Prerequisites).
