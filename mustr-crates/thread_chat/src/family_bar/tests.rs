@@ -200,7 +200,9 @@ fn shell_json() -> Value {
         "claudeAgent",
     );
     parent["pendingBackgroundTasks"] = json!([
-        { "kind": "command", "taskId": "task-1", "description": "npm run dev" }
+        { "kind": "command", "taskId": "task-1", "description": "npm run dev" },
+        { "kind": "subagent", "taskId": "task-2", "description": "Explore the API",
+          "childThreadId": "child-native" }
     ]);
     let child = |id: &str, title: &str, status: &str, created_at: &str, provider: &str| {
         shell_thread(
@@ -461,8 +463,9 @@ fn subagents_without_a_thread_and_workflows_get_their_own_rows() {
 
     assert_eq!(
         family.background,
+        // The subagent opens from its row, not from the background line.
         Some(BackgroundWork {
-            title: "Running: npm run dev".into(),
+            title: "Running 1 subagent and 1 command".into(),
             threads: Vec::new(),
         })
     );

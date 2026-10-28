@@ -251,7 +251,8 @@ impl Workflow {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BackgroundWork {
     pub title: String,
-    /// Subagents among it that have a thread, as `(label, thread id)`.
+    /// Subagents among it with a thread the family's children don't list, as
+    /// `(label, thread id)`.
     pub threads: Vec<(String, String)>,
 }
 
@@ -386,14 +387,21 @@ impl Family {
             })
             .collect();
 
+        let mut background = own_shell
+            .and_then(|shell| shell.pending_background_tasks.as_deref())
+            .and_then(background_work);
+        // Subagents listed as children open from their rows.
+        if let Some(work) = &mut background {
+            work.threads.retain(|(_, thread_id)| {
+                !children.iter().any(|child| &child.thread_id == thread_id)
+            });
+        }
         Self {
             parent,
             children,
             tasks,
             workflows,
-            background: own_shell
-                .and_then(|shell| shell.pending_background_tasks.as_deref())
-                .and_then(background_work),
+            background,
             waiting_on_thread: own_shell
                 .and_then(|shell| shell.blocked_on_thread_wait)
                 .unwrap_or(false),

@@ -43,6 +43,8 @@ use workspace::Workspace;
 
 /// Children listed before "Show more".
 const VISIBLE_CHILDREN: usize = 5;
+/// Background subagents with a button of their own; the rest are in the title's count.
+const BACKGROUND_THREADS: usize = 2;
 /// Lines of a workflow script shown at once.
 const SCRIPT_MAX_LINES: usize = 400;
 
@@ -849,6 +851,7 @@ impl ThreadFamilyBar {
             .children(
                 work.threads
                     .iter()
+                    .take(BACKGROUND_THREADS)
                     .enumerate()
                     .map(|(index, (label, thread_id))| {
                         let this = cx.entity().downgrade();
