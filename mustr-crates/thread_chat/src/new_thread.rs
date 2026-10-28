@@ -14,7 +14,9 @@ use gpui::{
 use mustr_ui::{Card, SegmentedControl, palette, tokens};
 use serde_json::json;
 use std::sync::Arc;
-use t3_api::types::{ModelSelection, RuntimeMode, ServerProvider, ServerProviderState};
+use t3_api::types::{
+    ModelSelection, ProviderInteractionMode, RuntimeMode, ServerProvider, ServerProviderState,
+};
 use ui::{
     Color, ContextMenu, DropdownMenu, DropdownStyle, IconPosition, Label, LabelCommon as _,
     LabelSize, prelude::*,
@@ -310,9 +312,12 @@ impl NewThreadForm {
             if base_ref.is_empty() {
                 return Err("Name the branch the worktree starts from.".into());
             }
-            ThreadWorkspace::NewWorktree { base_ref }
+            ThreadWorkspace::NewWorktree {
+                base_ref,
+                start_from_origin: true,
+            }
         } else {
-            ThreadWorkspace::ProjectRoot
+            ThreadWorkspace::ProjectRoot { branch: None }
         };
         Ok(NewThread {
             project_id: project.id.clone(),
@@ -323,6 +328,7 @@ impl NewThreadForm {
                 provider: None,
             },
             runtime_mode: runtime_mode_for(agent),
+            interaction_mode: ProviderInteractionMode::Default,
             workspace,
             text: text.to_string(),
         })
