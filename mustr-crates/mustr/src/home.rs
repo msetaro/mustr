@@ -24,7 +24,8 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use t3_client::t3_api::{rpc, tagged, types};
+use t3_client::t3_api::{rpc, types};
+use thread_chat::{Shell, ThreadShells};
 use ui::{Button, ButtonStyle, DiffStat, Divider, Indicator, prelude::*};
 use workspace::{
     Toast, Workspace,
@@ -105,9 +106,7 @@ pub struct AgentWork {
 
 /// What the shell snapshot gives the home view.
 struct ThreadLists {
-    projects: Vec<ProjectRow>,
     all: Vec<AgentThread>,
-    recent: Vec<ThreadRow>,
     work: Vec<AgentWork>,
 }
 
@@ -122,9 +121,11 @@ pub struct HomeView {
     /// The connection generation the lists below were loaded from.
     loaded_generation: Option<usize>,
     pull_requests: Loadable<PullRequestList>,
-    threads: Loadable<Vec<ThreadRow>>,
+    /// The app's shell: the projects and the recent threads, as T3 changes them.
+    shells: Entity<ThreadShells>,
+    threads: Vec<ThreadRow>,
+    projects: Vec<ProjectRow>,
     agent_work: Loadable<Vec<AgentWork>>,
-    projects: Loadable<Vec<ProjectRow>>,
     adding_project: Option<Task<()>>,
     project_error: Option<SharedString>,
     add_project_on_load: Option<PathBuf>,
@@ -138,7 +139,7 @@ pub struct HomeView {
     open_first_pull_request: bool,
     review_thread: Option<(String, ReviewScope)>,
     _load_tasks: Vec<Task<()>>,
-    _subscription: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl HomeView {
@@ -154,9 +155,10 @@ impl HomeView {
             editor.set_masked(true, cx);
             editor
         });
-        let subscription = cx.observe_in(&connection, window, |this, _, window, cx| {
+        let subscriptions = vec![cx.observe_in(&connection, window, |this, _, window, cx| {
             this.connection_changed(window, cx)
-        });
+        })];
+        let shells = ThreadShells::global(cx);
         let options = cx.try_global::<HomeOptions>().cloned().unwrap_or_default();
         let mut this = Self {
             focus_handle: cx.focus_handle(),
@@ -166,9 +168,10 @@ impl HomeView {
             pairing_error: None,
             loaded_generation: None,
             pull_requests: Loadable::NotLoaded,
-            threads: Loadable::NotLoaded,
+            shells: shells.clone(),
+            threads: Vec::new(),
+            projects: Vec::new(),
             agent_work: Loadable::NotLoaded,
-            projects: Loadable::NotLoaded,
             adding_project: None,
             project_error: None,
             add_project_on_load: options.add_project,
@@ -180,10 +183,22 @@ impl HomeView {
             open_first_pull_request: options.open_first_pull_request,
             review_thread: options.review_thread,
             _load_tasks: Vec::new(),
-            _subscription: subscription,
+            _subscriptions: subscriptions,
         };
+        this._subscriptions
+            .push(cx.observe(&shells, |this, _, cx| this.shell_changed(cx)));
+        this.shell_changed(cx);
         this.connection_changed(window, cx);
         this
+    }
+
+    /// Takes the projects and the recent threads from the app's shell.
+    fn shell_changed(&mut self, cx: &mut Context<Self>) {
+        if let Some(shell) = self.shells.read(cx).shell() {
+            self.projects = shell_projects(shell);
+            self.threads = recent_threads(shell, RECENT_THREADS);
+        }
+        cx.notify();
     }
 
     fn connection_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -200,9 +215,7 @@ impl HomeView {
 
     fn load(&mut self, session: Arc<T3Session>, window: &mut Window, cx: &mut Context<Self>) {
         self.pull_requests = Loadable::Loading;
-        self.threads = Loadable::Loading;
         self.agent_work = Loadable::Loading;
-        self.projects = Loadable::Loading;
         self.agents_notice = None;
         self.opening = None;
 
@@ -268,17 +281,12 @@ impl HomeView {
             this.update_in(cx, |this, window, cx| {
                 match result {
                     Ok(lists) => {
-                        this.projects = Loadable::Loaded(lists.projects);
-                        this.threads = Loadable::Loaded(lists.recent);
                         this.agent_work = Loadable::Loaded(lists.work);
                         this.all_threads = lists.all;
                     }
                     Err(error) => {
                         log::error!("couldn't load agent threads: {error:#}");
-                        let error: SharedString = format!("{error:#}").into();
-                        this.projects = Loadable::Failed(error.clone());
-                        this.threads = Loadable::Failed(error.clone());
-                        this.agent_work = Loadable::Failed(error);
+                        this.agent_work = Loadable::Failed(format!("{error:#}").into());
                     }
                 }
                 if let Some(path) = this.add_project_on_load.take() {
@@ -742,82 +750,35 @@ impl HomeView {
     }
 
     fn choose_project_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let paths = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Add project".into()),
-        });
-        cx.spawn_in(window, async move |this, cx| {
-            let chosen = match paths.await {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                Ok(Ok(None)) | Err(_) => None,
-                Ok(Err(error)) => {
-                    this.update(cx, |this, cx| {
-                        this.project_error =
-                            Some(format!("Couldn't open a folder picker: {error:#}").into());
-                        cx.notify();
-                    })
-                    .ok();
-                    None
-                }
-            };
-            if let Some(path) = chosen {
+        let folder = choose_folder(cx);
+        cx.spawn_in(window, async move |this, cx| match folder.await {
+            Ok(Some(path)) => {
                 this.update_in(cx, |this, window, cx| this.add_project(path, window, cx))
                     .ok();
+            }
+            Ok(None) => {}
+            Err(error) => {
+                this.update(cx, |this, cx| {
+                    this.project_error = Some(format!("{error:#}").into());
+                    cx.notify();
+                })
+                .ok();
             }
         })
         .detach();
     }
 
-    /// Adds a local folder as a T3 project (`projects.mutate` with `project.create`), then
-    /// reloads the lists.
+    /// Adds a local folder as a T3 project, showing how it went in the projects card. The
+    /// shell then brings the project to every view.
     fn add_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.project_error = None;
-        let Some(session) = self.connection.read(cx).session() else {
-            self.project_error = Some("mustr isn't connected to an agents engine".into());
-            cx.notify();
-            return;
-        };
-        // The embedded engine is mustr's own, so the dry-run switch (which protects the user's
-        // real T3 Code) doesn't block projects there.
-        if review_backend::dry_run_requested() && session.kind() != EngineKind::Embedded {
-            self.project_error = Some(
-                format!(
-                    "{} is set, so mustr didn't add {}",
-                    review_backend::DRY_RUN_ENV,
-                    path.display()
-                )
-                .into(),
-            );
-            cx.notify();
-            return;
-        }
-        if let Some(reason) = session.operate_blocked_reason() {
-            self.project_error = Some(reason.into());
-            cx.notify();
-            return;
-        }
-        let existing = match &self.projects {
-            Loadable::Loaded(projects) => projects.clone(),
-            _ => Vec::new(),
-        };
+        let task = add_project(path, cx);
         self.adding_project = Some(cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn({
-                    let session = session.clone();
-                    async move { create_project(&session, &path, &existing).await }
-                })
-                .await;
-            this.update_in(cx, |this, window, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
                 this.adding_project = None;
                 match result {
-                    Ok(title) => {
-                        log::info!("added the project {title}");
-                        if let Some(session) = this.connection.read(cx).session() {
-                            this.load(session, window, cx);
-                        }
-                    }
+                    Ok(title) => log::info!("added the project {title}"),
                     Err(error) => {
                         log::error!("couldn't add the project: {error:#}");
                         this.project_error = Some(format!("{error:#}").into());
@@ -833,18 +794,20 @@ impl HomeView {
     fn render_projects(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let adding = self.adding_project.is_some();
         let can_add = self.connection.read(cx).session().is_some() && !adding;
+        let shells = self.shells.read(cx);
+        let loaded = shells.shell().is_some();
+        let error = shells.error().cloned();
         let mut body = v_flex();
-        match &self.projects {
-            Loadable::NotLoaded => {}
-            Loadable::Loading => body = body.child(muted_line("Loading projects…")),
-            Loadable::Failed(error) => body = body.child(error_line(error.clone())),
-            Loadable::Loaded(projects) if projects.is_empty() => {
+        match (&self.projects, loaded, error) {
+            (_, false, Some(error)) => body = body.child(error_line(error)),
+            (_, false, None) => body = body.child(muted_line("Loading projects…")),
+            (projects, true, _) if projects.is_empty() => {
                 body = body.child(muted_line(
                     "No projects yet. Add a folder on this computer, such as a git repository, to \
                      start agent threads in it.",
                 ))
             }
-            Loadable::Loaded(projects) => {
+            (projects, true, _) => {
                 body = body.children(projects.iter().map(|project| {
                     h_flex()
                         .w_full()
@@ -873,10 +836,7 @@ impl HomeView {
                 }))
             }
         }
-        let count = match &self.projects {
-            Loadable::Loaded(projects) => Some(projects.len()),
-            _ => None,
-        };
+        let count = loaded.then_some(self.projects.len());
         card(cx)
             .gap_1()
             .child(
@@ -1261,28 +1221,37 @@ impl HomeView {
             .into_any_element()
     }
 
+    /// The threads that changed last and aren't settled: settled threads are done with, and
+    /// the threads sidebar keeps them.
     fn render_threads(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let count = match &self.threads {
-            Loadable::Loaded(threads) => Some(threads.len()),
-            _ => None,
+        let shells = self.shells.read(cx);
+        let loaded = shells.shell().is_some();
+        let any_threads = shells
+            .shell()
+            .is_some_and(|shell| !shell.threads.is_empty());
+        let body = match (loaded, shells.error().cloned()) {
+            (false, Some(error)) => error_line(error).into_any_element(),
+            (false, None) => muted_line("Loading agent threads…").into_any_element(),
+            _ if self.threads.is_empty() && any_threads => {
+                muted_line("Every thread is settled. The threads sidebar keeps them.")
+                    .into_any_element()
+            }
+            _ if self.threads.is_empty() => muted_line("No agent threads yet.").into_any_element(),
+            _ => v_flex()
+                .children(
+                    self.threads
+                        .iter()
+                        .enumerate()
+                        .map(|(index, thread)| render_thread(index, thread, cx).into_any_element()),
+                )
+                .into_any_element(),
         };
-        let body =
-            match &self.threads {
-                Loadable::NotLoaded => None,
-                Loadable::Loading => Some(muted_line("Loading agent threads…").into_any_element()),
-                Loadable::Failed(error) => Some(error_line(error.clone()).into_any_element()),
-                Loadable::Loaded(threads) if threads.is_empty() => {
-                    Some(muted_line("No agent threads yet.").into_any_element())
-                }
-                Loadable::Loaded(threads) => Some(
-                    v_flex()
-                        .children(threads.iter().enumerate().map(|(index, thread)| {
-                            render_thread(index, thread, cx).into_any_element()
-                        }))
-                        .into_any_element(),
-                ),
-            };
-        section("Recent agent threads", count, body, cx)
+        section(
+            "Recent agent threads",
+            loaded.then_some(self.threads.len()),
+            Some(body),
+            cx,
+        )
     }
 }
 
@@ -1291,9 +1260,7 @@ impl HomeView {
 /// whose worktree is gone from a T3 on this machine has nothing left to diff.
 async fn load_threads(session: &T3Session) -> anyhow::Result<ThreadLists> {
     let snapshot = session.shell_snapshot().await?;
-    let projects = inbox::projects(&snapshot);
     let all = agent_threads(&snapshot);
-    let recent = inbox::recent_threads(&snapshot, RECENT_THREADS);
     let reviewed = ReviewedMarks::new(&agent_reviews_dir()).load();
     let server_is_local = session.server_is_local();
     let mut candidates = agent_work_candidates(&all, &reviewed, usize::MAX);
@@ -1339,66 +1306,176 @@ async fn load_threads(session: &T3Session) -> anyhow::Result<ThreadLists> {
     .filter_map(futures::future::ready)
     .collect::<Vec<_>>()
     .await;
-    Ok(ThreadLists {
-        projects,
-        all,
-        recent,
-        work,
+    Ok(ThreadLists { all, work })
+}
+
+/// Handles [`thread_chat::AddProject`] (the palette's, and the threads sidebar's) on every
+/// workspace, the way the home view's Add project works.
+pub fn init(cx: &mut App) {
+    cx.observe_new(|workspace: &mut Workspace, _, _| {
+        workspace.register_action(|workspace, _: &thread_chat::AddProject, window, cx| {
+            choose_and_add_project(workspace.weak_handle(), window, cx)
+        });
+    })
+    .detach();
+}
+
+/// Asks for a folder with the OS's folder picker. `None` if the user cancelled.
+fn choose_folder(cx: &mut App) -> Task<anyhow::Result<Option<PathBuf>>> {
+    let paths = cx.prompt_for_paths(PathPromptOptions {
+        files: false,
+        directories: true,
+        multiple: false,
+        prompt: Some("Add project".into()),
+    });
+    cx.spawn(async move |_| match paths.await {
+        Ok(Ok(Some(paths))) => Ok(paths.into_iter().next()),
+        Ok(Ok(None)) | Err(_) => Ok(None),
+        Ok(Err(error)) => Err(anyhow!("Couldn't open a folder picker: {error:#}")),
     })
 }
 
-/// Asks T3 to make `path` a project, as T3's "Add project" does (`buildProjectCreateCommand`
-/// in T3's client runtime). Returns the project's title.
-async fn create_project(
-    session: &T3Session,
-    path: &Path,
-    existing: &[ProjectRow],
-) -> anyhow::Result<String> {
-    let path = path
-        .canonicalize()
-        .with_context(|| format!("{} isn't a folder mustr can read", path.display()))?;
-    if !path.is_dir() {
-        return Err(anyhow!("{} isn't a folder", path.display()));
-    }
-    let workspace_root = path
-        .to_str()
-        .with_context(|| format!("{} isn't a valid UTF-8 path", path.display()))?
-        .to_string();
-    if let Some(project) = existing
-        .iter()
-        .find(|project| project.workspace_root.as_deref() == Some(workspace_root.as_str()))
-    {
-        return Err(anyhow!(
-            "{workspace_root} is already the project {}",
-            project.title
-        ));
-    }
-    let title = path.file_name().map_or_else(
-        || workspace_root.clone(),
-        |name| name.to_string_lossy().into_owned(),
-    );
-    let mutation = project_create_mutation(&workspace_root, &title);
-    let project = session
-        .rpc()
-        .call::<rpc::ProjectsMutate>(mutation)
-        .await
-        .map_err(|error| anyhow!(error.error_detail().unwrap_or_else(|| error.to_string())))
-        .with_context(|| format!("adding {workspace_root}"))?;
-    Ok(project.title)
+struct ProjectToast;
+
+/// The folder picker, then [`add_project`], reporting in a toast.
+fn choose_and_add_project(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut App) {
+    let folder = choose_folder(cx);
+    window
+        .spawn(cx, async move |cx| {
+            let result = match folder.await {
+                Ok(Some(path)) => match cx.update(|_, cx| add_project(path, cx)) {
+                    Ok(task) => task.await,
+                    Err(_) => return,
+                },
+                Ok(None) => return,
+                Err(error) => Err(error),
+            };
+            let message = match result {
+                Ok(title) => format!("Added the project {title}."),
+                Err(error) => {
+                    log::error!("couldn't add the project: {error:#}");
+                    format!("Couldn't add the project: {error:#}")
+                }
+            };
+            workspace
+                .update(cx, |workspace, cx| {
+                    workspace.show_toast(
+                        Toast::new(NotificationId::unique::<ProjectToast>(), message).autohide(),
+                        cx,
+                    )
+                })
+                .ok();
+        })
+        .detach();
 }
 
-fn project_create_mutation(workspace_root: &str, title: &str) -> tagged::ProjectMutation {
-    tagged::ProjectMutation::ProjectCreate(types::ProjectMutationProjectCreate {
-        command_id: uuid::Uuid::new_v4().to_string(),
-        project_id: uuid::Uuid::new_v4().to_string(),
-        title: title.to_string(),
-        workspace_root: workspace_root.to_string(),
-        // The folder was picked, so it exists; never create one.
-        create_workspace_root_if_missing: Some(false),
-        default_model_selection: None,
-        scripts: None,
-        type_: types::ProjectMutationProjectCreateType::ProjectCreate,
+/// Asks T3 to make `path` a project (`projects.mutate` with `project.create`), as T3's "Add
+/// project" does. Returns the project's title.
+///
+/// The embedded engine is mustr's own, so the dry-run switch (which protects the user's real
+/// T3 Code) doesn't block projects there; that's why this calls the session itself rather than
+/// the threads' backend.
+fn add_project(path: PathBuf, cx: &mut App) -> Task<anyhow::Result<String>> {
+    let Some(session) = T3Connection::global(cx).read(cx).session() else {
+        return Task::ready(Err(anyhow!("mustr isn't connected to an agents engine")));
+    };
+    if review_backend::dry_run_requested() && session.kind() != EngineKind::Embedded {
+        return Task::ready(Err(anyhow!(
+            "{} is set, so mustr didn't add {}",
+            review_backend::DRY_RUN_ENV,
+            path.display()
+        )));
+    }
+    if let Some(reason) = session.operate_blocked_reason() {
+        return Task::ready(Err(anyhow!(reason)));
+    }
+    let existing = ThreadShells::global(cx)
+        .read(cx)
+        .shell()
+        .map(|shell| {
+            shell
+                .projects
+                .values()
+                .map(|project| (project.title.clone(), project.workspace_root.clone()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    cx.background_spawn(async move {
+        let project = thread_chat::projects::new_project(
+            &path,
+            existing
+                .iter()
+                .map(|(title, root)| (title.as_str(), root.as_str())),
+        )?;
+        let created = session
+            .rpc()
+            .call::<rpc::ProjectsMutate>(thread_chat::projects::create_mutation(&project))
+            .await
+            .map_err(|error| anyhow!(error.error_detail().unwrap_or_else(|| error.to_string())))
+            .with_context(|| format!("adding {}", project.workspace_root))?;
+        Ok(created.title)
     })
+}
+
+/// The shell's projects, by title.
+fn shell_projects(shell: &Shell) -> Vec<ProjectRow> {
+    let mut projects = shell
+        .projects
+        .values()
+        .map(|project| ProjectRow {
+            id: project.id.clone(),
+            title: project.title.clone(),
+            workspace_root: Some(project.workspace_root.clone()),
+        })
+        .collect::<Vec<_>>();
+    projects.sort_by_cached_key(|project| (project.title.to_lowercase(), project.id.clone()));
+    projects
+}
+
+/// The `limit` most recently updated threads of the shell, newest first, without settled,
+/// archived or deleted ones.
+fn recent_threads(shell: &Shell, limit: usize) -> Vec<ThreadRow> {
+    let mut threads = shell
+        .threads
+        .values()
+        .filter(|thread| {
+            thread.deleted_at.is_none()
+                && thread.archived_at.is_none()
+                && thread.settled_override
+                    != Some(types::OrchestrationV2ThreadShellSettledOverride::Settled)
+        })
+        .collect::<Vec<_>>();
+    // Every timestamp is an ISO 8601 UTC string, so string order is time order.
+    threads.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    threads
+        .into_iter()
+        .take(limit)
+        .map(|thread| {
+            let status = match serde_json::to_value(&thread.status) {
+                Ok(serde_json::Value::String(status)) => status,
+                _ => String::new(),
+            };
+            ThreadRow {
+                id: thread.id.clone(),
+                title: if thread.title.trim().is_empty() {
+                    "Untitled thread".to_string()
+                } else {
+                    thread.title.clone()
+                },
+                status: ThreadStatus::from_shell(status, thread.pending_runtime_request.is_some()),
+                branch: thread.branch.clone(),
+                project: shell
+                    .projects
+                    .get(&thread.project_id)
+                    .map(|project| project.title.clone()),
+            }
+        })
+        .collect()
 }
 
 /// Why no agent can run yet, from T3's provider status, or `None` when one can. Agents are the
@@ -1644,28 +1721,122 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn adding_a_project_sends_t3s_project_create() {
-        let mutation = project_create_mutation("/src/hello", "hello");
-        let mut payload = serde_json::to_value(&mutation).unwrap();
-        // Fresh ids each time.
-        for id in ["commandId", "projectId"] {
-            let value = payload[id].take();
-            assert!(
-                uuid::Uuid::parse_str(value.as_str().unwrap()).is_ok(),
-                "{id}: {value}"
-            );
-        }
-        assert_eq!(
-            payload,
+    fn shell(threads: Vec<serde_json::Value>) -> Shell {
+        let thread_fields = |thread: serde_json::Value| {
+            let mut full = json!({
+                "projectId": "p1", "createdAt": "2026-10-01T00:00:00.000Z",
+                "createdBy": "user", "creationSource": "web", "interactionMode": "default",
+                "runtimeMode": "full-access",
+                "modelSelection": { "instanceId": "codex", "model": "gpt-5" },
+                "providerInstanceId": "codex", "activeProviderThreadId": null,
+                "activeRunId": null, "archivedAt": null, "branch": null, "deletedAt": null,
+                "forkedFrom": null, "hasActionableProposedPlan": false, "itemCount": 1,
+                "latestRunId": null, "latestUserMessageAt": null, "latestVisibleMessage": null,
+                "lineage": { "rootThreadId": "x", "parentThreadId": null, "relationshipToParent": null },
+                "pendingRuntimeRequest": null, "settledAt": null, "settledOverride": null,
+                "visibleItemCount": 1, "worktreePath": null
+            });
+            util::merge_json_value_into(thread, &mut full);
+            full
+        };
+        let project = |id: &str, title: &str| {
             json!({
-                "type": "project.create",
-                "commandId": null,
-                "projectId": null,
-                "title": "hello",
-                "workspaceRoot": "/src/hello",
-                "createWorkspaceRootIfMissing": false,
+                "id": id, "title": title, "workspaceRoot": format!("/src/{title}"),
+                "scripts": [], "createdAt": "2026-10-01T00:00:00.000Z",
+                "updatedAt": "2026-10-01T00:00:00.000Z", "defaultModelSelection": null
             })
+        };
+        let snapshot: types::OrchestrationV2ShellSnapshot = serde_json::from_value(json!({
+            "schemaVersion": 1,
+            "snapshotSequence": 3,
+            "threads": threads.into_iter().map(thread_fields).collect::<Vec<_>>(),
+            "archivedThreads": [],
+            "projects": [project("p2", "zed"), project("p1", "mustr")]
+        }))
+        .unwrap();
+        Shell::from_snapshot(&snapshot)
+    }
+
+    #[test]
+    fn recent_threads_are_newest_first_without_settled_ones() {
+        let thread = |id: &str, status: &str, updated_at: &str| {
+            json!({
+                "id": id, "title": id, "status": status, "branch": format!("t3/{id}"),
+                "updatedAt": updated_at
+            })
+        };
+        let mut waiting = thread("waiting", "running", "2026-10-27T10:00:00.000Z");
+        waiting["pendingRuntimeRequest"] =
+            json!({ "id": "r1", "kind": "command", "createdAt": "2026-10-27T10:00:00.000Z" });
+        let mut settled = thread("settled", "completed", "2026-10-27T12:30:00.000Z");
+        settled["settledOverride"] = json!("settled");
+        settled["settledAt"] = json!("2026-10-27T12:30:00.000Z");
+        let mut deleted = thread("deleted", "idle", "2026-10-27T12:00:00.000Z");
+        deleted["deletedAt"] = json!("2026-10-27T12:00:00.000Z");
+        let mut unnamed = thread("", "failed", "2026-10-26T09:00:00.000Z");
+        unnamed["projectId"] = json!("unknown");
+        unnamed["branch"] = json!(null);
+        // Un-settled threads are back.
+        let mut back = thread("back", "completed", "2026-10-26T08:00:00.000Z");
+        back["settledOverride"] = json!("active");
+
+        let shell = shell(vec![
+            thread("old", "idle", "2026-10-20T00:00:00.000Z"),
+            waiting,
+            settled,
+            deleted,
+            unnamed,
+            back,
+            thread("newest", "running", "2026-10-27T11:00:00.000Z"),
+        ]);
+        let threads = recent_threads(&shell, 4);
+        assert_eq!(
+            threads,
+            vec![
+                ThreadRow {
+                    id: "newest".into(),
+                    title: "newest".into(),
+                    status: ThreadStatus::Working("running".into()),
+                    branch: Some("t3/newest".into()),
+                    project: Some("mustr".into()),
+                },
+                ThreadRow {
+                    id: "waiting".into(),
+                    title: "waiting".into(),
+                    status: ThreadStatus::NeedsInput,
+                    branch: Some("t3/waiting".into()),
+                    project: Some("mustr".into()),
+                },
+                ThreadRow {
+                    id: "".into(),
+                    title: "Untitled thread".into(),
+                    status: ThreadStatus::Failed,
+                    branch: None,
+                    project: None,
+                },
+                ThreadRow {
+                    id: "back".into(),
+                    title: "back".into(),
+                    status: ThreadStatus::Settled("completed".into()),
+                    branch: Some("t3/back".into()),
+                    project: Some("mustr".into()),
+                },
+            ]
+        );
+        assert_eq!(threads[1].status.label(), "needs input");
+        assert_eq!(
+            ThreadStatus::from_shell("rolled_back".into(), false).label(),
+            "rolled back"
+        );
+        assert_eq!(
+            shell_projects(&shell)
+                .into_iter()
+                .map(|project| (project.title, project.workspace_root.unwrap()))
+                .collect::<Vec<_>>(),
+            [
+                ("mustr".to_string(), "/src/mustr".to_string()),
+                ("zed".to_string(), "/src/zed".to_string())
+            ]
         );
     }
 

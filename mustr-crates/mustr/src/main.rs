@@ -438,6 +438,8 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     window::init(cx);
     // Work packages call their `init` here, each package under its own label
     // (`mustr-docs/PARITY.md` §3).
+    // WP3, thread list and projects:
+    home::init(cx);
     // WP4, ship the work:
     // WP5, scheduled tasks:
     // WP6, terminals and worktrees:
