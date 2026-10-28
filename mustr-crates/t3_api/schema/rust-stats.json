@@ -1,4 +1,5 @@
 {
+  "lenientContainers": 917,
   "lenientFields": 47,
   "stringEnumsWithFallback": 328,
   "typesNoLongerCopy": 0,

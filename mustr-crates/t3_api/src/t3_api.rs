@@ -228,6 +228,7 @@ macro_rules! string_enum {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> ::std::result::Result<Self, D::Error> {
                 $crate::forward_compat::string_enum(
                     deserializer,
+                    stringify!($name),
                     Self::from_known,
                     Self::Unrecognized,
                     Self::KNOWN_VALUES,
@@ -303,7 +304,14 @@ macro_rules! tagged_union {
                             value
                         )));
                     }
-                    _ => return Ok(Self::Unrecognized(value)),
+                    _ => {
+                        let tag = match value.get($tag) {
+                            Some(::serde_json::Value::String(tag)) => tag.as_str(),
+                            _ => "",
+                        };
+                        $crate::forward_compat::note_unrecognized(stringify!($name), tag);
+                        return Ok(Self::Unrecognized(value));
+                    }
                 };
                 // A tag value may map to several variants, tried in order; a known tag whose
                 // body fails to decode is an error. With several candidates, all are tried

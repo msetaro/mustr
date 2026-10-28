@@ -14,5 +14,6 @@ path = "src/t3_api.rs"
 doctest = false
 
 [dependencies]
+log.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
