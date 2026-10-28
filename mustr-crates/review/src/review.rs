@@ -6,6 +6,7 @@ mod file_tree;
 mod file_tree_panel;
 mod header;
 mod threads;
+mod toolbar;
 
 pub use file_tree::{FileChange, FileTreeFile, FileTreeModel, FileTreeRow, FileViewedState};
 pub use file_tree_panel::{FileTreePanel, ToggleFileTree};
@@ -217,6 +218,7 @@ pub struct ReviewView {
     unshown_thread_cards: Vec<Entity<ThreadCard>>,
     unshown_threads_expanded: bool,
     blocks: ThreadBlocks,
+    toolbar: Entity<toolbar::ReviewToolbar>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -424,6 +426,7 @@ impl ReviewView {
             }),
         ];
 
+        let toolbar = cx.new(|cx| toolbar::ReviewToolbar::new(&editor, cx));
         let mut this = Self {
             editor,
             header,
@@ -433,6 +436,7 @@ impl ReviewView {
             unshown_thread_cards,
             unshown_threads_expanded: false,
             blocks: ThreadBlocks::default(),
+            toolbar,
             _subscriptions: subscriptions,
         };
         this.sync_thread_blocks(cx);
@@ -910,6 +914,10 @@ impl Item for ReviewView {
     ) -> Option<gpui::AnyEntity> {
         if type_id == TypeId::of::<Self>() {
             Some(self_handle.clone().into())
+        } else if type_id == TypeId::of::<SplittableEditor>() {
+            // Zed's buffer search bar shows collapse and split buttons for items that act as a
+            // `SplittableEditor`; the review's own toolbar has those controls.
+            None
         } else {
             self.editor.act_as_type(type_id, cx)
         }
@@ -986,6 +994,7 @@ impl Render for ReviewView {
                     )
                 }),
             })
+            .child(self.toolbar.clone())
             .child(div().flex_1().min_h_0().child(self.editor.clone()))
     }
 }
