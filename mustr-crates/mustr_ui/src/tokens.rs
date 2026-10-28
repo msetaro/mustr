@@ -143,8 +143,8 @@ pub const UI_FONT_FAMILY: &str = ".SystemUIFont";
 /// Zed's bundled monospace font.
 pub const CODE_FONT_FAMILY: &str = ".ZedMono";
 
-/// mustr's default `ui_font_size`, which is the size of one rem. The text sizes below are
-/// written for it, and [`text_size`] scales them when the user picks another size.
+/// The `ui_font_size` mustr's designs are drawn at. A rem is the user's `ui_font_size`, so
+/// [`text_size`] and [`scaled`] turn the sizes below into rems that follow it.
 pub const UI_FONT_SIZE: Pixels = px(13.);
 
 /// Key caps.
@@ -166,7 +166,14 @@ pub const BORDER_WIDTH: Pixels = px(1.);
 /// The width of the icon rail.
 pub const RAIL_WIDTH: Pixels = px(38.);
 
+/// A length from mustr's designs, in rems. The designs are drawn at [`UI_FONT_SIZE`], so lengths
+/// written with this scale with the user's `ui_font_size`, the way a web page zooms. Hairlines
+/// ([`BORDER_WIDTH`]) stay in pixels.
+pub fn scaled(length: Pixels) -> Rems {
+    rems(length / UI_FONT_SIZE)
+}
+
 /// One of the text sizes above, in rems, so it follows the user's `ui_font_size`.
 pub fn text_size(size: Pixels) -> Rems {
-    rems(size / UI_FONT_SIZE)
+    scaled(size)
 }
