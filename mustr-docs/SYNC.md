@@ -10,7 +10,7 @@ Both scripts are idempotent: re-running one picks up where the last run stopped.
 | 1 | Preflight error. Nothing changed | Same | Fix the environment (the message says how), then re-run |
 | 2 | Stop and ask the human | Stop and ask the human | Report the `reason:` line verbatim |
 | 3 | Build or tests failed. The merge commit is on the sync branch | Same, for the sync commit | Fix it in `mustr-crates/`, commit, re-run |
-| 4 | Invariant violated: Zed-owned files differ from the tag | Codegen failed. Nothing committed | Zed: ask the human. T3: fix codegen, then re-run |
+| 4 | Invariant violated: Zed-owned files differ from the tag | Codegen failed. Nothing committed | Zed: ask the human. T3: fix codegen (`mustr-crates/t3_api/codegen/README.md`, "When regen fails"), then re-run |
 
 ## 0. Ground rules
 
@@ -23,7 +23,7 @@ Both scripts are idempotent: re-running one picks up where the last run stopped.
 - mustr-only dependencies go in `mustr-crates/*/Cargo.toml` with explicit versions. Never add them to the root `[workspace.dependencies]`, because that would create a second Cargo.toml touch point.
 - Never force-push `main`. Never push to `upstream`; its push URL is `no-pushing-to-zed`.
 - Zed tags are fetched to `refs/upstream-tags/<tag>`, never `refs/tags`, so `git push --tags` can't push Zed's tags to `origin`.
-- Script state and logs go in `.git/mustr-sync/`: PR bodies, the T3 sparse checkout, contract diffs, and the codegen log.
+- Script state and logs go in `.git/mustr-sync/`: PR bodies, the T3 sparse checkout, contract diffs, the codegen work dir and log, and the API change lists.
 
 **Pins**, all in mustr-owned files:
 
@@ -33,7 +33,7 @@ Both scripts are idempotent: re-running one picks up where the last run stopped.
 | `mustr-crates/t3_client/T3_VERSION` | `t3_server_version=0.1.3`, `orchestration_protocol=2`, `contracts_commit=<sha>`: key=value, the format `m0/t3-client` chose | `mustr-sync-t3` |
 | `mustr-crates/t3_client/T3_RUNTIME.sha256` | `sha256sum` lines for `t3-<v>-<os>-<arch>.{tar.gz,zip}` | `mustr-sync-t3` |
 
-**Tools.** git 2.38 or later, curl, jq, `gh` logged in as `msetaro` (for releases and PRs), and cargo via rustup (`rust-toolchain.toml` pins 1.98.1).
+**Tools.** git 2.38 or later, curl, jq, `gh` logged in as `msetaro` (for releases and PRs), and cargo via rustup (`rust-toolchain.toml` pins 1.98.1). The T3 sync's codegen also needs node 22.18 or later and npm; npm downloads the Effect version T3 pins, once per version.
 - On 2026-10-27 this machine had no Rust toolchain, so the scripts' build steps fail with exit 3. Use `--no-build` until cargo is installed.
 - **Needs the human:**
   - Install rustup in user space: `curl https://sh.rustup.rs | sh`.
@@ -110,32 +110,43 @@ script/mustr-sync-t3 v0.1.3               # sync/t3-v0.1.3: codegen, pins, commi
 2. Sparse-clones that tag's `packages/contracts` to `.git/mustr-sync/t3-src-<tag>/`.
 3. Reads `ORCHESTRATION_PROTOCOL_VERSION`, compares the contracts with the previous pin (excluding `*.test.ts`), and checks that T3's LICENSE is still MIT and unchanged.
 4. Downloads `SHA256SUMS`, requires all 5 runtime archives, and cross-checks them against GitHub's asset digests.
-5. Runs codegen (`regen.sh <t3-checkout> <out-dir>`, a placeholder for m0/t3-codegen; skipped while the file doesn't exist), writes the pins, and commits.
+5. Runs codegen, `mustr-crates/t3_api/codegen/regen.sh <t3-checkout> --out mustr-crates/t3_api --no-test`, which regenerates the `t3_api` crate's `schema/`, `src/generated/`, and test corpus (see `mustr-crates/t3_api/codegen/README.md`).
+   - The work dir is `.git/mustr-sync/t3-codegen-work/`.
+   - The log is `.git/mustr-sync/t3-regen-<tag>.log`.
+   - It summarizes what changed in `api_changes`: RPCs and HTTP endpoints added or removed, and types added, removed, or changed. The lists are in `.git/mustr-sync/t3-api-changes-<tag>.json`, and `api_removed` names every removed RPC or endpoint.
+   - Then it writes the pins and commits.
 6. Downloads the host's runtime archive to `~/.cache/mustr-dev/t3-runtime/<v>/`, verifies its SHA-256, and extracts it.
-7. Runs `cargo build`, `cargo test -p t3_client`, and the contract tests (`MUSTR_CONTRACT_TEST_CMD`, a placeholder) with `MUSTR_T3_RUNTIME_BIN` set.
+7. Builds and tests, one crate per cargo invocation:
+   - `cargo build -p mustr`.
+   - `cargo test -p t3_api`: the round trip of T3's own sample values and fixtures, including the forward-compat ones.
+   - `cargo test -p t3_client`: it also checks that `T3_VERSION` matches `t3_api/schema/SOURCE.json` and the protocol constant.
+   - The contract tests, but only when `MUSTR_CONTRACT_TEST_CMD` is set; none exist yet. They run with `MUSTR_T3_RUNTIME_BIN` set.
 8. Removes `T3CODE_*`/`T3_*` from the environment of anything it spawns.
 
 **Protocol version.**
 - `packages/contracts/src/environment.ts` exports `ORCHESTRATION_PROTOCOL_VERSION`. It is 2 from v0.1.0 through v0.1.3 and the 2026-10-27 nightlies, and was 1 at v0.0.45.
 - The server accepts only an exact match: `x-t3-orchestration-protocol: 2` on HTTP and `?orchestrationProtocol=2` on WebSocket. Anything else gets HTTP 426.
 - `orchestration_protocol` in `T3_VERSION` must equal T3's value, and so must mustr's constant `pub const ORCHESTRATION_PROTOCOL_VERSION: u32 = 2;` in `t3_client/src/auth.rs`. The script checks both and prints `protocol_const`.
-- Add a unit test to `t3_client` that asserts the constant equals the pin (`include_str!("../T3_VERSION")`). That way `cargo test` catches drift too.
+- `t3_client`'s `the_protocol_constant_matches_the_pins` test asserts that the constant equals the pin. It also asserts that `t3_api` was generated from the pinned version and commit. That way `cargo test` catches drift too.
 - If the value changes, the script stops with exit 2. That's a human decision, because a mustr build on protocol N+1 can't talk to a user's installed T3 on protocol N. That breaks the "connect to existing T3" path until they update.
 - When the human approves, re-run with `--accept-protocol-change`.
   - The script commits the pin and exits 3 with `protocol_const: ACTION`. Update the constant, commit, and re-run.
   - Then update mustr's supported-server range and its connect-time check (`check_protocol_compatibility` in `auth.rs`), so that an old T3 gets the "update T3 or use mustr's runtime" prompt.
 
-**When the generated types change.** Read `generated_types`, `.git/mustr-sync/t3-generated-<tag>.diffstat`, and the contracts diff `.git/mustr-sync/t3-contracts-<tag>.diff`. From v0.1.1 to v0.1.3, 57 non-test files changed, with +1692/−1488 lines, so expect real churn.
+**When the generated types change.**
+- Read `api_changes`, `api_removed`, `generated_types`, `.git/mustr-sync/t3-generated-<tag>.diffstat`, and the contracts diff `.git/mustr-sync/t3-contracts-<tag>.diff`.
+- From v0.1.1 to v0.1.3, 57 non-test files changed, with +1692/−1488 lines, so expect real churn. `git diff <base> -- mustr-crates/t3_api/schema/manifest.json` is the API changelog.
 - **Additive changes** (new optional fields, new RPCs, new union members): these usually compile.
-  - Make sure decoding of server-to-client unions tolerates unknown variants (`#[serde(other)]` or a catch-all), so a newer T3 doesn't break an older mustr.
+  - A newer T3 doesn't break an older mustr, so there's nothing to do for decoding. String enums and tagged unions have an `Unrecognized` variant, and T3's own lenient fields decode as T3 does: unknown elements are dropped, and undecodable optionals become `None`. See `mustr-crates/t3_api/codegen/README.md`, "Forward compatibility".
   - Add a match arm only where mustr shows the new variant.
-- **Renamed or removed fields or RPCs:** the compiler lists every call site. Fix them in mustr's wrappers and UI crates.
-  - Never hand-edit `src/generated/`. Fix the codegen, or wrap the type outside `generated/`.
-  - If an RPC mustr uses (PLAN.md §4) is removed with no replacement, stop and ask.
+- **Renamed or removed fields or RPCs:** the compiler lists every call site, because `t3_client` uses the typed `rpc::*`/`http::*` tables. Fix them in mustr's wrappers and UI crates.
+  - Never hand-edit `mustr-crates/t3_api/src/generated/` or `schema/`. Fix the codegen (`mustr-crates/t3_api/codegen/`), or wrap the type in `t3_client`.
+  - If an RPC mustr uses (PLAN.md §4) is removed with no replacement, stop and ask. Check `api_removed`.
 - **Same shape, new meaning:** the compiler can't catch this.
   - Read the contracts diff for every RPC mustr uses, plus `auth.ts`, `environment.ts`, and `environmentHttp.ts`.
   - The contract tests (record and replay) should fail. Re-record fixtures only for intended wire changes, and say so in the PR. Never edit a fixture just to make a test pass.
-- **New Effect version** (`effect_version`): codegen must use exactly that version. If codegen fails (exit 4), fix the codegen, not the contracts.
+  - This includes `mustr-crates/t3_api/tests/fixtures/t3-tests/`, which are copied from T3's tests.
+- **New Effect version** (`effect_version`): codegen must use exactly that version, and regen.sh installs it. Review `codegen/dump-schemas.ts` (it uses Effect internals) and `t3_api/src/envelope.rs` (Effect's RPC frames) by hand. If codegen fails (exit 4), fix the codegen, not the contracts.
 
 **Checksums.**
 - `T3_RUNTIME.sha256` comes from the release's `SHA256SUMS` and must match GitHub's digests. T3 publishes no signatures, so this is TLS plus GitHub plus mustr's pin.
@@ -181,6 +192,8 @@ git commit -m "Merge Zed $T into mustr"
 
 ## Validation log (2026-10-27, throwaway `git clone --shared` in /tmp; the real repo was not touched)
 
+The `t3_api` codegen was checked separately on branch `m0/t3-api`; see the end of this log.
+
 - **Zed:**
   - Tag detection picked v1.25.3, which matches `gh releases/latest`.
   - The dry run from the real `main` predicted 5 conflicts, 3 of them Zed-owned, and flagged the rebaseline.
@@ -197,3 +210,13 @@ git commit -m "Merge Zed $T into mustr"
   - Zed `--rebaseline` re-applied its 6-line members block onto v1.25.3 unchanged.
   - With the patch context broken on purpose, the fallback re-inserted the block after `members = [`.
   - The T3 sync read the key=value pin (0.1.1, protocol 2), rewrote it for 0.1.3 with the tag's commit, and checked `ORCHESTRATION_PROTOCOL_VERSION: u32 = 2` in `auth.rs`.
+- **`t3_api` codegen (branch `m0/t3-api`, 2026-10-27):**
+  - `--latest --dry-run --base m0/t3-api` picked v0.1.3: protocol 2 → 2, and the 5 checksums match GitHub's digests. It printed the regen command it would run and changed nothing.
+  - A full run in a throwaway `git clone --shared` ran `v0.1.3 --base m0/t3-api --no-build --no-runtime`:
+    - Codegen took 8 s, with a fresh npm install of effect 4.0.5.
+    - It reported `api_changes: rpc +5 -0, http +1 -0, types +49 -4 ~97` and committed `sync/t3-v0.1.3`.
+  - That commit was then built in the worktree (and reverted afterwards):
+    - `cargo test -p t3_api` passed (round trip and forward compat).
+    - `t3_client`'s library and unit tests passed unchanged.
+    - The only compile error was the live test's `GET /api/orchestration/shell` call, because v0.1.3 added query options to that endpoint. The compiler pointed at it, and `call_endpoint_with` with a default query now compiles on both versions.
+  - Generating v0.1.3 first needed one generator fix: a lenient field made with a plain `catchDecoding` is already typed on the wire.

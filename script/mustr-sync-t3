@@ -3,11 +3,13 @@
 #
 # Draft of script/mustr-sync-t3 for msetaro/mustr. Runbook: SYNC.md.
 # Steps: resolve tag -> fetch that tag's packages/contracts -> check the
-# orchestration protocol version -> regenerate t3_client types (regen.sh) ->
-# pin version, protocol and runtime checksums -> commit on sync/t3-<tag> ->
-# build, unit tests, contract tests against the pinned runtime.
+# orchestration protocol version -> regenerate the t3_api crate
+# (mustr-crates/t3_api/codegen/regen.sh) -> pin version, protocol and runtime
+# checksums -> commit on sync/t3-<tag> -> build, unit tests, contract tests
+# against the pinned runtime.
 #
-# Compatible with bash 3.2 (macOS /bin/bash). Needs git >= 2.27, curl.
+# Compatible with bash 3.2 (macOS /bin/bash). Needs git >= 2.27, curl, jq;
+# codegen also needs node >= 22.18 and npm.
 set -euo pipefail
 
 # ---------------------------------------------------------------- config ----
@@ -23,8 +25,9 @@ CRATE_DIR=mustr-crates/t3_client
 #   contracts_commit=<T3 commit of the tag>
 VERSION_FILE=$CRATE_DIR/T3_VERSION
 SUMS_FILE=$CRATE_DIR/T3_RUNTIME.sha256             # sha256sum format, runtime archives only
-REGEN="${MUSTR_T3_REGEN:-$CRATE_DIR/codegen/regen.sh}"   # placeholder: built at m0/t3-codegen/
-GEN_OUT="${MUSTR_T3_GEN_OUT:-$CRATE_DIR/src/generated}"
+API_DIR=mustr-crates/t3_api                         # generated wire types (codegen/README.md)
+REGEN="${MUSTR_T3_REGEN:-$API_DIR/codegen/regen.sh}"
+GEN_OUT="${MUSTR_T3_GEN_OUT:-$API_DIR}"             # regen.sh --out: schema/, src/generated/, test corpus
 EXPECTED_PLATFORMS="darwin-arm64 linux-arm64 linux-x64 win32-arm64 win32-x64"
 
 # ------------------------------------------------------------------ args ----
@@ -42,7 +45,7 @@ Usage: mustr-sync-t3 (vX.Y.Z | --latest) [options]
   --dry-run                  Resolve, fetch contracts, check protocol and checksums; change nothing
   --no-build                 Skip cargo build and tests
   --no-runtime               Skip downloading the runtime for contract tests
-Env: MUSTR_T3_REGEN (codegen script), MUSTR_T3_GEN_OUT, MUSTR_CONTRACT_TEST_CMD
+Env: MUSTR_T3_REGEN (codegen script), MUSTR_T3_GEN_OUT (its --out), MUSTR_CONTRACT_TEST_CMD
 Exit codes: 0 synced / already pinned / dry run
             1 usage or preflight error (nothing changed)
             2 stop and ask the human (protocol change, preview tag, downgrade,
@@ -82,7 +85,7 @@ on_exit() {
   if [ "$rc" -ne 0 ] && [ "$STATE" = editing ]; then
     log "cleaning up: discarding uncommitted sync changes and restoring $ORIG_REF"
     git reset -q --hard HEAD >/dev/null 2>&1 || true
-    git clean -q -fd -- "$CRATE_DIR" >/dev/null 2>&1 || true
+    git clean -q -fd -- "$CRATE_DIR" "$GEN_OUT" >/dev/null 2>&1 || true
     git switch -q "$ORIG_REF" >/dev/null 2>&1 || true
     if [ "$CREATED_BRANCH" = 1 ]; then git branch -q -D "$SYNC_BRANCH" >/dev/null 2>&1 || true; fi
   fi
@@ -126,6 +129,14 @@ if [ "$DRY_RUN" = 0 ] && [ -n "$(git status --porcelain --untracked-files=normal
   die 1 "working tree is not clean (commit, stash or remove untracked files first)"
 fi
 git rev-parse -q --verify "refs/heads/$BASE" >/dev/null || die 1 "base branch '$BASE' does not exist"
+if [ -e "$REGEN" ]; then
+  NODE_V="$(node -p 'process.versions.node' 2>/dev/null || true)"
+  NPM_V="$(npm --version 2>/dev/null || true)"
+  if [ -z "$NODE_V" ] || [ -z "$NPM_V" ]; then
+    [ "$DRY_RUN" = 1 ] || die 1 "codegen needs node >= 22.18 and npm on PATH"
+  fi
+  note codegen_tools "node ${NODE_V:-MISSING}, npm ${NPM_V:-MISSING}"
+fi
 ORIG_REF="$(git symbolic-ref -q --short HEAD || git rev-parse HEAD)"
 
 # ------------------------------------------------------- 1. resolve tag ----
@@ -238,6 +249,7 @@ note runtime_checksums "$(wc -l <"$SUMS_TMP.runtime" | tr -d ' ') archives, SHA2
 
 if [ "$DRY_RUN" = 1 ]; then
   [ "$PROTO_CHANGED" = 0 ] || note protocol_change "YES: a real run stops here unless --accept-protocol-change (ask the human)"
+  if [ -e "$REGEN" ]; then note codegen "would run $REGEN $T3_SRC --out $GEN_OUT --no-test"; fi
   note branch "would create $SYNC_BRANCH from $BASE"
   note result "dry run (no branch, index or worktree changes)"
   exit 0
@@ -258,23 +270,50 @@ fi
 
 # --------------------------------------------- 7. codegen + pins ----
 HAVE_CRATE=0; [ -f "$CRATE_DIR/Cargo.toml" ] && HAVE_CRATE=1
+# What changed in T3's API, from the generated manifest and schema: RPCs and HTTP
+# endpoints added/removed, definitions added/removed/changed.
+api_changes() { # $1 = rev with the old t3_api, $2 = new schema dir; JSON to stdout
+  local old="$WORK/t3-api-old"
+  mkdir -p "$old"
+  git show "$1:$GEN_OUT/schema/manifest.json" >"$old/manifest.json" 2>/dev/null \
+    || echo '{"rpc":[],"http":[]}' >"$old/manifest.json"
+  git show "$1:$GEN_OUT/schema/t3-api.schema.json" >"$old/schema.json" 2>/dev/null \
+    || echo '{"definitions":{}}' >"$old/schema.json"
+  jq -n --slurpfile am "$old/manifest.json" --slurpfile bm "$2/manifest.json" \
+    --slurpfile as "$old/schema.json" --slurpfile bs "$2/t3-api.schema.json" '
+    def rpc(m): [m.rpc[].tag]; def http(m): [m.http[] | "\(.method) \(.path)"];
+    $am[0] as $am | $bm[0] as $bm |
+    ($as[0].definitions // {}) as $ad | ($bs[0].definitions // {}) as $bd |
+    { rpc_added: (rpc($bm) - rpc($am)), rpc_removed: (rpc($am) - rpc($bm)),
+      http_added: (http($bm) - http($am)), http_removed: (http($am) - http($bm)),
+      types_added: (($bd | keys) - ($ad | keys)), types_removed: (($ad | keys) - ($bd | keys)),
+      types_changed: [ $ad | keys[] | select(($bd[.] != null) and ($ad[.] != $bd[.])) ] }'
+}
 if [ "$ALREADY" = 0 ]; then
   STATE=editing
-  if [ "$HAVE_CRATE" = 0 ]; then
-    note codegen "skipped ($CRATE_DIR/Cargo.toml not created yet; placeholder)"
+  if [ ! -f "$GEN_OUT/Cargo.toml" ]; then
+    note codegen "skipped ($GEN_OUT/Cargo.toml does not exist)"
   elif [ ! -e "$REGEN" ]; then
-    note codegen "skipped ($REGEN not written yet; placeholder). Types stay hand-written"
+    note codegen "skipped ($REGEN does not exist)"
   elif [ ! -x "$REGEN" ]; then
     die 4 "codegen script $REGEN is not executable"
   else
-    log "codegen: $REGEN $T3_SRC $GEN_OUT"
-    # Placeholder interface: regen.sh <t3-checkout> <out-dir>. It reads
-    # packages/contracts/src and the Effect version from the checkout.
+    log "codegen: $REGEN $T3_SRC --out $GEN_OUT"
+    # regen.sh copies packages/contracts out of the (untrusted) checkout, installs the
+    # Effect version T3's catalog pins with --ignore-scripts, and regenerates t3_api.
+    # Its tests run in step 9 with the rest, so a test failure keeps the commit (exit 3).
     MUSTR_T3_VERSION="$VER" MUSTR_T3_COMMIT="$T3_COMMIT" MUSTR_T3_EFFECT_VERSION="$EFFECT_VER" \
-      scrubbed "$REGEN" "$T3_SRC" "$GEN_OUT" >"$WORK/t3-regen-$TAG.log" 2>&1 \
+      MUSTR_T3_CODEGEN_WORK="$WORK/t3-codegen-work" \
+      scrubbed "$REGEN" "$T3_SRC" --out "$GEN_OUT" --no-test >"$WORK/t3-regen-$TAG.log" 2>&1 \
       || { tail -30 "$WORK/t3-regen-$TAG.log" >&2; die 4 "codegen failed (log: $WORK/t3-regen-$TAG.log)"; }
+    note codegen "ok ($(tail -1 "$WORK/t3-regen-$TAG.log" | sed 's/^regen: //'))"
+    api_changes HEAD "$GEN_OUT/schema" >"$WORK/t3-api-changes-$TAG.json"
+    API_CHANGES="$(jq -r '"rpc +\(.rpc_added|length) -\(.rpc_removed|length), http +\(.http_added|length) -\(.http_removed|length), types +\(.types_added|length) -\(.types_removed|length) ~\(.types_changed|length)"' "$WORK/t3-api-changes-$TAG.json")"
+    note api_changes "$API_CHANGES (lists: $WORK/t3-api-changes-$TAG.json)"
+    REMOVED="$(jq -r '(.rpc_removed + .http_removed) | join(", ")' "$WORK/t3-api-changes-$TAG.json")"
+    [ -z "$REMOVED" ] || note api_removed "$REMOVED"
     git add -A -- "$GEN_OUT"
-    GSTAT="$(git diff --cached --shortstat -- "$GEN_OUT")"
+    GSTAT="$(git diff --cached --shortstat -- "$GEN_OUT/src/generated")"
     note generated_types "${GSTAT:-unchanged}"
     git diff --cached --stat=100 -- "$GEN_OUT" >"$WORK/t3-generated-$TAG.diffstat" || true
   fi
@@ -290,6 +329,7 @@ if [ "$ALREADY" = 0 ]; then
     printf 'T3 commit: %s\nPrevious pin: %s\nOrchestration protocol: %s -> %s\n' "$T3_COMMIT" "${OLD_VER:-none}" "${OLD_PROTO:-none}" "$NEW_PROTO"
     [ -z "${STAT:-}" ] || printf 'packages/contracts/src (excluding tests):%s\n' "$STAT"
     [ -z "${GSTAT:-}" ] || printf 'Generated types:%s\n' "$GSTAT"
+    [ -z "${API_CHANGES:-}" ] || printf 'API changes: %s\n' "$API_CHANGES"
     printf '\nRuntime checksums (from the release SHA256SUMS, checked against\nGitHub asset digests):\n'
     sed 's/^/  /' "$SUMS_FILE"
     printf '\nMade by script/mustr-sync-t3.\n'
@@ -359,13 +399,23 @@ elif [ "$HAVE_CRATE" = 0 ]; then
 elif ! command -v cargo >/dev/null 2>&1; then
   note build "FAILED: cargo not found (install rustup; rust-toolchain.toml pins the version)"; exit 3
 else
-  PKGS="-p t3_client"; [ -f mustr-crates/mustr/Cargo.toml ] && PKGS="$PKGS -p mustr"
-  log "build: cargo build $PKGS"
-  if cargo build $PKGS; then note build "ok (cargo build $PKGS)"
-  else note build "FAILED: fix call sites the compiler lists (SYNC.md, 'When generated types change')"; exit 3; fi
-  if cargo test -p t3_client; then note unit_tests ok; else note unit_tests FAILED; exit 3; fi
-  CT_CMD="${MUSTR_CONTRACT_TEST_CMD:-cargo test -p t3_client --features contract-tests}"  # placeholder
-  if [ -z "$RUNTIME_BIN" ]; then
+  # One crate per cargo invocation: building Zed-dependent crates together unifies
+  # test-support features (mustr-docs/AGENTS.md).
+  if [ -f mustr-crates/mustr/Cargo.toml ]; then
+    log "build: cargo build -p mustr"
+    if cargo build -p mustr; then note build "ok (cargo build -p mustr)"
+    else note build "FAILED: fix call sites the compiler lists (SYNC.md, 'When the generated types change')"; exit 3; fi
+  fi
+  for crate in t3_api t3_client; do
+    [ -f "mustr-crates/$crate/Cargo.toml" ] || continue
+    log "test: cargo test -p $crate"
+    if cargo test -p "$crate"; then note "tests_$crate" ok
+    else note "tests_$crate" "FAILED (cargo test -p $crate; SYNC.md, 'When the generated types change')"; exit 3; fi
+  done
+  CT_CMD="${MUSTR_CONTRACT_TEST_CMD:-}"   # none yet; e.g. a record/replay suite against $MUSTR_T3_RUNTIME_BIN
+  if [ -z "$CT_CMD" ]; then
+    note contract_tests "skipped (none yet; set MUSTR_CONTRACT_TEST_CMD)"
+  elif [ -z "$RUNTIME_BIN" ]; then
     note contract_tests "skipped (no runtime)"
   elif MUSTR_T3_RUNTIME_BIN="$RUNTIME_BIN" MUSTR_T3_VERSION="$VER" scrubbed sh -c "$CT_CMD"; then
     note contract_tests "ok ($CT_CMD)"
