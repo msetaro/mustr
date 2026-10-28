@@ -5,6 +5,7 @@
 //! items, and in an event). They're identical on the wire, so each is decoded into
 //! [`OrchestrationV2TurnItem`] once and turned into a [`TimelineItem`].
 
+use collections::{HashMap, HashSet};
 use serde::Serialize;
 use t3_api::{
     tagged::{
@@ -13,10 +14,13 @@ use t3_api::{
         OrchestrationV2TurnItem,
     },
     types::{
-        OrchestrationV2AppThread, OrchestrationV2ConversationMessage, OrchestrationV2DomainEvent,
-        OrchestrationV2PlanArtifactProposedPlanStatus, OrchestrationV2ProviderThread,
-        OrchestrationV2ProviderTurn, OrchestrationV2Run, OrchestrationV2RunStatus,
-        OrchestrationV2RuntimeRequest, OrchestrationV2RuntimeRequestKind,
+        OrchestrationV2AppThread, OrchestrationV2Checkpoint, OrchestrationV2CheckpointStatus,
+        OrchestrationV2ConversationMessage, OrchestrationV2DomainEvent,
+        OrchestrationV2NativeRefStrength, OrchestrationV2PlanArtifactProposedPlanStatus,
+        OrchestrationV2ProviderCapabilities, OrchestrationV2ProviderSession,
+        OrchestrationV2ProviderSessionStatus, OrchestrationV2ProviderThread,
+        OrchestrationV2ProviderTurn, OrchestrationV2Run, OrchestrationV2RunAttempt,
+        OrchestrationV2RunStatus, OrchestrationV2RuntimeRequest, OrchestrationV2RuntimeRequestKind,
         OrchestrationV2RuntimeRequestKindString, OrchestrationV2RuntimeRequestStatus,
         OrchestrationV2Subagent, OrchestrationV2ThreadProjection,
         OrchestrationV2ThreadProjectionVisibleTurnItemsItemVisibility,
@@ -34,6 +38,8 @@ pub struct TimelineItem {
     pub status: ItemStatus,
     /// Carried over from the thread this one was forked from.
     pub inherited: bool,
+    /// The thread an inherited item belongs to, which a fork from it forks.
+    pub source_thread_id: Option<String>,
     pub kind: ItemKind,
 }
 
@@ -97,6 +103,9 @@ pub enum ItemKind {
         text: String,
         /// Sent while a run was active, to run after it.
         queued: bool,
+        /// It started its run, now or after a queue, rather than steering one: the messages
+        /// "Edit from here" rewinds to (`turn_start` and `queued_turn`).
+        starts_turn: bool,
         /// The images sent with it.
         images: Vec<MessageImage>,
     },
@@ -262,6 +271,7 @@ impl TimelineItem {
                     run_id: $item.run_id.clone(),
                     status: ItemStatus::from_wire(&$item.status),
                     inherited: false,
+                    source_thread_id: None,
                     kind: $kind,
                 }
             };
@@ -273,6 +283,11 @@ impl TimelineItem {
                 ItemKind::UserMessage {
                     text: item.text.clone(),
                     queued: item.input_intent == OrchestrationV2UserMessageInputIntent::QueuedTurn,
+                    starts_turn: matches!(
+                        item.input_intent,
+                        OrchestrationV2UserMessageInputIntent::TurnStart
+                            | OrchestrationV2UserMessageInputIntent::QueuedTurn
+                    ),
                     images: message_images(&item.attachments),
                 }
             ),
@@ -704,6 +719,17 @@ pub struct ActionablePlan {
     pub markdown: String,
 }
 
+/// Where "Edit from here" rewinds a user message to: the checkpoint T3 took before its run
+/// (`deriveRevertTurnCountByUserMessageId` and `findRevertCheckpoint` in T3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RevertTarget {
+    /// How many of the thread's runs stay: the checkpoint's run ordinal, or 0 for the thread's
+    /// start.
+    pub turn_count: i64,
+    pub checkpoint_id: String,
+    pub scope_id: String,
+}
+
 /// What Resume does in an empty composer (`chat/useComposerResume.ts` in T3).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resumable {
@@ -770,6 +796,13 @@ pub struct ThreadState {
     /// The thread's subagents and delegated tasks, for its family bar (`family_bar.rs`).
     subagents: Vec<OrchestrationV2Subagent>,
     plans: Vec<ProposedPlan>,
+    /// Each run's attempts at its provider turn, for which runs "Edit from here" can rewind
+    /// the agent's conversation to (`history.rs`).
+    attempts: Vec<OrchestrationV2RunAttempt>,
+    /// The checkpoints T3 took, which "Edit from here" rolls back to.
+    checkpoints: Vec<OrchestrationV2Checkpoint>,
+    /// The agent sessions the thread holds, which "Restart agent session" detaches.
+    provider_sessions: Vec<OrchestrationV2ProviderSession>,
 }
 
 impl ThreadState {
@@ -790,6 +823,9 @@ impl ThreadState {
             provider_threads: projection.provider_threads,
             plans: projection.plans.iter().filter_map(proposed_plan).collect(),
             subagents: projection.subagents,
+            attempts: projection.attempts,
+            checkpoints: projection.checkpoints,
+            provider_sessions: projection.provider_sessions,
         }
     }
 
@@ -861,6 +897,23 @@ impl ThreadState {
                 upsert(&mut self.runs, payload, |run| &run.id);
                 changed
             }
+            // `run-attempt.created` and `run-attempt.updated`.
+            OrchestrationV2DomainEvent::Variant6 { payload, .. }
+            | OrchestrationV2DomainEvent::Variant7 { payload, .. } => {
+                upsert(&mut self.attempts, payload, |attempt| &attempt.id);
+                changed
+            }
+            // `provider-session.attached` and `updated`, and `detached`, which drops it, as T3's
+            // projection does.
+            OrchestrationV2DomainEvent::Variant10 { payload, .. } => {
+                upsert(&mut self.provider_sessions, payload, |session| &session.id);
+                changed
+            }
+            OrchestrationV2DomainEvent::Variant11 { payload, .. } => {
+                self.provider_sessions
+                    .retain(|session| session.id != payload.provider_session_id);
+                changed
+            }
             // `subagent.updated`, for the family bar.
             OrchestrationV2DomainEvent::Variant9 { payload, .. } => {
                 upsert(&mut self.subagents, payload, |subagent| &subagent.id);
@@ -905,6 +958,11 @@ impl ThreadState {
                     }
                     None => Applied::default(),
                 }
+            }
+            // `checkpoint.captured`.
+            OrchestrationV2DomainEvent::Variant19 { payload, .. } => {
+                upsert(&mut self.checkpoints, payload, |checkpoint| &checkpoint.id);
+                changed
             }
             _ => Applied::default(),
         }
@@ -1226,6 +1284,254 @@ impl ThreadState {
         })
     }
 
+    /// Where each user message can be rewound to with "Edit from here", by item id, as T3's
+    /// timeline works it out (`deriveRevertTurnCountByUserMessageId` in `session-logic.ts`).
+    /// A message rewinds to the checkpoint T3 took after the run before its own, or to the
+    /// thread's start for its first run. Messages of a run that hasn't settled, inherited ones,
+    /// and ones whose rewind the agent's conversation can't follow have none.
+    pub fn revert_targets(&self) -> HashMap<String, RevertTarget> {
+        let available = self.available_revert_turn_counts();
+        let mut ready_turn_counts = HashMap::default();
+        for checkpoint in &self.checkpoints {
+            if checkpoint.status == OrchestrationV2CheckpointStatus::Ready
+                && let (Some(ordinal), Some(run_id)) =
+                    (checkpoint.app_run_ordinal, checkpoint.run_id.as_deref())
+            {
+                ready_turn_counts.insert(run_id, ordinal);
+            }
+        }
+        // A window of a longer history can't tell the first run it holds is the thread's.
+        let start_ready = !self.has_more_history && self.revert_checkpoint(0).is_some();
+        let unsettled = self.unsettled_run_id();
+        let mut target_by_run: HashMap<&str, Option<i64>> = HashMap::default();
+        let mut previous_run: Option<&str> = None;
+        let mut targets = HashMap::default();
+        for item in &self.items {
+            // Inherited history belongs to the source thread, not this one's checkpoints.
+            if item.inherited || !self.is_visible(item) {
+                continue;
+            }
+            if !matches!(
+                item.kind,
+                ItemKind::UserMessage { .. }
+                    | ItemKind::AssistantMessage { .. }
+                    | ItemKind::Notice { .. }
+            ) {
+                continue;
+            }
+            let Some(run_id) = item.run_id.as_deref() else {
+                continue;
+            };
+            if !target_by_run.contains_key(run_id) {
+                let target = match previous_run {
+                    None => start_ready.then_some(0),
+                    Some(previous) => ready_turn_counts.get(previous).copied(),
+                };
+                target_by_run.insert(run_id, target);
+                previous_run = Some(run_id);
+            }
+            if !matches!(
+                item.kind,
+                ItemKind::UserMessage {
+                    starts_turn: true,
+                    ..
+                }
+            ) || unsettled == Some(run_id)
+            {
+                continue;
+            }
+            let Some(turn_count) = target_by_run.get(run_id).copied().flatten() else {
+                continue;
+            };
+            if !available.contains(&turn_count) {
+                continue;
+            }
+            if let Some(checkpoint) = self.revert_checkpoint(turn_count) {
+                targets.insert(
+                    item.id.clone(),
+                    RevertTarget {
+                        turn_count,
+                        checkpoint_id: checkpoint.id.clone(),
+                        scope_id: checkpoint.scope_id.clone(),
+                    },
+                );
+            }
+        }
+        targets
+    }
+
+    /// The ready checkpoint to roll back to so that `turn_count` runs stay
+    /// (`findRevertCheckpoint` in T3).
+    fn revert_checkpoint(&self, turn_count: i64) -> Option<&OrchestrationV2Checkpoint> {
+        self.checkpoints.iter().rev().find(|checkpoint| {
+            checkpoint.status == OrchestrationV2CheckpointStatus::Ready
+                && if turn_count == 0 {
+                    checkpoint.ordinal_within_scope == 0 && checkpoint.app_run_ordinal.is_none()
+                } else {
+                    checkpoint.app_run_ordinal == Some(turn_count)
+                }
+        })
+    }
+
+    /// The run counts the agent's conversation can be rewound to: its session's thread must be
+    /// the thread's current agent, and a run counts only when its provider turn ran in that
+    /// thread, since a file checkpoint alone can't restore the conversation
+    /// (`deriveAvailableRevertTurnCounts` in T3's `ChatView.logic.ts`).
+    fn available_revert_turn_counts(&self) -> HashSet<i64> {
+        let mut available = HashSet::default();
+        let provider_thread = self
+            .thread
+            .active_provider_thread_id
+            .as_deref()
+            .and_then(|id| self.provider_threads.iter().find(|thread| thread.id == id));
+        let Some(provider_thread) = provider_thread else {
+            return available;
+        };
+        if provider_thread.provider_session_id.is_none()
+            || Some(provider_thread.provider_instance_id.as_str())
+                != crate::thread_settings::selection_instance_id(&self.thread.model_selection)
+        {
+            return available;
+        }
+        available.insert(0);
+        for run in &self.runs {
+            let Some(attempt_id) = run.active_attempt_id.as_deref() else {
+                continue;
+            };
+            let provider_turn = self
+                .provider_turns
+                .iter()
+                .filter(|turn| turn.run_attempt_id.as_deref() == Some(attempt_id))
+                .max_by_key(|turn| turn.ordinal)
+                .or_else(|| {
+                    let attempt = self
+                        .attempts
+                        .iter()
+                        .find(|attempt| attempt.id == attempt_id)?;
+                    let turn_id = attempt.provider_turn_id.as_deref()?;
+                    self.provider_turns.iter().find(|turn| turn.id == turn_id)
+                });
+            if provider_turn.is_some_and(|turn| turn.provider_thread_id == provider_thread.id) {
+                available.insert(run.ordinal);
+            }
+        }
+        available
+    }
+
+    /// The run that hasn't settled yet, whose messages can't be rewound to: the active run, or
+    /// the latest one while it hasn't finished (`deriveUnsettledRunId` in T3).
+    fn unsettled_run_id(&self) -> Option<&str> {
+        if let Some(run) = self.active_run() {
+            return Some(&run.id);
+        }
+        let latest = self
+            .runs
+            .iter()
+            .filter(|run| run.status != OrchestrationV2RunStatus::Queued)
+            .max_by_key(|run| run.ordinal)?;
+        let settled = latest.completed_at.is_some()
+            && !matches!(
+                latest.status,
+                OrchestrationV2RunStatus::Running
+                    | OrchestrationV2RunStatus::Starting
+                    | OrchestrationV2RunStatus::Waiting
+            );
+        (!settled).then_some(latest.id.as_str())
+    }
+
+    /// The run whose rolling back shows a rewind to `turn_count` happened: the latest settled
+    /// run after it, which T3 rolls back with the rest of the thread's later runs
+    /// (`waitForRevertedMessage` in T3).
+    pub fn rewind_witness(&self, turn_count: i64) -> Option<&OrchestrationV2Run> {
+        self.runs
+            .iter()
+            .filter(|run| {
+                run.ordinal > turn_count
+                    && matches!(
+                        run.status,
+                        OrchestrationV2RunStatus::Completed
+                            | OrchestrationV2RunStatus::Interrupted
+                            | OrchestrationV2RunStatus::Failed
+                            | OrchestrationV2RunStatus::Cancelled
+                    )
+            })
+            .max_by_key(|run| run.ordinal)
+    }
+
+    /// A run's current state, by id.
+    pub fn run_by_id(&self, run_id: &str) -> Option<&OrchestrationV2Run> {
+        self.run(run_id)
+    }
+
+    /// The agent session the thread runs in: its active provider thread's, or else the latest
+    /// one that's still alive (`resolveThreadProviderSession` in T3's `threadWorkflows.ts`).
+    pub fn provider_session(&self) -> Option<&OrchestrationV2ProviderSession> {
+        let provider_thread_id = self
+            .active_run()
+            .and_then(|run| run.provider_thread_id.as_deref())
+            .or(self.thread.active_provider_thread_id.as_deref());
+        let active = provider_thread_id
+            .and_then(|id| self.provider_threads.iter().find(|thread| thread.id == id));
+        let attached = active.or_else(|| {
+            self.provider_threads.iter().find(|thread| {
+                thread.app_thread_id.as_deref() == Some(self.thread.id.as_str())
+                    && thread.provider_session_id.is_some()
+            })
+        });
+        if let Some(session_id) = attached.and_then(|thread| thread.provider_session_id.as_deref())
+        {
+            return self
+                .provider_sessions
+                .iter()
+                .find(|session| session.id == session_id);
+        }
+        self.provider_sessions.iter().rev().find(|session| {
+            !matches!(
+                session.status,
+                OrchestrationV2ProviderSessionStatus::Stopped
+                    | OrchestrationV2ProviderSessionStatus::Error
+            )
+        })
+    }
+
+    /// Every agent session the thread holds, which restarting the agent detaches.
+    pub fn provider_sessions(&self) -> &[OrchestrationV2ProviderSession] {
+        &self.provider_sessions
+    }
+
+    /// Whether "Fork from this response" can fork from `item`: a finished agent message of a
+    /// run, when the agent can fork natively or hand its whole thread to a new one
+    /// (`canForkProjectedAssistantItem` in T3). Without a session to ask, as for inherited
+    /// history, T3's server-side fallback still forks.
+    pub fn can_fork(&self, item: &TimelineItem) -> bool {
+        if !matches!(
+            item.kind,
+            ItemKind::AssistantMessage {
+                streaming: false,
+                ..
+            }
+        ) || item.run_id.is_none()
+            || item.status != ItemStatus::Completed
+        {
+            return false;
+        }
+        if item.inherited {
+            return true;
+        }
+        self.provider_session()
+            .is_none_or(|session| can_fork_with(&session.capabilities))
+    }
+
+    /// Whether there's a conversation to compact: a message other than `/compact` itself.
+    pub fn has_compactable_conversation(&self) -> bool {
+        self.items.iter().any(|item| match &item.kind {
+            ItemKind::UserMessage { text, images, .. } => {
+                !text.trim().eq_ignore_ascii_case("/compact") || !images.is_empty()
+            }
+            _ => false,
+        })
+    }
+
     /// The plan to offer Implement and Refine for, as T3's composer does
     /// (`shouldShowPlanFollowUpPrompt` in T3's `ChatView.logic.ts`): the thread is in plan mode,
     /// its latest run has settled, no question is waiting, and that run's latest plan is still
@@ -1310,6 +1616,15 @@ impl TimelineItem {
     }
 }
 
+/// Whether an agent with `capabilities` can fork a thread from one of its turns: natively, or by
+/// handing the whole thread over.
+fn can_fork_with(capabilities: &OrchestrationV2ProviderCapabilities) -> bool {
+    let natively = capabilities.threads.can_fork_thread
+        && capabilities.threads.can_fork_from_turn
+        && capabilities.identity.native_thread_ids == OrchestrationV2NativeRefStrength::Strong;
+    natively || capabilities.context.supports_full_thread_handoff
+}
+
 fn proposed_plan(artifact: &OrchestrationV2PlanArtifact) -> Option<ProposedPlan> {
     match artifact {
         OrchestrationV2PlanArtifact::ProposedPlan(plan) => Some(ProposedPlan {
@@ -1349,6 +1664,9 @@ fn timeline_items(projection: &OrchestrationV2ThreadProjection) -> Vec<TimelineI
             let mut item = TimelineItem::from_turn_item(&canonical_item(&visible.item)?)?;
             item.inherited = visible.visibility
                 == OrchestrationV2ThreadProjectionVisibleTurnItemsItemVisibility::Inherited;
+            if item.inherited {
+                item.source_thread_id = Some(visible.source_thread_id.clone());
+            }
             Some(item)
         })
         .collect()
