@@ -3,19 +3,37 @@
 //! reasoning, and plans show.
 
 use crate::{
-    model::{ItemKind, ItemStatus, Row, TimelineItem, ToolKind, canonical_item},
+    attachments::{AssetKey, AssetState},
+    model::{ItemKind, ItemStatus, MessageImage, Row, TimelineItem, ToolKind, canonical_item},
     thread_view::{CONTENT_MAX_WIDTH, Loadable, ThreadView},
 };
 use gpui::{
-    AnyElement, App, AppContext as _, Context, FontWeight, Hsla, IntoElement, ParentElement as _,
-    SharedString, Styled as _, TextStyleRefinement, Window, div, px, relative,
+    AnyElement, App, AppContext as _, Context, FontWeight, Hsla, IntoElement, ObjectFit,
+    ParentElement as _, Pixels, SharedString, Styled as _, StyledImage as _, TextStyleRefinement,
+    Window, div, img, px, relative,
 };
 use markdown::{Markdown, MarkdownElement, MarkdownStyle};
-use mustr_ui::{Card, palette, tokens};
+use mustr_ui::{ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens};
 use t3_api::types::OrchestrationV2GetTurnItemInput;
 use ui::{
     Color, Icon, IconName, IconSize, Indicator, Label, LabelCommon as _, LabelSize, prelude::*,
 };
+
+/// A message's thumbnails, two to a row as in T3's timeline (`grid-cols-2`, `aspect-[4/3]`).
+const MESSAGE_IMAGE_WIDTH: f32 = 101.;
+const MESSAGE_IMAGE_HEIGHT: f32 = 76.;
+/// A tool's images, such as screenshots, in its expanded output.
+const TOOL_IMAGE_WIDTH: f32 = 320.;
+const TOOL_IMAGE_HEIGHT: f32 = 200.;
+
+/// An image of the timeline, and how to show it.
+struct Thumbnail {
+    key: AssetKey,
+    name: SharedString,
+    selector: String,
+    size: (Pixels, Pixels),
+    fit: ObjectFit,
+}
 
 /// Tool calls shown as chips on a collapsed run of work.
 const COLLAPSED_CHIPS: usize = 6;
@@ -139,21 +157,24 @@ impl ThreadView {
             let result = request.await;
             this.update(cx, |this, cx| {
                 this.loading_outputs.remove(&item_id);
-                let output = match result {
-                    Ok(result) => result
-                        .item
-                        .as_ref()
-                        .and_then(canonical_item)
-                        .and_then(|item| TimelineItem::from_turn_item(&item))
-                        .and_then(|item| match item.kind {
-                            ItemKind::Tool { output, .. } => output,
-                            _ => None,
-                        })
-                        .or_else(|| Some("No output.".to_string())),
-                    Err(error) => Some(format!("Couldn't load the output: {error:#}")),
+                let (output, images) = match result {
+                    Ok(result) => {
+                        let fetched = result
+                            .item
+                            .as_ref()
+                            .and_then(canonical_item)
+                            .and_then(|item| TimelineItem::from_turn_item(&item))
+                            .and_then(|item| match item.kind {
+                                ItemKind::Tool { output, images, .. } => Some((output, images)),
+                                _ => None,
+                            });
+                        let (output, images) = fetched.unwrap_or_default();
+                        (output.or_else(|| Some("No output.".to_string())), images)
+                    }
+                    Err(error) => (Some(format!("Couldn't load the output: {error:#}")), 0),
                 };
                 if let Loadable::Loaded(state) = &mut this.state
-                    && state.set_output(&item_id, output).changed
+                    && state.set_output(&item_id, output, images).changed
                 {
                     this.sync_rows(cx);
                 }
@@ -425,21 +446,29 @@ impl ThreadView {
     ) -> AnyElement {
         let palette = palette(cx);
         match &item.kind {
-            ItemKind::UserMessage { .. } => h_flex()
-                .items_start()
-                .gap_2()
-                .child(avatar("Y", gpui::rgb(0x6e7781).into()))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .px(px(10.))
-                        .py(px(6.))
-                        .rounded(tokens::CORNER_RADIUS)
-                        .bg(palette.surface_2.hsla())
-                        .child(self.render_markdown(&item.id, false, window, cx)),
-                )
-                .into_any_element(),
+            ItemKind::UserMessage { text, images, .. } => {
+                let thumbnails =
+                    (!images.is_empty()).then(|| self.render_message_images(&item.id, images, cx));
+                h_flex()
+                    .items_start()
+                    .gap_2()
+                    .child(avatar("Y", gpui::rgb(0x6e7781).into()))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .gap_1p5()
+                            .px(px(10.))
+                            .py(px(6.))
+                            .rounded(tokens::CORNER_RADIUS)
+                            .bg(palette.surface_2.hsla())
+                            .when(!text.trim().is_empty(), |this| {
+                                this.child(self.render_markdown(&item.id, false, window, cx))
+                            })
+                            .children(thumbnails),
+                    )
+                    .into_any_element()
+            }
             ItemKind::AssistantMessage { streaming, .. } => h_flex()
                 .items_start()
                 .gap_2()
@@ -460,25 +489,58 @@ impl ThreadView {
                         }),
                 )
                 .into_any_element(),
-            ItemKind::Plan { title, .. } => Card::new()
-                .gap_1()
-                .border_color(palette.accent.hsla().opacity(0.45))
-                .child(
-                    h_flex()
-                        .gap_1p5()
-                        .child(
-                            Icon::new(IconName::ListTodo)
-                                .size(IconSize::Small)
-                                .color(Color::Accent),
-                        )
-                        .child(
-                            Label::new(title.clone().unwrap_or_else(|| "Plan".to_string()))
-                                .size(LabelSize::Small)
-                                .weight(FontWeight::SEMIBOLD),
-                        ),
-                )
-                .child(self.render_markdown(&item.id, false, window, cx))
-                .into_any_element(),
+            ItemKind::Plan {
+                title, markdown, ..
+            } => {
+                let actions = self.render_plan_actions(item, cx);
+                let copied = self.composer_state.copied.as_deref() == Some(item.id.as_str());
+                let copy_text = format!("{}\n", markdown.trim_end());
+                let item_id = item.id.clone();
+                Card::new()
+                    .gap_1()
+                    .border_color(palette.accent.hsla().opacity(0.45))
+                    .child(
+                        h_flex()
+                            .gap_1p5()
+                            .child(
+                                Icon::new(IconName::ListTodo)
+                                    .size(IconSize::Small)
+                                    .color(Color::Accent),
+                            )
+                            .child(
+                                Label::new(title.clone().unwrap_or_else(|| "Plan".to_string()))
+                                    .size(LabelSize::Small)
+                                    .weight(FontWeight::SEMIBOLD),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .debug_selector(|| format!("thread-plan-copy-{item_id}"))
+                                    .child(
+                                        TextButton::new(
+                                            SharedString::from(format!("copy-plan-{}", item.id)),
+                                            if copied { "Copied" } else { "Copy" },
+                                        )
+                                        .tooltip("Copy the plan as Markdown")
+                                        .on_click(
+                                            cx.listener({
+                                                let item_id = item.id.clone();
+                                                move |this, _, _, cx| {
+                                                    this.copy_text(
+                                                        item_id.clone(),
+                                                        copy_text.clone(),
+                                                        cx,
+                                                    )
+                                                }
+                                            }),
+                                        ),
+                                    ),
+                            ),
+                    )
+                    .child(self.render_markdown(&item.id, false, window, cx))
+                    .children(actions)
+                    .into_any_element()
+            }
             ItemKind::Todo { explanation, steps } => {
                 let done = steps
                     .iter()
@@ -605,7 +667,7 @@ impl ThreadView {
                     }))
                     .into_any_element()
             }
-            ItemKind::Error { message } => Card::new()
+            ItemKind::Error { message, .. } => Card::new()
                 .border_color(cx.theme().status().error.opacity(0.6))
                 .child(
                     h_flex()
@@ -632,6 +694,149 @@ impl ThreadView {
             ItemKind::Tool { .. } | ItemKind::FileChange { .. } | ItemKind::Reasoning { .. } => {
                 self.render_work(vec![item.clone()], window, cx)
             }
+        }
+    }
+
+    /// Implement, Implement in a new thread, and Refine, on the plan T3 would offer them for.
+    fn render_plan_actions(
+        &mut self,
+        item: &TimelineItem,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let plan = self.thread_state()?.actionable_plan()?;
+        if plan.item_id != item.id || !self.images.composer.is_empty() {
+            return None;
+        }
+        let disabled = self.backend.write_blocked_reason().is_some() || self.sending;
+        Some(
+            h_flex()
+                .pt_1()
+                .gap_1p5()
+                .child(
+                    div()
+                        .debug_selector(|| "thread-plan-implement".into())
+                        .child(
+                            TextButton::new("plan-implement", "Implement")
+                                .style(MustrButtonStyle::Primary)
+                                .disabled(disabled)
+                                .tooltip("Leave plan mode and implement this plan")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.implement_plan(false, window, cx)
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .debug_selector(|| "thread-plan-implement-new".into())
+                        .child(
+                            TextButton::new("plan-implement-new", "Implement in a new thread")
+                                .disabled(disabled)
+                                .tooltip("Start a thread on the same branch that implements it")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.implement_plan(true, window, cx)
+                                })),
+                        ),
+                )
+                .child(
+                    div().debug_selector(|| "thread-plan-refine".into()).child(
+                        TextButton::new("plan-refine", "Refine")
+                            .disabled(disabled)
+                            .tooltip("Ask the agent to change the plan")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.refine_plan(window, cx)),
+                            ),
+                    ),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// A message's images, as thumbnails that open full size.
+    fn render_message_images(
+        &mut self,
+        item_id: &str,
+        images: &[MessageImage],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        h_flex()
+            .flex_wrap()
+            .gap_2()
+            .max_w(px(MESSAGE_IMAGE_WIDTH * 2. + 8.))
+            .children(images.iter().enumerate().map(|(index, image)| {
+                let key = AssetKey::Attachment {
+                    attachment_id: image.attachment_id.clone(),
+                    mime_type: image.mime_type.clone(),
+                };
+                self.render_thumbnail(
+                    Thumbnail {
+                        key,
+                        name: image.name.clone().into(),
+                        selector: format!("thread-message-image-{item_id}-{index}"),
+                        size: (px(MESSAGE_IMAGE_WIDTH), px(MESSAGE_IMAGE_HEIGHT)),
+                        fit: ObjectFit::Cover,
+                    },
+                    cx,
+                )
+            }))
+            .into_any_element()
+    }
+
+    /// An image of the timeline: a placeholder while it loads, then the image, which opens full
+    /// size when clicked.
+    fn render_thumbnail(&mut self, thumbnail: Thumbnail, cx: &mut Context<Self>) -> AnyElement {
+        let Thumbnail {
+            key,
+            name,
+            selector,
+            size: (width, height),
+            fit,
+        } = thumbnail;
+        let palette = palette(cx);
+        let state = self.asset(&key, cx);
+        let frame = div()
+            .id(SharedString::from(selector.clone()))
+            .debug_selector(|| selector)
+            .flex_none()
+            .w(width)
+            .h(height)
+            .rounded(tokens::CONTROL_RADIUS)
+            .overflow_hidden()
+            .border(tokens::BORDER_WIDTH)
+            .border_color(palette.border.hsla())
+            .bg(palette.background.hsla());
+        match state {
+            AssetState::Loaded(image) => {
+                let preview = image.clone();
+                frame
+                    .cursor_pointer()
+                    .tooltip(ui::Tooltip::text(name.clone()))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_image_preview(name.clone(), preview.clone(), window, cx)
+                    }))
+                    .child(img(image).size_full().object_fit(fit))
+                    .into_any_element()
+            }
+            AssetState::Loading => frame
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    Icon::new(IconName::Image)
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                )
+                .into_any_element(),
+            AssetState::Failed(error) => frame
+                .flex()
+                .items_center()
+                .justify_center()
+                .tooltip(ui::Tooltip::text(format!("Couldn't load {name}: {error}")))
+                .child(
+                    Icon::new(IconName::Warning)
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                )
+                .into_any_element(),
         }
     }
 
@@ -757,31 +962,61 @@ impl ThreadView {
         };
         let detail: Option<AnyElement> = if expanded {
             match &item.kind {
-                ItemKind::Tool { input, output, .. } => {
+                ItemKind::Tool {
+                    input,
+                    output,
+                    images,
+                    ..
+                } => {
                     let loading = self.loading_outputs.contains(&item.id);
                     let text = [input.clone(), output.clone()]
                         .into_iter()
                         .flatten()
                         .collect::<Vec<_>>()
                         .join("\n\n");
+                    let item_id = item.id.clone();
+                    let thumbnails = (0..*images)
+                        .map(|index| {
+                            self.render_thumbnail(
+                                Thumbnail {
+                                    key: AssetKey::ToolImage {
+                                        item_id: item_id.clone(),
+                                        index,
+                                    },
+                                    name: format!("Screenshot {}", index + 1).into(),
+                                    selector: format!("thread-tool-image-{item_id}-{index}"),
+                                    size: (px(TOOL_IMAGE_WIDTH), px(TOOL_IMAGE_HEIGHT)),
+                                    fit: ObjectFit::Contain,
+                                },
+                                cx,
+                            )
+                        })
+                        .collect::<Vec<_>>();
                     Some(
-                        div()
+                        v_flex()
                             .ml(px(20.))
-                            .px_2()
-                            .py_1()
-                            .rounded(tokens::CONTROL_RADIUS)
-                            .bg(palette.background.hsla())
-                            .border_1()
-                            .border_color(palette.border.hsla())
-                            .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
-                            .font_buffer(cx)
-                            .text_color(palette.text_muted.hsla())
-                            .child(if loading {
-                                "Loading…".to_string()
-                            } else if text.is_empty() {
-                                "No output.".to_string()
-                            } else {
-                                text
+                            .gap_1()
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded(tokens::CONTROL_RADIUS)
+                                    .bg(palette.background.hsla())
+                                    .border_1()
+                                    .border_color(palette.border.hsla())
+                                    .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
+                                    .font_buffer(cx)
+                                    .text_color(palette.text_muted.hsla())
+                                    .child(if loading {
+                                        "Loading…".to_string()
+                                    } else if text.is_empty() {
+                                        "No output.".to_string()
+                                    } else {
+                                        text
+                                    }),
+                            )
+                            .when(!thumbnails.is_empty(), |this| {
+                                this.child(h_flex().flex_wrap().gap_2().children(thumbnails))
                             })
                             .into_any_element(),
                     )

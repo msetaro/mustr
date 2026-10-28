@@ -2,19 +2,25 @@
 //! and above it the agent's pending requests, to approve or answer, and the queued messages.
 
 use crate::{
-    commands::{self, CommandIds, Delivery},
+    attachments::{ComposerImage, UploadState},
+    commands::{self, CommandIds, Delivery, Message, PlanRef},
     model::{ItemKind, PendingRequest, QueuedMessage, ThreadState},
     thread_view::{CONTENT_MAX_WIDTH, Loadable, ThreadView},
     timeline::truncate,
 };
+use editor::{Editor, EditorEvent};
 use gpui::{
-    AnyElement, App, Context, Focusable as _, FontWeight, IntoElement, ParentElement as _,
-    SharedString, Styled as _, Window, actions, div, px,
+    AnyElement, App, AppContext as _, ClipboardEntry, Context, Entity, ExternalPaths,
+    Focusable as _, FontWeight, IntoElement, ObjectFit, ParentElement as _, SharedString,
+    Styled as _, StyledImage as _, Subscription, Window, actions, div, img, px, relative,
 };
 use mustr_ui::{ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens};
+use std::path::Path;
 use t3_api::types::ProviderApprovalDecision;
+use t3_api::types::ProviderInteractionMode;
 use ui::{
-    Color, Icon, IconName, IconSize, Label, LabelCommon as _, LabelSize, Tooltip, prelude::*,
+    Color, Icon, IconButton, IconName, IconSize, Label, LabelCommon as _, LabelSize, Tooltip,
+    prelude::*,
 };
 
 actions!(
@@ -31,6 +37,62 @@ actions!(
 );
 
 pub(crate) const COMPOSER_CONTEXT: &str = "ThreadComposer";
+/// The side of an image's tile in the composer, as T3's (`h-16 w-16`).
+const IMAGE_TILE_SIZE: f32 = 64.;
+
+/// The composer's and timeline's state besides their images.
+#[derive(Default)]
+pub struct ComposerState {
+    /// What was copied last, by the id of its item, to say so on its button.
+    pub(crate) copied: Option<String>,
+    pub(crate) _copied_reset: Option<gpui::Task<()>>,
+}
+
+impl ThreadView {
+    /// Copies text, and says so on the button of `item_id` for a moment.
+    pub(crate) fn copy_text(&mut self, item_id: String, text: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        self.composer_state.copied = Some(item_id.clone());
+        self.composer_state._copied_reset = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(2))
+                .await;
+            this.update(cx, |this, cx| {
+                if this.composer_state.copied.as_deref() == Some(item_id.as_str()) {
+                    this.composer_state.copied = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+}
+
+/// Redraws the view as the composer's text changes, since its buttons depend on whether
+/// there's anything to send.
+pub(crate) fn observe_composer(
+    composer: &Entity<Editor>,
+    cx: &mut Context<ThreadView>,
+) -> Subscription {
+    cx.subscribe(composer, |_, _, event: &EditorEvent, cx| {
+        if matches!(event, EditorEvent::BufferEdited { .. }) {
+            cx.notify();
+        }
+    })
+}
+
+/// Whether a file is named like an image agents take, or one mustr converts.
+fn has_image_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tif" | "tiff"
+            )
+        })
+}
 pub(crate) const COMPOSER_MIN_LINES: usize = 2;
 pub(crate) const COMPOSER_MAX_LINES: usize = 12;
 
@@ -43,9 +105,20 @@ impl ThreadView {
         self.backend.write_blocked_reason()
     }
 
-    fn send(&mut self, delivery: Delivery, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn send(&mut self, delivery: Delivery, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.composer_text(cx);
-        if text.trim().is_empty() || self.sending {
+        let has_images = !self.images.composer.is_empty();
+        if (text.trim().is_empty() && !has_images) || self.sending {
+            return;
+        }
+        // Like T3's Send: it waits for images still going up, and retries failed ones first.
+        if self.images.uploading() {
+            self.images.send_when_uploaded = Some(delivery);
+            cx.notify();
+            return;
+        }
+        if self.images.any_failed() {
+            self.retry_failed_then_send(delivery, window, cx);
             return;
         }
         if let Some(form) = self.new_thread.clone() {
@@ -55,8 +128,18 @@ impl ThreadView {
         let Loadable::Loaded(state) = &self.state else {
             return;
         };
-        let command =
-            commands::send_message(state.thread_id(), text.trim(), delivery, CommandIds::new());
+        let thread_id = state.thread_id().to_string();
+        let sent_images = self
+            .images
+            .composer
+            .iter()
+            .map(|image| image.key)
+            .collect::<Vec<_>>();
+        let message = Message {
+            attachments: self.images.attachments(),
+            ..Message::text(text.trim())
+        };
+        let command = commands::message(&thread_id, message, delivery, CommandIds::new());
         let dispatch = self.backend.dispatch(command);
         self.sending = true;
         self.error = None;
@@ -66,15 +149,259 @@ impl ThreadView {
             this.update_in(cx, |this, window, cx| {
                 this.sending = false;
                 match result {
-                    Ok(_) => this
-                        .composer
-                        .update(cx, |editor, cx| editor.clear(window, cx)),
+                    Ok(_) => {
+                        this.composer
+                            .update(cx, |editor, cx| editor.clear(window, cx));
+                        this.images.clear_sent(&sent_images);
+                    }
                     Err(error) => this.error = Some(format!("{error:#}").into()),
                 }
                 cx.notify();
             })
             .ok();
         }));
+    }
+
+    /// Sends commands one after another, stopping at the first T3 refuses, then calls `done`
+    /// with how it went. The composer is busy until then.
+    pub(crate) fn dispatch_in_order(
+        &mut self,
+        commands: Vec<t3_api::tagged::OrchestrationV2Command>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        done: impl FnOnce(&mut Self, anyhow::Result<()>, &mut Window, &mut Context<Self>) + 'static,
+    ) {
+        if self.sending {
+            return;
+        }
+        let backend = self.backend.clone();
+        self.sending = true;
+        self.error = None;
+        cx.notify();
+        self._tasks.push(cx.spawn_in(window, async move |this, cx| {
+            let mut result = Ok(());
+            for command in commands {
+                if let Err(error) = backend.dispatch(command).await {
+                    result = Err(error);
+                    break;
+                }
+            }
+            this.update_in(cx, |this, window, cx| {
+                this.sending = false;
+                done(this, result, window, cx);
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// Resume, in an empty composer: continues the latest run if it was interrupted or hit a
+    /// usage limit, and restarts a held queue (`useComposerResume.ts` in T3).
+    pub(crate) fn resume(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(state) = self.thread_state() else {
+            return;
+        };
+        let Some(resumable) = state.resumable() else {
+            return;
+        };
+        let thread_id = state.thread_id().to_string();
+        let mut commands = Vec::new();
+        if let Some(run_id) = &resumable.continue_run_id {
+            commands.push(commands::continue_run(
+                &thread_id,
+                run_id,
+                Some(state.thread.model_selection.clone()),
+                CommandIds::new(),
+            ));
+        }
+        if resumable.held_queue {
+            commands.push(commands::resume_queue(&thread_id, commands::new_id()));
+        }
+        self.dispatch_in_order(commands, window, cx, |this, result, _, _| {
+            if let Err(error) = result {
+                this.error = Some(format!("{error:#}").into());
+            }
+        });
+    }
+
+    /// Implements the thread's actionable plan, in this thread or a new one
+    /// (`useProposedPlanSend.ts` in T3).
+    pub(crate) fn implement_plan(
+        &mut self,
+        in_new_thread: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = self.thread_state() else {
+            return;
+        };
+        let Some(plan) = state.actionable_plan() else {
+            return;
+        };
+        let thread = &state.thread;
+        let text = commands::plan_implementation_text(&plan.markdown);
+        let source_plan = PlanRef {
+            thread_id: thread.id.clone(),
+            plan_id: plan.plan_id.clone(),
+        };
+        if !in_new_thread {
+            let mut commands = Vec::new();
+            // T3 switches the thread out of plan mode first, with its own command.
+            if thread.interaction_mode != ProviderInteractionMode::Default {
+                commands.push(commands::set_interaction_mode(
+                    &thread.id,
+                    ProviderInteractionMode::Default,
+                    commands::new_id(),
+                ));
+            }
+            commands.push(commands::message(
+                &thread.id,
+                Message {
+                    model_selection: Some(thread.model_selection.clone()),
+                    source_plan: Some(source_plan),
+                    title_seed: Some(thread.title.clone()),
+                    ..Message::text(text)
+                },
+                Delivery::Auto,
+                CommandIds::new(),
+            ));
+            self.dispatch_in_order(commands, window, cx, |this, result, _, _| {
+                if let Err(error) = result {
+                    this.error = Some(format!("{error:#}").into());
+                }
+            });
+            return;
+        }
+
+        let new_thread_id = commands::new_id();
+        let title = commands::plan_thread_title(&plan.markdown);
+        let create = commands::create_plan_thread(
+            commands::PlanThread {
+                project_id: thread.project_id.clone(),
+                title: title.clone(),
+                model_selection: thread.model_selection.clone(),
+                runtime_mode: thread.runtime_mode.clone(),
+                branch: thread.branch.clone(),
+                worktree_path: thread.worktree_path.clone(),
+            },
+            &new_thread_id,
+            commands::new_id(),
+        );
+        let first_message = commands::message(
+            &new_thread_id,
+            Message {
+                model_selection: Some(thread.model_selection.clone()),
+                source_plan: Some(source_plan),
+                title_seed: Some(title.clone()),
+                ..Message::text(text)
+            },
+            Delivery::Auto,
+            CommandIds::new(),
+        );
+        let created = new_thread_id;
+        self.dispatch_in_order(vec![create], window, cx, move |this, result, window, cx| {
+            if let Err(error) = result {
+                this.error =
+                    Some(format!("Could not start the implementation thread: {error:#}").into());
+                return;
+            }
+            this.dispatch_in_order(
+                vec![first_message],
+                window,
+                cx,
+                move |this, result, window, cx| {
+                    match result {
+                        Ok(()) => this.open_other_thread(created, title, window, cx),
+                        Err(error) => {
+                            // As T3 does, don't leave an empty thread behind.
+                            this.error = Some(
+                                format!("Could not start the implementation thread: {error:#}")
+                                    .into(),
+                            );
+                            let delete = this
+                                .backend
+                                .dispatch(commands::delete_thread(&created, commands::new_id()));
+                            cx.background_spawn(async move {
+                                if let Err(error) = delete.await {
+                                    log::warn!("couldn't delete the unstarted thread: {error:#}");
+                                }
+                            })
+                            .detach();
+                            let _ = window;
+                        }
+                    }
+                },
+            );
+        });
+    }
+
+    /// Opens another thread's view in this view's workspace.
+    fn open_other_thread(
+        &mut self,
+        thread_id: String,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = workspace::Workspace::for_window(window, cx) else {
+            return;
+        };
+        crate::open_thread(thread_id, title.into(), workspace.downgrade(), window, cx);
+    }
+
+    /// Refine: asks for what to change, and the next message goes in plan mode.
+    pub(crate) fn refine_plan(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.composer.update(cx, |editor, cx| {
+            editor.set_placeholder_text("Describe how to change the plan…", window, cx);
+        });
+        window.focus(&self.composer.focus_handle(cx), cx);
+        cx.notify();
+    }
+
+    /// Pastes images as attachments; anything else goes to the editor.
+    fn on_paste(
+        &mut self,
+        _: &editor::actions::Paste,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(clipboard) = cx.read_from_clipboard() else {
+            return;
+        };
+        let mut images = Vec::new();
+        let mut paths = Vec::new();
+        for entry in clipboard.entries() {
+            match entry {
+                ClipboardEntry::Image(image) if !image.bytes.is_empty() => {
+                    images.push(image.clone())
+                }
+                ClipboardEntry::ExternalPaths(external) => {
+                    paths.extend(external.paths().iter().cloned())
+                }
+                _ => {}
+            }
+        }
+        // Copied files are attached only when they're all images; otherwise they paste as text.
+        let image_paths = !paths.is_empty() && paths.iter().all(|path| has_image_extension(path));
+        if images.is_empty() && !image_paths {
+            return;
+        }
+        cx.stop_propagation();
+        if !images.is_empty() {
+            self.add_clipboard_images(images, window, cx);
+        }
+        if image_paths {
+            self.add_image_paths(paths, window, cx);
+        }
+    }
+
+    fn on_drop_paths(
+        &mut self,
+        paths: &ExternalPaths,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.add_image_paths(paths.paths().to_vec(), window, cx);
     }
 
     fn dispatch(
@@ -527,6 +854,181 @@ impl ThreadView {
             }))
     }
 
+    /// The composer's images, as T3's strip shows them: a tile each, with its upload's
+    /// progress, Retry when it failed, and a remove button.
+    fn render_image_strip(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let preparing = self.images.preparing;
+        h_flex()
+            .flex_wrap()
+            .gap_1p5()
+            .pt_0p5()
+            .children(
+                self.images
+                    .composer
+                    .iter()
+                    .map(|image| self.render_image_tile(image, cx)),
+            )
+            .when(preparing > 0, |this| {
+                let palette = mustr_ui::palette(cx);
+                this.child(
+                    div()
+                        .size(px(IMAGE_TILE_SIZE))
+                        .rounded(tokens::CORNER_RADIUS)
+                        .border(tokens::BORDER_WIDTH)
+                        .border_dashed()
+                        .border_color(palette.border.hsla())
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(Label::new("0%").size(LabelSize::XSmall).color(Color::Muted)),
+                )
+            })
+    }
+
+    fn render_image_tile(&self, image: &ComposerImage, cx: &mut Context<Self>) -> AnyElement {
+        let palette = palette(cx);
+        let key = image.key;
+        let failed = match &image.upload {
+            UploadState::Failed { reason } => Some(reason.clone()),
+            _ => None,
+        };
+        let progress = match image.upload {
+            UploadState::Uploading { progress } => Some(progress),
+            _ => None,
+        };
+        let name: SharedString = image.name.clone().into();
+        let thumbnail = image.image.clone();
+        let small_button = |id: SharedString, icon: IconName| {
+            div()
+                .id(id)
+                .size(px(18.))
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(gpui::black().opacity(0.62))
+                .hover(|style| style.bg(gpui::black().opacity(0.8)))
+                .cursor_pointer()
+                .child(
+                    Icon::new(icon)
+                        .size(IconSize::XSmall)
+                        .color(Color::Custom(gpui::white())),
+                )
+        };
+        div()
+            .id(SharedString::from(format!("composer-image-{key}")))
+            .debug_selector(move || format!("thread-image-{key}"))
+            .relative()
+            .flex_none()
+            .size(px(IMAGE_TILE_SIZE))
+            .rounded(tokens::CORNER_RADIUS)
+            .overflow_hidden()
+            .border(tokens::BORDER_WIDTH)
+            .border_color(if failed.is_some() {
+                cx.theme().status().error
+            } else {
+                palette.border.hsla()
+            })
+            .bg(palette.surface_2.hsla())
+            .cursor_pointer()
+            .tooltip(Tooltip::text(match &failed {
+                Some(reason) => format!("{name}: {reason}"),
+                None => name.to_string(),
+            }))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.open_image_preview(name.clone(), thumbnail.clone(), window, cx)
+            }))
+            .child(
+                img(image.image.clone())
+                    .size_full()
+                    .object_fit(ObjectFit::Cover),
+            )
+            .when_some(progress, |this, progress| {
+                this.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(gpui::black().opacity(0.35))
+                        .flex()
+                        .items_end()
+                        .child(
+                            v_flex()
+                                .w_full()
+                                .items_center()
+                                .gap_0p5()
+                                .pb_1()
+                                .child(
+                                    div()
+                                        .text_size(tokens::text_size(tokens::TEXT_SIZE_XSMALL))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(gpui::white())
+                                        .child(format!("{}%", (progress * 100.).floor() as u32)),
+                                )
+                                .child(
+                                    div()
+                                        .mx_1()
+                                        .h(px(3.))
+                                        .w(px(IMAGE_TILE_SIZE - 12.))
+                                        .rounded_full()
+                                        .bg(gpui::white().opacity(0.3))
+                                        .child(
+                                            div()
+                                                .h_full()
+                                                .w(relative(progress.max(0.04)))
+                                                .rounded_full()
+                                                .bg(palette.accent.hsla()),
+                                        ),
+                                ),
+                        ),
+                )
+            })
+            .when(failed.is_some(), |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(cx.theme().status().error.opacity(0.25)),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .bottom(px(3.))
+                        .left(px(3.))
+                        .debug_selector(move || format!("thread-image-retry-{key}"))
+                        .child(
+                            small_button(
+                                SharedString::from(format!("retry-image-{key}")),
+                                IconName::RotateCw,
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.retry_image(key, window, cx)
+                                },
+                            )),
+                        ),
+                )
+            })
+            .child(
+                div()
+                    .absolute()
+                    .top(px(3.))
+                    .right(px(3.))
+                    .debug_selector(move || format!("thread-image-remove-{key}"))
+                    .child(
+                        small_button(
+                            SharedString::from(format!("remove-image-{key}")),
+                            IconName::Close,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.remove_image(key, cx)
+                        })),
+                    ),
+            )
+            .into_any_element()
+    }
+
     pub(crate) fn render_composer(
         &self,
         window: &mut Window,
@@ -540,6 +1042,7 @@ impl ThreadView {
         let queued = state.map(ThreadState::queued_messages).unwrap_or_default();
         let blocked = self.write_blocked_reason();
         let can_write = blocked.is_none() && (is_draft || state.is_some()) && !self.sending;
+        let has_text = !self.composer_text(cx).trim().is_empty();
 
         let mut buttons: Vec<AnyElement> = Vec::new();
         if running {
@@ -582,24 +1085,89 @@ impl ThreadView {
                     .into_any_element(),
             );
         } else {
-            buttons.push(
-                div()
-                    .debug_selector(|| "thread-send".into())
-                    .child(
-                        TextButton::new(
-                            "thread-send",
-                            if is_draft { "Start thread" } else { "Send" },
+            // T3's primary actions (`ComposerPrimaryActions.tsx`): Resume in an empty composer
+            // when there's a run to continue or a held queue, then Implement or Refine for an
+            // active plan, then Send.
+            let empty = !has_text && self.images.composer.is_empty();
+            let resumable = state.and_then(ThreadState::resumable);
+            let plan = state
+                .and_then(ThreadState::actionable_plan)
+                .filter(|_| self.images.composer.is_empty());
+            if empty && let Some(resumable) = resumable {
+                let tooltip = match (&resumable.continue_run_id, resumable.held_queue) {
+                    (Some(_), true) => "Continue the stopped run, then the held queue",
+                    (Some(_), false) => "Continue where the agent left off",
+                    (None, _) => "Run the held queued messages",
+                };
+                buttons.push(
+                    div()
+                        .debug_selector(|| "thread-resume".into())
+                        .child(
+                            TextButton::new("thread-resume", "Resume")
+                                .style(MustrButtonStyle::Primary)
+                                .disabled(!can_write)
+                                .tooltip(tooltip)
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.resume(window, cx)),
+                                ),
                         )
-                        .style(MustrButtonStyle::Primary)
-                        .disabled(!can_write)
-                        .on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.send(Delivery::Auto, window, cx)
-                            }),
-                        ),
-                    )
-                    .into_any_element(),
-            );
+                        .into_any_element(),
+                );
+            } else if plan.is_some() && empty {
+                buttons.push(
+                    div()
+                        .debug_selector(|| "thread-implement-new".into())
+                        .child(
+                            TextButton::new("thread-implement-new", "In a new thread")
+                                .disabled(!can_write)
+                                .tooltip("Implement the plan in a new thread")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.implement_plan(true, window, cx)
+                                })),
+                        )
+                        .into_any_element(),
+                );
+                buttons.push(
+                    div()
+                        .debug_selector(|| "thread-implement".into())
+                        .child(
+                            TextButton::new("thread-implement", "Implement")
+                                .style(MustrButtonStyle::Primary)
+                                .disabled(!can_write)
+                                .tooltip("Leave plan mode and implement the plan")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.implement_plan(false, window, cx)
+                                })),
+                        )
+                        .into_any_element(),
+                );
+            } else {
+                let label = if is_draft {
+                    "Start thread"
+                } else if plan.is_some() {
+                    "Refine"
+                } else {
+                    "Send"
+                };
+                let waiting = self.images.send_blocked_reason();
+                buttons.push(
+                    div()
+                        .debug_selector(|| "thread-send".into())
+                        .child(
+                            TextButton::new("thread-send", label)
+                                .style(MustrButtonStyle::Primary)
+                                .disabled(!can_write || empty || waiting.is_some())
+                                .when_some(waiting, |button, waiting| button.tooltip(waiting))
+                                .when(plan.is_some() && waiting.is_none(), |button| {
+                                    button.tooltip("Ask the agent to change the plan")
+                                })
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.send(Delivery::Auto, window, cx)
+                                })),
+                        )
+                        .into_any_element(),
+                );
+            }
         }
         let composer_focus = self.composer.focus_handle(cx);
         let send_binding = ui::KeyBinding::for_action_in(&SendMessage, &composer_focus, cx)
@@ -652,12 +1220,38 @@ impl ThreadView {
                                 ),
                         )
                     })
+                    .when_some(self.images.intake_error.clone(), |this, error| {
+                        this.child(
+                            h_flex()
+                                .gap_1()
+                                .child(
+                                    Icon::new(IconName::Warning)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Warning),
+                                )
+                                .child(
+                                    Label::new(error)
+                                        .size(LabelSize::Small)
+                                        .color(Color::Warning),
+                                ),
+                        )
+                    })
                     .child(
                         v_flex()
+                            .id("thread-composer")
+                            .debug_selector(|| "thread-composer".into())
                             .key_context(COMPOSER_CONTEXT)
                             .on_action(cx.listener(Self::on_send))
                             .on_action(cx.listener(Self::on_steer))
                             .on_action(cx.listener(Self::on_stop))
+                            .capture_action(cx.listener(Self::on_paste))
+                            .drag_over::<ExternalPaths>(|style, _, _, cx| {
+                                let palette = mustr_ui::palette(cx);
+                                style
+                                    .border_color(palette.accent.hsla())
+                                    .bg(palette.accent_soft.hsla())
+                            })
+                            .on_drop(cx.listener(Self::on_drop_paths))
                             .w_full()
                             .gap_1()
                             .px_2()
@@ -666,11 +1260,28 @@ impl ThreadView {
                             .border(tokens::BORDER_WIDTH)
                             .border_color(palette.border.hsla())
                             .bg(palette.surface.hsla())
+                            .when(
+                                !self.images.composer.is_empty() || self.images.preparing > 0,
+                                |this| this.child(self.render_image_strip(cx)),
+                            )
                             .child(self.composer.clone())
                             .child(
                                 h_flex()
                                     .gap_1p5()
                                     .child(self.settings_bar.clone())
+                                    .child(
+                                        div().debug_selector(|| "thread-attach".into()).child(
+                                            IconButton::new("thread-attach", IconName::Image)
+                                                .icon_size(IconSize::Small)
+                                                .icon_color(Color::Muted)
+                                                .tooltip(Tooltip::text(
+                                                    "Attach images (or paste or drop them)",
+                                                ))
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.pick_images(window, cx)
+                                                })),
+                                        ),
+                                    )
                                     .children(hint)
                                     .when_some(blocked, |this, blocked| {
                                         this.child(
@@ -689,13 +1300,20 @@ impl ThreadView {
                                         )
                                     })
                                     .child(div().flex_1())
-                                    .when(self.sending, |this| {
-                                        this.child(
-                                            Label::new("Sending…")
+                                    .when(
+                                        self.sending || self.images.send_when_uploaded.is_some(),
+                                        |this| {
+                                            this.child(
+                                                Label::new(if self.sending {
+                                                    "Sending…"
+                                                } else {
+                                                    "Sending once the images are up…"
+                                                })
                                                 .size(LabelSize::XSmall)
                                                 .color(Color::Muted),
-                                        )
-                                    })
+                                            )
+                                        },
+                                    )
                                     .children(buttons),
                             ),
                     ),

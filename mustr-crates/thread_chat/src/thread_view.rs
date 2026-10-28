@@ -83,6 +83,10 @@ pub struct ThreadView {
     /// Answers picked for questions, by request id and question id.
     pub(crate) answers: HashMap<String, HashMap<String, String>>,
     pub(crate) error: Option<SharedString>,
+    /// The composer's images, and the timeline's as they load (`attachments.rs`).
+    pub(crate) images: crate::attachments::Images,
+    /// The composer's and timeline's other state: copied messages, prompt history, drafts.
+    pub(crate) composer_state: crate::composer::ComposerState,
     _load: Option<Task<()>>,
     _follow: Option<Task<()>>,
     pub(crate) _tasks: Vec<Task<()>>,
@@ -160,6 +164,7 @@ impl ThreadView {
             );
             editor
         });
+        let composer_subscription = crate::composer::observe_composer(&composer, cx);
         let list_state = ListState::new(0, ListAlignment::Top, px(2048.));
         list_state.set_follow_mode(FollowMode::Tail);
         let this_view = cx.weak_entity();
@@ -187,10 +192,12 @@ impl ThreadView {
             responding: HashSet::default(),
             answers: HashMap::default(),
             error: None,
+            images: Default::default(),
+            composer_state: Default::default(),
             _load: None,
             _follow: None,
             _tasks: Vec::new(),
-            _subscriptions: Vec::new(),
+            _subscriptions: vec![composer_subscription],
         };
         match thread_id {
             Some(thread_id) => this.load(thread_id, cx),
@@ -369,9 +376,9 @@ impl ThreadView {
             }
         };
         let title = commands::title_from_message(&new_thread.text);
-        let launch = self
-            .backend
-            .launch_thread(commands::launch(new_thread, LaunchIds::new()));
+        let mut input = commands::launch(new_thread, LaunchIds::new());
+        let sent_images = self.attach_composer_images(&mut input);
+        let launch = self.backend.launch_thread(input);
         self.sending = true;
         self.error = None;
         cx.notify();
@@ -381,6 +388,7 @@ impl ThreadView {
                 this.sending = false;
                 match result {
                     Ok(launched) => {
+                        this.images.clear_sent(&sent_images);
                         this.new_thread = None;
                         this.placeholder_title = title.into();
                         this.thread_id = Some(launched.thread_id.clone());

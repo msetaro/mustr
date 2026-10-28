@@ -25,6 +25,7 @@ mod timeline;
 // their branches merge without conflicts (`mustr-docs/PARITY.md` §3).
 // WP1, thread settings and new threads:
 // WP2, composer and timeline:
+pub mod attachments;
 // WP3, thread list and projects:
 
 #[cfg(test)]
