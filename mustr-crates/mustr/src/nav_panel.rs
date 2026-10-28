@@ -16,7 +16,7 @@ use gpui::{
 };
 use mustr_ui::{MustrIcon, RailButton, tokens};
 use review::{FileTreePanel, ReviewView, ToggleFileTree};
-use thread_chat::{ThreadView, ThreadsSidebar};
+use thread_chat::{ThreadView, ThreadsSidebar, ThreadsSidebarEvent};
 use ui::{FluentBuilder as _, Icon, h_flex, v_flex};
 use workspace::{
     ItemHandle, Workspace,
@@ -100,7 +100,7 @@ pub struct NavPanel {
     /// The panel's width with each sidebar, restored when that sidebar shows again.
     file_tree_width: Option<Pixels>,
     threads_width: Option<Pixels>,
-    _subscription: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl NavPanel {
@@ -108,7 +108,14 @@ impl NavPanel {
     /// example, from `observe_new`).
     pub fn new(workspace: &Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let file_tree = cx.new(|cx| FileTreePanel::new(workspace, window, cx));
-        let threads = cx.new(|cx| ThreadsSidebar::new(workspace.downgrade(), cx));
+        let threads = cx.new(|cx| ThreadsSidebar::new(workspace.downgrade(), window, cx));
+        let reveal = cx.subscribe_in(
+            &threads,
+            window,
+            |this, _, event: &ThreadsSidebarEvent, window, cx| match event {
+                ThreadsSidebarEvent::Reveal => this.reveal_threads(window, cx),
+            },
+        );
         let subscription = cx.subscribe_in(
             workspace,
             window,
@@ -132,7 +139,7 @@ impl NavPanel {
             sized_for: None,
             file_tree_width: None,
             threads_width: None,
-            _subscription: subscription,
+            _subscriptions: vec![subscription, reveal],
         }
     }
 
@@ -233,6 +240,22 @@ impl NavPanel {
             return;
         };
         self.update_size(&left_dock, window, cx);
+    }
+
+    /// Shows the threads next to the rail, opening the dock if it was closed, for the threads'
+    /// search.
+    fn reveal_threads(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sidebar() != Sidebar::Threads {
+            self.toggle_threads(window, cx);
+        }
+        let workspace = self.workspace.clone();
+        window.defer(cx, move |window, cx| {
+            workspace
+                .update(cx, |workspace, cx| {
+                    workspace.open_panel::<NavPanel>(window, cx)
+                })
+                .ok();
+        });
     }
 
     fn with_workspace(
@@ -606,6 +629,23 @@ mod tests {
         });
         nav_panel.read_with(cx, |nav_panel, _| {
             assert_eq!(nav_panel.sidebar(), Sidebar::None)
+        });
+    }
+
+    #[gpui::test]
+    async fn searching_threads_shows_the_threads(cx: &mut TestAppContext) {
+        let (_workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;
+        let threads = nav_panel.read_with(cx, |nav_panel, _| nav_panel.threads.clone());
+        threads.update_in(cx, |threads, window, cx| threads.reveal_search(window, cx));
+        cx.run_until_parked();
+        nav_panel.read_with(cx, |nav_panel, _| {
+            assert_eq!(nav_panel.sidebar(), Sidebar::Threads)
+        });
+        // Asking again leaves them shown.
+        threads.update_in(cx, |threads, window, cx| threads.reveal_search(window, cx));
+        cx.run_until_parked();
+        nav_panel.read_with(cx, |nav_panel, _| {
+            assert_eq!(nav_panel.sidebar(), Sidebar::Threads)
         });
     }
 
