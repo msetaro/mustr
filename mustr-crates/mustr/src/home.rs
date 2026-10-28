@@ -1,5 +1,6 @@
 use crate::{
     inbox::{self, PullRequestEntry, PullRequestList, ThreadRow, ThreadStatus},
+    pull_request_review,
     t3_connection::{self, ConnectionStatus, T3Connection, T3Session},
 };
 use anyhow::{Context as _, anyhow};
@@ -8,7 +9,7 @@ use gpui::{
     App, Entity, EventEmitter, FocusHandle, Focusable, Global, Subscription, Task, WeakEntity,
 };
 use mustr_ui::tokens;
-use review::{ReviewContents, ReviewView};
+use review::{FileTreePanel, ReviewContents, ReviewView};
 use std::sync::Arc;
 use ui::{Button, ButtonStyle, DiffStat, Divider, Indicator, prelude::*};
 use workspace::{
@@ -178,40 +179,55 @@ impl HomeView {
         let task = cx.spawn_in(window, async move |this, cx| {
             let display_ref = entry.display_ref();
             let result = async {
-                let files = cx
-                    .background_spawn({
-                        let reference = entry.reference();
-                        async move { session.pull_request_files(&reference).await }
-                    })
-                    .await
-                    .with_context(|| format!("loading {display_ref}"))?;
+                let reference = entry.reference();
+                // The files and the data around them (header, threads, viewed marks) load
+                // side by side; the files take longest.
+                let files = cx.background_spawn({
+                    let session = session.clone();
+                    let reference = reference.clone();
+                    async move { session.pull_request_files(&reference).await }
+                });
+                let review_data = cx.background_spawn(async move {
+                    pull_request_review::load(&session, &reference).await
+                });
+                let (files, review_data) = futures::join!(files, review_data);
+                let files = files.with_context(|| format!("loading {display_ref}"))?;
                 let review = inbox::review_files(files);
-                let note = inbox::unavailable_note(&display_ref, &review.unavailable);
                 if review.files.is_empty() {
                     return Err(anyhow!(
-                        note.unwrap_or_else(|| format!("{display_ref} has no changed files"))
+                        inbox::unavailable_note(&display_ref, &review.unavailable)
+                            .unwrap_or_else(|| format!("{display_ref} has no changed files"))
                     ));
                 }
                 log::info!(
-                    "Opening {display_ref}: {} files, {} not shown",
+                    "Opening {display_ref}: {} files, {} not shown, {} review threads",
                     review.files.len(),
-                    review.unavailable.len()
+                    review.unavailable.len(),
+                    review_data.threads.len(),
                 );
                 let contents = ReviewContents {
+                    header: review_data.header,
                     files: review.files,
+                    // The file tree lists these, dimmed, with the reason they aren't shown.
                     unavailable: review.unavailable,
-                    ..ReviewContents::default()
+                    threads: review_data.threads,
+                    viewed: review_data.viewed,
                 };
                 let open_review = workspace.update_in(cx, |workspace, window, cx| {
                     ReviewView::open(contents, workspace, window, cx)
                 })?;
                 open_review.await?;
-                if let Some(note) = note {
-                    workspace.update(cx, |workspace, cx| {
+                workspace.update_in(cx, |workspace, window, cx| {
+                    workspace.open_panel::<FileTreePanel>(window, cx);
+                    if !review_data.problems.is_empty() {
                         let id = NotificationId::composite::<HomeView>(display_ref.clone());
+                        let note = format!(
+                            "{display_ref}: couldn't load {}",
+                            review_data.problems.join("; ")
+                        );
                         workspace.show_toast(Toast::new(id, note), cx);
-                    })?;
-                }
+                    }
+                })?;
                 anyhow::Ok(())
             }
             .await;

@@ -454,6 +454,15 @@ impl T3Session {
         Ok(crate::inbox::recent_threads(snapshot, limit))
     }
 
+    /// Calls one of T3's RPCs. T3's typed errors become their readable detail.
+    pub async fn request(&self, tag: &str, payload: Value) -> Result<Value> {
+        self.rpc
+            .request(tag, payload)
+            .await
+            .map_err(|error| anyhow!(error.error_detail().unwrap_or_else(|| error.to_string())))
+            .with_context(|| format!("calling {tag}"))
+    }
+
     pub async fn pull_request_files(
         &self,
         pull_request: &PullRequestRef,

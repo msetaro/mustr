@@ -3,6 +3,7 @@ use gpui::{
     App, AppContext as _, Context, Entity, Menu, MenuItem, OsAction, PromptLevel, TaskExt as _,
     TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions, point, px,
 };
+use review::{FileTreePanel, ToggleFileTree};
 use settings::{Settings as _, SettingsStore};
 use std::{
     path::Path,
@@ -88,6 +89,16 @@ pub fn init(cx: &mut App) {
         let center_pane = workspace.active_pane().clone();
         add_search_bars(workspace, &center_pane, window, cx);
         let workspace_handle = cx.entity();
+
+        // Zed adds its panels in `initialize_panels` (crates/zed/src/zed.rs); mustr's are
+        // created synchronously, so dock restoration can finish right away.
+        let file_tree = cx.new(|cx| FileTreePanel::new(&workspace_handle, window, cx));
+        workspace.add_panel(file_tree, window, cx);
+        workspace.finish_dock_restoration(cx);
+        workspace.register_action(|workspace, _: &ToggleFileTree, window, cx| {
+            workspace.toggle_panel_focus::<FileTreePanel>(window, cx);
+        });
+
         cx.subscribe_in(
             &workspace_handle,
             window,
