@@ -309,6 +309,7 @@ pub fn parse_review_threads(activity: Value) -> Result<Vec<ParsedThread>> {
                 ParsedThread {
                     thread: ReviewThread {
                         comment_count: thread.comment_count.unwrap_or(comments.len()),
+                        sent_to_agent: false,
                         id: thread.id,
                         path: thread.path,
                         line: thread.line.filter(|line| *line > 0),
@@ -745,6 +746,7 @@ mod tests {
                             },
                         ],
                         comment_count: 3,
+                        sent_to_agent: false,
                     },
                     next_comments_cursor: Some("cursor-1".to_string()),
                 },
@@ -766,6 +768,7 @@ mod tests {
                             can_edit: false,
                         }],
                         comment_count: 1,
+                        sent_to_agent: false,
                     },
                     next_comments_cursor: None,
                 },

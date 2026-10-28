@@ -12,7 +12,7 @@ use gpui::{
     App, Entity, EventEmitter, FocusHandle, Focusable, Global, Subscription, Task, WeakEntity,
 };
 use mustr_ui::tokens;
-use review::{ReviewContents, ReviewView};
+use review::{ReviewContents, ReviewHeader, ReviewView};
 use std::sync::Arc;
 use ui::{Button, ButtonStyle, DiffStat, Divider, Indicator, prelude::*};
 use workspace::{
@@ -227,7 +227,8 @@ impl HomeView {
                 let mut permissions = review_data.permissions;
                 permissions.blocked = session.write_blocked_reason().map(Into::into);
                 let contents = ReviewContents {
-                    header: review_data.header,
+                    header: review_data.header.map(ReviewHeader::PullRequest),
+                    worktree: None,
                     files: review.files,
                     // The file tree lists these, dimmed, with the reason they aren't shown.
                     unavailable: review.unavailable,

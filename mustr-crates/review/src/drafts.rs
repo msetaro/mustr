@@ -248,12 +248,23 @@ impl PendingReview {
     }
 }
 
+/// The lines a comment was written on, as the diff showed them when the review was submitted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuotedCode {
+    /// The language's name for code fences, such as `rust`.
+    pub language: Option<String>,
+    pub text: String,
+}
+
 /// What's sent when the reviewer submits.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReviewSubmission {
     pub verdict: ReviewVerdict,
     pub body: String,
     pub comments: Vec<DraftComment>,
+    /// The code each comment is on, by draft id. A forge has the diff already; an agent gets the
+    /// code quoted in its message.
+    pub quotes: BTreeMap<String, QuotedCode>,
 }
 
 /// T3's rule (`PullRequestReviewForm.tsx`): approving needs nothing, the other verdicts need a

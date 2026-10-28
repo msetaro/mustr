@@ -3,6 +3,8 @@
 
 use gpui::{AnyElement, App, Hsla, IntoElement, ParentElement as _, SharedString, Styled as _};
 use mustr_ui::tokens;
+
+use crate::AgentThreadHeader;
 use ui::{
     Color, DiffStat, Icon, IconName, IconSize, Label, LabelCommon as _, LabelSize, prelude::*,
 };
@@ -76,13 +78,7 @@ impl PullRequestHeader {
     }
 
     pub fn tab_title(&self) -> SharedString {
-        let title = self.title.trim();
-        let truncated = util::truncate(title, TAB_TITLE_MAX_CHARS - 1);
-        if truncated.len() == title.len() {
-            title.to_string().into()
-        } else {
-            format!("{}…", truncated.trim_end()).into()
-        }
+        truncated_tab_title(&self.title)
     }
 
     fn state_color(&self, cx: &App) -> Hsla {
@@ -92,6 +88,80 @@ impl PullRequestHeader {
             PullRequestState::Open => status.success,
             PullRequestState::Closed => status.error,
             PullRequestState::Merged => mustr_ui::palette(cx).pending.hsla(),
+        }
+    }
+}
+
+/// `title`, cut short with an ellipsis when it's too long for a tab.
+pub(crate) fn truncated_tab_title(title: &str) -> SharedString {
+    let title = title.trim();
+    let truncated = util::truncate(title, TAB_TITLE_MAX_CHARS - 1);
+    if truncated.len() == title.len() {
+        title.to_string().into()
+    } else {
+        format!("{}…", truncated.trim_end()).into()
+    }
+}
+
+/// What a review is of, for its header and tab.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReviewHeader {
+    PullRequest(PullRequestHeader),
+    AgentThread(AgentThreadHeader),
+}
+
+impl ReviewHeader {
+    pub fn title(&self) -> &str {
+        match self {
+            ReviewHeader::PullRequest(header) => &header.title,
+            ReviewHeader::AgentThread(header) => &header.title,
+        }
+    }
+
+    pub fn tab_title(&self) -> SharedString {
+        match self {
+            ReviewHeader::PullRequest(header) => header.tab_title(),
+            ReviewHeader::AgentThread(header) => header.tab_title(),
+        }
+    }
+
+    /// What the window's tab shows: `owner/repo#123` for a pull request, as in the mockups,
+    /// and the title for an agent thread.
+    pub fn tab_label(&self) -> SharedString {
+        match self {
+            ReviewHeader::PullRequest(header) => header.reference().into(),
+            ReviewHeader::AgentThread(header) => header.tab_title(),
+        }
+    }
+
+    /// A second line for tooltips: the pull request's reference, or the thread's scope, project
+    /// and branch.
+    pub fn subtitle(&self) -> String {
+        match self {
+            ReviewHeader::PullRequest(header) => header.reference(),
+            ReviewHeader::AgentThread(header) => [
+                Some(header.scope.label()),
+                header.project.clone(),
+                header.branch.clone(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · "),
+        }
+    }
+
+    pub fn pull_request(&self) -> Option<&PullRequestHeader> {
+        match self {
+            ReviewHeader::PullRequest(header) => Some(header),
+            ReviewHeader::AgentThread(_) => None,
+        }
+    }
+
+    pub fn agent_thread(&self) -> Option<&AgentThreadHeader> {
+        match self {
+            ReviewHeader::PullRequest(_) => None,
+            ReviewHeader::AgentThread(header) => Some(header),
         }
     }
 }

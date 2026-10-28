@@ -532,6 +532,7 @@ mod tests {
     async fn test_submitting_a_review_sends_t3s_payload(cx: &mut TestAppContext) {
         let (rpc, backend, _dir) = backend(cx);
         let submission = ReviewSubmission {
+            quotes: Default::default(),
             verdict: ReviewVerdict::RequestChanges,
             body: "A few things.".to_string(),
             comments: vec![
@@ -726,6 +727,7 @@ mod tests {
             error,
         };
         let submission = || ReviewSubmission {
+            quotes: Default::default(),
             verdict: ReviewVerdict::Comment,
             body: "Hi".to_string(),
             comments: Vec::new(),

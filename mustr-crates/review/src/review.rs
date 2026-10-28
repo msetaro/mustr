@@ -5,7 +5,13 @@
 //! With a [`ReviewBackend`], the review also writes: replies, resolving threads, editing the
 //! viewer's comments, viewed marks, and a pending review of drafted line comments that's
 //! submitted in one go. Drafts are handed to the backend to persist on every change.
+//!
+//! The same view reviews an agent thread's work ([`AgentThreadHeader`]): its comments stay
+//! local, and submitting sends them to the agent. When the thread's worktree is on this machine,
+//! the review shows its real files ([`ReviewContents::worktree`]), so language servers work once
+//! the worktree is trusted.
 
+mod agent;
 mod backend;
 mod comment_html;
 mod composer;
@@ -17,16 +23,19 @@ mod submit;
 mod threads;
 mod toolbar;
 
+pub use agent::{
+    AgentStatusTone, AgentThreadHeader, OpenThreadChat, ReviewScope, ReviewViewEvent, ScopeChoice,
+};
 pub use backend::{ReviewBackend, ReviewPermissions};
 pub use comment_html::comment_markdown;
 pub use composer::{AddComment, CancelComment, ConfirmComment, DraftCard, SubmitReview};
 pub use drafts::{
-    CommentPosition, CommentableLines, DraftComment, HunkLine, PendingReview, ReviewSubmission,
-    ReviewVerdict, can_submit,
+    CommentPosition, CommentableLines, DraftComment, HunkLine, PendingReview, QuotedCode,
+    ReviewSubmission, ReviewVerdict, can_submit,
 };
 pub use file_tree::{FileChange, FileTreeFile, FileTreeModel, FileTreeRow, FileViewedState};
 pub use file_tree_panel::{FileTreePanel, ToggleFileTree};
-pub use header::{ChecksState, ChecksSummary, PullRequestHeader, PullRequestState};
+pub use header::{ChecksState, ChecksSummary, PullRequestHeader, PullRequestState, ReviewHeader};
 pub use submit::SubmitMode;
 pub use threads::{
     DiffSide, EditorSide, OutdatedThreads, ReviewThread, ThreadCard, ThreadCardEvent, ThreadComment,
@@ -54,7 +63,7 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
     ]
 }
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use buffer_diff::BufferDiff;
 use collections::{HashMap, HashSet};
 use composer::DraftCardEvent;
@@ -71,13 +80,17 @@ use gpui::{
     SharedString, Styled as _, Subscription, Task, WeakEntity, Window, px,
 };
 use language::{
-    Buffer, Capability, DiskState, File, HighlightedText, LanguageRegistry, LineEnding,
-    OffsetRangeExt as _, Point, ReplicaId, Rope, TextBuffer,
+    Buffer, BufferEvent, Capability, DiskState, File, HighlightedText, LanguageRegistry,
+    LineEnding, OffsetRangeExt as _, Point, ReplicaId, Rope, TextBuffer,
 };
 use multi_buffer::PathKey;
 use multi_buffer::{MultiBufferRow, RowInfo};
 use mustr_ui::tokens;
-use project::{Project, ProjectPath, WorktreeId};
+use project::{
+    Project, ProjectPath, WorktreeId,
+    trusted_worktrees::{TrustedWorktrees, TrustedWorktreesEvent},
+    worktree_store::WorktreeStore,
+};
 use settings::Settings as _;
 use std::{
     any::{Any, TypeId},
@@ -136,9 +149,15 @@ pub struct UnavailableFile {
 /// Everything a review shows.
 #[derive(Default)]
 pub struct ReviewContents {
-    /// The pull request, when the review is of one and its details could be loaded.
-    pub header: Option<PullRequestHeader>,
+    /// The pull request or agent thread under review, when its details could be loaded.
+    pub header: Option<ReviewHeader>,
     pub files: Vec<ReviewFileContents>,
+    /// The local checkout the head side's files are in. The review then shows the real files
+    /// (opened in the workspace's project, so language servers attach once Zed trusts the
+    /// worktree) instead of the head texts, and keeps each diff current as the files change. The
+    /// base texts still come from `files`, and each file's head text is used if its real file
+    /// can't be opened.
+    pub worktree: Option<PathBuf>,
     pub unavailable: Vec<UnavailableFile>,
     pub threads: Vec<ReviewThread>,
     /// The viewer's viewed marks by path, or `None` when the forge keeps none. Files missing from
@@ -227,11 +246,14 @@ struct ReviewEntry {
     buffer: Entity<Buffer>,
     diff: Entity<BufferDiff>,
     commentable: Option<CommentableLines>,
+    /// Whether `buffer` is the real file in the worktree, which can change under the review.
+    on_disk: bool,
 }
 
 /// The parts of [`ReviewContents`] the view keeps once the buffers are built.
 struct LoadedReview {
-    header: Option<PullRequestHeader>,
+    header: Option<ReviewHeader>,
+    worktree_store: Option<Entity<WorktreeStore>>,
     entries: Vec<ReviewEntry>,
     unavailable: Vec<UnavailableFile>,
     threads: Vec<ReviewThread>,
@@ -249,6 +271,7 @@ struct ShownFile {
     buffer: Entity<Buffer>,
     diff: Entity<BufferDiff>,
     commentable: Option<CommentableLines>,
+    on_disk: bool,
 }
 
 impl ShownFile {
@@ -279,7 +302,12 @@ struct ThreadBlocks {
 /// (`crates/git_ui/src/commit_view.rs`).
 pub struct ReviewView {
     editor: Entity<SplittableEditor>,
-    header: Option<PullRequestHeader>,
+    header: Option<ReviewHeader>,
+    /// The project's worktrees, when the review shows real files: Zed's Restricted Mode applies
+    /// to them.
+    worktree_store: Option<Entity<WorktreeStore>>,
+    /// Diffs being recomputed after a real file changed, by file index.
+    diff_updates: HashMap<usize, Task<()>>,
     files: Vec<ShownFile>,
     file_tree: FileTreeModel,
     /// Cards of threads on shown files, with the file's index.
@@ -317,6 +345,10 @@ struct CommentTarget {
 /// Saving waits this long after the last keystroke, so typing doesn't write on every key.
 const SAVE_DELAY: Duration = Duration::from_millis(300);
 
+/// A real file's diff is recomputed this long after it last changed, as in Zed's
+/// `FileDiffView` (`crates/git_ui_core/src/file_diff_view.rs`).
+const RECALCULATE_DIFF_DEBOUNCE: Duration = Duration::from_millis(250);
+
 impl ReviewView {
     pub fn open(
         contents: ReviewContents,
@@ -332,6 +364,7 @@ impl ReviewView {
             let ReviewContents {
                 header,
                 files,
+                worktree,
                 unavailable,
                 threads,
                 viewed,
@@ -339,12 +372,32 @@ impl ReviewView {
                 permissions,
                 pending,
             } = contents;
+            // A visible worktree, so Zed's Restricted Mode applies to it: Zed skips the trust
+            // check for invisible ones, which would start language servers in an untrusted
+            // checkout.
+            let worktree_id = match &worktree {
+                Some(root) => {
+                    let (worktree, _) = project
+                        .update(cx, |project, cx| {
+                            project.find_or_create_worktree(root, true, cx)
+                        })
+                        .await
+                        .with_context(|| format!("opening {}", root.display()))?;
+                    Some(cx.update(|_, cx| worktree.read(cx).id())?)
+                }
+                None => None,
+            };
             let mut entries = Vec::with_capacity(files.len());
             for file in files {
-                entries.push(load_entry(file, &language_registry, cx).await?);
+                entries
+                    .push(load_entry(file, worktree_id, &project, &language_registry, cx).await?);
             }
+            let worktree_store = worktree_id
+                .map(|_| cx.update(|_, cx| project.read(cx).worktree_store()))
+                .transpose()?;
             let loaded = LoadedReview {
                 header,
+                worktree_store,
                 entries,
                 unavailable,
                 threads,
@@ -375,6 +428,7 @@ impl ReviewView {
     ) -> Self {
         let LoadedReview {
             header,
+            worktree_store,
             entries,
             unavailable,
             threads,
@@ -500,12 +554,14 @@ impl ReviewView {
                         buffer: entry.buffer,
                         diff: entry.diff,
                         commentable: entry.commentable,
+                        on_disk: entry.on_disk,
                     }
                 })
                 .collect::<Vec<_>>()
         });
 
-        let submit = SubmitForm::new(&pending, &permissions, window, cx);
+        let to_agent = matches!(header, Some(ReviewHeader::AgentThread(_)));
+        let submit = SubmitForm::new(&pending, &permissions, to_agent, window, cx);
         let mut subscriptions = vec![
             cx.subscribe(&editor, |this, _, event: &EditorEvent, cx| {
                 if event == &(EditorEvent::SelectionsChanged { local: true }) {
@@ -528,11 +584,36 @@ impl ReviewView {
         ];
         // The last keystrokes are saved even when the review closes before the save delay.
         subscriptions.push(cx.on_release(|this, cx| this.save_now(cx)));
+        // Real files change under the review (the agent keeps working, or the reviewer edits
+        // one in its own tab), so their diffs follow.
+        for (index, file) in files.iter().enumerate() {
+            if file.on_disk {
+                subscriptions.push(cx.subscribe(
+                    &file.buffer,
+                    move |this, _, event: &BufferEvent, cx| {
+                        if matches!(event, BufferEvent::Edited { .. } | BufferEvent::Reloaded) {
+                            this.schedule_diff_update(index, cx);
+                        }
+                    },
+                ));
+            }
+        }
+        if worktree_store.is_some()
+            && let Some(trusted_worktrees) = TrustedWorktrees::try_get_global(cx)
+        {
+            subscriptions.push(
+                cx.subscribe(&trusted_worktrees, |_, _, _: &TrustedWorktreesEvent, cx| {
+                    cx.notify()
+                }),
+            );
+        }
 
         let toolbar = cx.new(|cx| toolbar::ReviewToolbar::new(&editor, cx));
         let mut this = Self {
             editor,
             header,
+            worktree_store,
+            diff_updates: HashMap::default(),
             files,
             file_tree,
             thread_cards: Vec::new(),
@@ -662,8 +743,98 @@ impl ReviewView {
         card
     }
 
-    pub fn header(&self) -> Option<&PullRequestHeader> {
+    pub fn header(&self) -> Option<&ReviewHeader> {
         self.header.as_ref()
+    }
+
+    /// Whether this is a review of an agent's work, whose comments go to the agent rather than
+    /// to a forge.
+    pub fn sends_to_agent(&self) -> bool {
+        matches!(self.header, Some(ReviewHeader::AgentThread(_)))
+    }
+
+    /// Whether the review shows real files in a worktree that Zed's Restricted Mode keeps
+    /// language servers out of.
+    pub fn is_worktree_restricted(&self, cx: &App) -> bool {
+        self.worktree_store.as_ref().is_some_and(|worktree_store| {
+            TrustedWorktrees::has_restricted_worktrees(worktree_store, cx)
+        })
+    }
+
+    /// Whether the buffer of a file (by its index in the file tree) is the real file on disk.
+    pub fn is_file_on_disk(&self, file: usize) -> bool {
+        self.files.get(file).is_some_and(|file| file.on_disk)
+    }
+
+    /// Shows a line under the header (or clears it), such as what's loading.
+    pub fn set_notice(&mut self, notice: Option<SharedString>, cx: &mut Context<Self>) {
+        self.notice = notice;
+        cx.notify();
+    }
+
+    /// Asks the app for another scope of the agent thread under review.
+    pub fn select_scope(&mut self, scope: ReviewScope, cx: &mut Context<Self>) {
+        let Some(ReviewHeader::AgentThread(header)) = &self.header else {
+            return;
+        };
+        if header.scope == scope {
+            return;
+        }
+        self.notice = Some(format!("Loading {}…", scope.label()).into());
+        cx.emit(ReviewViewEvent::SelectScope(scope));
+        cx.notify();
+    }
+
+    /// Recomputes a real file's diff once it stops changing, and shows any new hunks.
+    fn schedule_diff_update(&mut self, file: usize, cx: &mut Context<Self>) {
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(RECALCULATE_DIFF_DEBOUNCE)
+                .await;
+            let Ok(update) = this.update(cx, |this, cx| {
+                let shown = this.files.get(file)?;
+                let snapshot = shown.buffer.read(cx).text_snapshot();
+                let diff = shown.diff.read(cx);
+                let base = diff.base_text(cx);
+                let base_text = diff.base_text_string(cx).map(Arc::<str>::from);
+                Some(diff.update_diff(snapshot, &base, base_text, cx))
+            }) else {
+                return;
+            };
+            let Some(update) = update else {
+                return;
+            };
+            let update = update.await;
+            this.update(cx, |this, cx| {
+                this.diff_updates.remove(&file);
+                let Some(shown) = this.files.get(file) else {
+                    return;
+                };
+                shown
+                    .diff
+                    .update(cx, |diff, cx| diff.set_snapshot(update, cx));
+                let (path_key, buffer, diff) = (
+                    shown.path_key.clone(),
+                    shown.buffer.clone(),
+                    shown.diff.clone(),
+                );
+                let ranges = hunk_ranges(&buffer, &diff, &[], cx);
+                this.editor.update(cx, |editor, cx| {
+                    let context_lines = multibuffer_context_lines(cx);
+                    editor.update_excerpts_for_path(
+                        path_key,
+                        buffer,
+                        ranges,
+                        context_lines,
+                        diff,
+                        cx,
+                    );
+                });
+                this.sync_thread_blocks(cx);
+            })
+            .ok();
+        });
+        self.diff_updates.insert(file, task);
     }
 
     pub fn file_tree(&self) -> &FileTreeModel {
@@ -1483,21 +1654,68 @@ fn thread_location(thread: &ReviewThread) -> SharedString {
 
 async fn load_entry(
     contents: ReviewFileContents,
+    worktree_id: Option<WorktreeId>,
+    project: &Entity<Project>,
     language_registry: &Arc<LanguageRegistry>,
     cx: &mut AsyncWindowContext,
 ) -> Result<ReviewEntry> {
     let change = contents.change();
-    let file = Arc::new(ReviewFile {
-        path: contents.path.clone(),
-        is_deleted: contents.head_text.is_none(),
-    }) as Arc<dyn File>;
-    let buffer = build_buffer(
-        contents.head_text.unwrap_or_default(),
-        file,
-        language_registry,
-        cx,
-    )
-    .await?;
+    // A deleted file has nothing on disk, so it keeps an empty in-memory buffer.
+    let real_buffer = match worktree_id {
+        Some(worktree_id) if contents.head_text.is_some() => {
+            let project_path = ProjectPath {
+                worktree_id,
+                path: contents.path.clone(),
+            };
+            match project
+                .update(cx, |project, cx| project.open_buffer(project_path, cx))
+                .await
+            {
+                // A path that isn't on disk opens as a new, empty buffer.
+                Ok(buffer)
+                    if cx.update(|_, cx| {
+                        buffer.read(cx).file().is_some_and(|file| {
+                            matches!(file.disk_state(), DiskState::Present { .. })
+                        })
+                    })? =>
+                {
+                    Some(buffer)
+                }
+                Ok(_) => {
+                    log::warn!(
+                        "{} isn't in the worktree, showing its text instead",
+                        contents.path.as_unix_str()
+                    );
+                    None
+                }
+                Err(error) => {
+                    log::warn!(
+                        "couldn't open {} from the worktree, showing its text instead: {error:#}",
+                        contents.path.as_unix_str()
+                    );
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+    let on_disk = real_buffer.is_some();
+    let buffer = match real_buffer {
+        Some(buffer) => buffer,
+        None => {
+            let file = Arc::new(ReviewFile {
+                path: contents.path.clone(),
+                is_deleted: contents.head_text.is_none(),
+            }) as Arc<dyn File>;
+            build_buffer(
+                contents.head_text.unwrap_or_default(),
+                file,
+                language_registry,
+                cx,
+            )
+            .await?
+        }
+    };
     let diff = build_buffer_diff(contents.base_text, &buffer, language_registry, cx).await?;
     Ok(ReviewEntry {
         path: contents.path,
@@ -1506,6 +1724,7 @@ async fn load_entry(
         buffer,
         diff,
         commentable: contents.commentable,
+        on_disk,
     })
 }
 
@@ -1583,8 +1802,17 @@ async fn build_buffer_diff(
 /// The hunks, plus the rows threads are on. A file without hunks (for example, one that was only
 /// renamed) is shown in full, as `CommitView` does, so it doesn't silently vanish from the review.
 fn excerpt_ranges(entry: &ReviewEntry, thread_rows: &[u32], cx: &App) -> Vec<Range<Point>> {
-    let snapshot = entry.buffer.read(cx).snapshot();
-    let diff_snapshot = entry.diff.read(cx).snapshot(cx);
+    hunk_ranges(&entry.buffer, &entry.diff, thread_rows, cx)
+}
+
+fn hunk_ranges(
+    buffer: &Entity<Buffer>,
+    diff: &Entity<BufferDiff>,
+    thread_rows: &[u32],
+    cx: &App,
+) -> Vec<Range<Point>> {
+    let snapshot = buffer.read(cx).snapshot();
+    let diff_snapshot = diff.read(cx).snapshot(cx);
     let mut ranges = diff_snapshot
         .hunks(&snapshot)
         .map(|hunk| hunk.buffer_range.to_point(&snapshot))
@@ -1625,6 +1853,7 @@ fn row_count(range: &Range<Point>) -> u32 {
 }
 
 impl EventEmitter<EditorEvent> for ReviewView {}
+impl EventEmitter<ReviewViewEvent> for ReviewView {}
 
 impl Focusable for ReviewView {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
@@ -1642,7 +1871,7 @@ impl Item for ReviewView {
 
     fn tab_tooltip_text(&self, _cx: &App) -> Option<SharedString> {
         match &self.header {
-            Some(header) => Some(format!("{}\n{}", header.title, header.reference()).into()),
+            Some(header) => Some(format!("{}\n{}", header.title(), header.subtitle()).into()),
             None => Some(self.title()),
         }
     }
@@ -1777,7 +2006,17 @@ impl Render for ReviewView {
             .on_action(cx.listener(Self::open_submit_form))
             .size_full()
             .map(|this| match &self.header {
-                Some(header) => this.child(header::render_header(header, actions, extra, cx)),
+                Some(ReviewHeader::PullRequest(header)) => {
+                    this.child(header::render_header(header, actions, extra, cx))
+                }
+                Some(ReviewHeader::AgentThread(header)) => this.child(agent::render_agent_header(
+                    header,
+                    cx.entity().downgrade(),
+                    self.is_worktree_restricted(cx),
+                    actions,
+                    extra,
+                    cx,
+                )),
                 None if actions.is_some() || extra.is_some() => this.child(
                     v_flex()
                         .flex_none()
@@ -1798,7 +2037,10 @@ impl Render for ReviewView {
 }
 
 #[cfg(test)]
-mod tests {
+mod agent_tests;
+
+#[cfg(test)]
+pub(crate) mod tests {
     use super::*;
     use buffer_diff::DiffHunkStatusKind;
     use editor::display_map::Block;
@@ -1809,12 +2051,12 @@ mod tests {
     use settings::{DiffViewStyle, SettingsStore};
     use workspace::MultiWorkspace;
 
-    const RUST_BASE: &str = "fn main() {\n    println!(\"hello\");\n}\n";
-    const RUST_HEAD: &str = "fn main() {\n    println!(\"hello, world\");\n}\n";
+    pub(crate) const RUST_BASE: &str = "fn main() {\n    println!(\"hello\");\n}\n";
+    pub(crate) const RUST_HEAD: &str = "fn main() {\n    println!(\"hello, world\");\n}\n";
     const MARKDOWN_BASE: &str = "# Title\n\nIntro.\n";
     const MARKDOWN_HEAD: &str = "# Title\n\nIntro.\n\nA new paragraph.\n";
 
-    fn review_files() -> Vec<ReviewFileContents> {
+    pub(crate) fn review_files() -> Vec<ReviewFileContents> {
         vec![
             ReviewFileContents {
                 path: rel_path("src/main.rs"),
@@ -1833,7 +2075,7 @@ mod tests {
         ]
     }
 
-    fn rel_path(path: &str) -> Arc<RelPath> {
+    pub(crate) fn rel_path(path: &str) -> Arc<RelPath> {
         RelPath::from_unix_str(path)
             .expect("test paths are valid relative paths")
             .into_arc()
@@ -1857,14 +2099,29 @@ mod tests {
                 can_edit: false,
             }],
             comment_count: 1,
+            sent_to_agent: false,
         }
     }
 
     // Modeled on `test_init` in `crates/git_ui/src/multi_diff_view.rs`, but with a project that
     // has no worktrees, as when reviewing a pull request without a local checkout.
-    async fn build_review_view(
+    pub(crate) async fn build_review_view(
         contents: ReviewContents,
         diff_view_style: DiffViewStyle,
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<ReviewView>,
+        Entity<Workspace>,
+        &mut VisualTestContext,
+    ) {
+        let fs = FakeFs::new(cx.executor());
+        build_review_view_with_fs(contents, diff_view_style, fs, cx).await
+    }
+
+    pub(crate) async fn build_review_view_with_fs(
+        contents: ReviewContents,
+        diff_view_style: DiffViewStyle,
+        fs: Arc<FakeFs>,
         cx: &mut TestAppContext,
     ) -> (
         Entity<ReviewView>,
@@ -1883,7 +2140,6 @@ mod tests {
             cx.bind_keys(key_bindings());
         });
 
-        let fs = FakeFs::new(cx.executor());
         let project = Project::test(fs, [], cx).await;
         project.read_with(cx, |project, _| {
             let languages = project.languages();
@@ -1907,7 +2163,10 @@ mod tests {
         (review_view, workspace, cx)
     }
 
-    fn rhs_editor(review_view: &Entity<ReviewView>, cx: &mut VisualTestContext) -> Entity<Editor> {
+    pub(crate) fn rhs_editor(
+        review_view: &Entity<ReviewView>,
+        cx: &mut VisualTestContext,
+    ) -> Entity<Editor> {
         review_view.read_with(cx, |review_view, cx| {
             review_view.editor.read(cx).rhs_editor().clone()
         })
@@ -1924,7 +2183,7 @@ mod tests {
         })
     }
 
-    fn buffer_for_path(
+    pub(crate) fn buffer_for_path(
         review_view: &Entity<ReviewView>,
         path: &str,
         cx: &mut VisualTestContext,
@@ -1947,7 +2206,7 @@ mod tests {
 
     /// The text line nearest to a block, above or below it, skipping the rows of other blocks
     /// (such as the spacers that keep the two sides of a split diff aligned).
-    fn line_next_to_block(
+    pub(crate) fn line_next_to_block(
         editor: &Entity<Editor>,
         block: CustomBlockId,
         above: bool,
@@ -2262,7 +2521,7 @@ mod tests {
             deletions: 1,
         };
         let contents = ReviewContents {
-            header: Some(header),
+            header: Some(ReviewHeader::PullRequest(header)),
             files: review_files(),
             unavailable: vec![UnavailableFile {
                 path: "assets/logo.png".to_string(),
@@ -2390,15 +2649,15 @@ mod tests {
     /// Records what the review asks of the app, and answers every write with `fail_with` if
     /// set, or success.
     #[derive(Default)]
-    struct FakeBackend {
-        calls: Mutex<Vec<Call>>,
-        saved: Mutex<Vec<PendingReview>>,
-        fail_with: Mutex<Option<String>>,
-        threads: Mutex<Vec<ReviewThread>>,
+    pub(crate) struct FakeBackend {
+        pub(crate) calls: Mutex<Vec<Call>>,
+        pub(crate) saved: Mutex<Vec<PendingReview>>,
+        pub(crate) fail_with: Mutex<Option<String>>,
+        pub(crate) threads: Mutex<Vec<ReviewThread>>,
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    enum Call {
+    pub(crate) enum Call {
         Reply(String, String),
         Resolve(String, bool),
         Update(String, String),
@@ -2417,7 +2676,7 @@ mod tests {
             })
         }
 
-        fn writes(&self) -> Vec<Call> {
+        pub(crate) fn writes(&self) -> Vec<Call> {
             self.calls
                 .lock()
                 .iter()
@@ -2426,7 +2685,7 @@ mod tests {
                 .collect()
         }
 
-        fn last_saved(&self) -> PendingReview {
+        pub(crate) fn last_saved(&self) -> PendingReview {
             self.saved
                 .lock()
                 .last()
@@ -2510,7 +2769,7 @@ mod tests {
 
     /// Puts the cursor (or a selection) on the diff lines with these texts, in the right-hand
     /// editor, and focuses it.
-    fn select_lines(
+    pub(crate) fn select_lines(
         review_view: &Entity<ReviewView>,
         first: &str,
         last: &str,
@@ -2538,7 +2797,10 @@ mod tests {
         cx.run_until_parked();
     }
 
-    fn drafts(review_view: &Entity<ReviewView>, cx: &mut VisualTestContext) -> Vec<DraftComment> {
+    pub(crate) fn drafts(
+        review_view: &Entity<ReviewView>,
+        cx: &mut VisualTestContext,
+    ) -> Vec<DraftComment> {
         review_view.read_with(cx, |review_view, cx| {
             review_view
                 .draft_cards()
@@ -2850,6 +3112,15 @@ mod tests {
             verdict: ReviewVerdict::RequestChanges,
             body: "Please fix the typo.".to_string(),
             comments: vec![added.clone()],
+            quotes: [(
+                "d1".to_string(),
+                QuotedCode {
+                    language: Some("markdown".to_string()),
+                    text: "A new paragraph.".to_string(),
+                },
+            )]
+            .into_iter()
+            .collect(),
         };
         assert_eq!(backend.writes(), vec![Call::Submit(submission.clone())]);
         review_view.read_with(cx, |review_view, cx| {
