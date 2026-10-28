@@ -9,7 +9,7 @@ use gpui::{
     InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Task, WeakEntity, Window, div, px,
 };
-use mustr_ui::{ButtonStyle, Card, SegmentedControl, TextButton, palette, tokens};
+use mustr_ui::{ButtonStyle, Card, SegmentedControl, TextButton, palette, tokens, tokens::scaled};
 use serde_json::json;
 use std::sync::Arc;
 use t3_client::t3_api::{
@@ -314,9 +314,9 @@ fn field(label: &'static str, control: impl IntoElement) -> impl IntoElement {
         .items_start()
         .child(
             div()
-                .w(px(96.))
+                .w(scaled(px(96.)))
                 .flex_none()
-                .pt(px(3.))
+                .pt(scaled(px(3.)))
                 .child(Label::new(label).size(LabelSize::Small).color(Color::Muted)),
         )
         .child(
@@ -332,11 +332,11 @@ fn field(label: &'static str, control: impl IntoElement) -> impl IntoElement {
 fn text_box(editor: &Entity<Editor>, width: Option<f32>, cx: &App) -> impl IntoElement {
     let palette = palette(cx);
     div()
-        .when_some(width, |this, width| this.w(px(width)))
+        .when_some(width, |this, width| this.w(scaled(px(width))))
         .when(width.is_none(), |this| this.flex_1().min_w_0())
         .px_2()
         .py_0p5()
-        .rounded(tokens::CONTROL_RADIUS)
+        .rounded(scaled(tokens::CONTROL_RADIUS))
         .border(tokens::BORDER_WIDTH)
         .border_color(palette.border.hsla())
         .bg(palette.background.hsla())
@@ -582,10 +582,10 @@ impl Render for TaskEditor {
                             div()
                                 .id(("schedule-weekday", day as usize))
                                 .debug_selector(move || format!("schedule-weekday-{day}"))
-                                .w(px(26.))
-                                .py(px(1.))
+                                .w(scaled(px(26.)))
+                                .py(scaled(px(1.)))
                                 .text_center()
-                                .rounded(tokens::CONTROL_RADIUS)
+                                .rounded(scaled(tokens::CONTROL_RADIUS))
                                 .border(tokens::BORDER_WIDTH)
                                 .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
                                 .cursor_pointer()
@@ -650,8 +650,8 @@ impl Render for TaskEditor {
         let editing = self.is_editing();
         Card::new()
             .gap_3()
-            .px(px(14.))
-            .py(px(12.))
+            .px(scaled(px(14.)))
+            .py(scaled(px(12.)))
             .child(
                 v_flex()
                     .gap_0p5()

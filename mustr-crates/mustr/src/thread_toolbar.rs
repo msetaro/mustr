@@ -30,7 +30,7 @@ use gpui::{
     FocusHandle, Focusable, Hsla, IntoElement, ParentElement as _, Render, SharedString,
     Styled as _, Subscription, Task, TaskExt as _, WeakEntity, Window, div, px, rems,
 };
-use mustr_ui::{ButtonStyle, Chip, TextButton, palette, tokens};
+use mustr_ui::{ButtonStyle, Chip, TextButton, palette, tokens, tokens::scaled};
 use serde_json::json;
 use std::sync::Arc;
 use t3_client::{
@@ -750,7 +750,7 @@ impl Render for LinkPullRequestDialog {
             .w(rems(30.))
             .p_4()
             .gap_3()
-            .rounded(tokens::CORNER_RADIUS)
+            .rounded(scaled(tokens::CORNER_RADIUS))
             .border(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .bg(palette.surface.hsla())
@@ -773,7 +773,7 @@ impl Render for LinkPullRequestDialog {
                 div()
                     .px_2()
                     .py_1p5()
-                    .rounded(tokens::CONTROL_RADIUS)
+                    .rounded(scaled(tokens::CONTROL_RADIUS))
                     .border(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
                     .bg(palette.background.hsla())
@@ -1037,7 +1037,7 @@ impl ThreadToolbar {
             })
         });
         self.menu
-            .deploy(menu_position(event), menu, window, cx, |this| {
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
                 &mut this.menu
             });
     }
@@ -1076,7 +1076,7 @@ impl ThreadToolbar {
             .map(|checkout| format!("{} · switch or create a branch", checkout.cwd))
             .unwrap_or_else(|| "Switch or create a branch".to_string());
         h_flex()
-            .gap(px(8.))
+            .gap(scaled(px(8.)))
             .child(
                 Chip::new("thread-branch", branch)
                     .dot(dot)
@@ -1147,7 +1147,7 @@ impl ThreadToolbar {
         let error_color = cx.theme().status().error;
         let reference = pull_request.reference.clone();
         h_flex()
-            .gap(px(4.))
+            .gap(scaled(px(4.)))
             .child(
                 Chip::new("thread-pull-request", label)
                     .dot(state_color(&state, is_draft, cx))
@@ -1293,11 +1293,11 @@ impl Render for ThreadToolbar {
         v_flex()
             .id("thread-toolbar")
             .w_full()
-            .gap(px(4.))
+            .gap(scaled(px(4.)))
             .child(
                 h_flex()
                     .w_full()
-                    .gap(px(10.))
+                    .gap(scaled(px(10.)))
                     .child(branch)
                     .child(pull_request)
                     .child(div().flex_1())

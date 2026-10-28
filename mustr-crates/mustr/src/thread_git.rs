@@ -26,7 +26,7 @@ use gpui::{
     Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window, anchored, deferred,
     div, px, rems,
 };
-use mustr_ui::{ButtonStyle, Chip, SplitButton, TextButton, palette, tokens};
+use mustr_ui::{ButtonStyle, Chip, SplitButton, TextButton, palette, tokens, tokens::scaled};
 use picker::{Picker, PickerDelegate};
 use serde_json::json;
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -1509,10 +1509,17 @@ impl MenuSlot {
 }
 
 /// Below the element that was clicked, for menus opened by a click.
-pub fn menu_position(event: &ClickEvent) -> Point<Pixels> {
+pub fn menu_position(event: &ClickEvent, window: &Window) -> Point<Pixels> {
     match event {
         ClickEvent::Keyboard(event) => event.bounds.bottom_left(),
-        event => event.position() + Point::new(px(-8.), px(10.)),
+        event => {
+            let rem_size = window.rem_size();
+            event.position()
+                + Point::new(
+                    scaled(px(-8.)).to_pixels(rem_size),
+                    scaled(px(10.)).to_pixels(rem_size),
+                )
+        }
     }
 }
 
@@ -1644,7 +1651,7 @@ impl ThreadGitControls {
                 })
         });
         self.menu
-            .deploy(menu_position(event), menu, window, cx, |this| {
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
                 &mut this.menu
             });
     }
@@ -1681,7 +1688,7 @@ impl ThreadGitControls {
             menu
         });
         self.menu
-            .deploy(menu_position(event), menu, window, cx, |this| {
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
                 &mut this.menu
             });
     }
@@ -1749,7 +1756,7 @@ impl Render for ThreadGitControls {
         h_flex()
             .id("thread-git-controls")
             .flex_none()
-            .gap(px(6.))
+            .gap(scaled(px(6.)))
             .children(notice)
             .when(has_checkout, |this| {
                 this.child(
@@ -1838,7 +1845,7 @@ impl Render for GitProgressRow {
         let pr = git.change_request();
         let palette = palette(cx);
         let status = cx.theme().status();
-        let mut steps = h_flex().gap(px(6.)).flex_wrap();
+        let mut steps = h_flex().gap(scaled(px(6.))).flex_wrap();
         for (index, (phase, state)) in run.steps().into_iter().enumerate() {
             if index > 0 {
                 steps = steps.child(Label::new("›").size(LabelSize::Small).color(Color::Muted));
@@ -1906,9 +1913,9 @@ impl Render for GitProgressRow {
         h_flex()
             .id("thread-git-progress")
             .w_full()
-            .gap(px(10.))
-            .pt(px(6.))
-            .mt(px(2.))
+            .gap(scaled(px(10.)))
+            .pt(scaled(px(6.)))
+            .mt(scaled(px(2.)))
             .border_t(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .child(
@@ -2074,7 +2081,7 @@ impl Render for GitActionDialog {
             .w(rems(32.))
             .p_4()
             .gap_3()
-            .rounded(tokens::CORNER_RADIUS)
+            .rounded(scaled(tokens::CORNER_RADIUS))
             .border(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .bg(palette.surface.hsla())
@@ -2098,7 +2105,7 @@ impl Render for GitActionDialog {
                     div()
                         .px_2()
                         .py_1p5()
-                        .rounded(tokens::CONTROL_RADIUS)
+                        .rounded(scaled(tokens::CONTROL_RADIUS))
                         .border(tokens::BORDER_WIDTH)
                         .border_color(palette.border.hsla())
                         .bg(palette.background.hsla())

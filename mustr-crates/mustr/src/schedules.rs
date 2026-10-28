@@ -24,7 +24,7 @@ use gpui::{
     Focusable, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     SharedString, Styled as _, Subscription, Task, Window, div, px,
 };
-use mustr_ui::{ButtonStyle, Card, Pill, TextButton, palette, tokens};
+use mustr_ui::{ButtonStyle, Card, Pill, TextButton, palette, tokens, tokens::scaled};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -542,7 +542,7 @@ fn render_deliveries(
         .mt_1()
         .px_2()
         .py_1()
-        .rounded(tokens::CONTROL_RADIUS)
+        .rounded(scaled(tokens::CONTROL_RADIUS))
         .border(tokens::BORDER_WIDTH)
         .border_color(palette.border.hsla())
         .child(body)
@@ -654,7 +654,7 @@ impl SchedulesView {
         let switch = div()
             .id(("schedule-enabled", index))
             .debug_selector(|| format!("schedule-toggle-{id}"))
-            .pt(px(2.))
+            .pt(scaled(px(2.)))
             .when_some(blocked.clone(), |this, reason| {
                 this.tooltip(Tooltip::text(reason))
             })
@@ -778,7 +778,7 @@ impl SchedulesView {
                     div()
                         .min_w_0()
                         .px_1p5()
-                        .rounded(tokens::CONTROL_RADIUS)
+                        .rounded(scaled(tokens::CONTROL_RADIUS))
                         .bg(palette.surface_2.hsla())
                         .font_family(tokens::CODE_FONT_FAMILY)
                         .text_size(tokens::text_size(tokens::TEXT_SIZE_XSMALL))
@@ -838,7 +838,7 @@ impl SchedulesView {
             .items_start()
             .gap_3()
             .px_2()
-            .py(px(10.))
+            .py(scaled(px(10.)))
             .when(index > 0, |this| {
                 this.border_t(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
@@ -923,8 +923,8 @@ impl SchedulesView {
             }
         };
         Card::new()
-            .px(px(10.))
-            .py(px(4.))
+            .px(scaled(px(10.)))
+            .py(scaled(px(4.)))
             .child(body)
             .into_any_element()
     }
@@ -1020,7 +1020,7 @@ impl Render for SchedulesView {
                     .child(
                         v_flex()
                             .w_full()
-                            .max_w(px(CONTENT_MAX_WIDTH))
+                            .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                             .mx_auto()
                             .px_6()
                             .py_6()

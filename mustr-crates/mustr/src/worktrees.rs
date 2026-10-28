@@ -32,7 +32,7 @@ use gpui::{
     FontWeight, Global, ListAlignment, ListState, PromptLevel, SharedString, Subscription, Task,
     WeakEntity, Window, actions, list,
 };
-use mustr_ui::{Pill, SegmentedControl, TextButton, palette, tokens};
+use mustr_ui::{Pill, SegmentedControl, TextButton, palette, tokens, tokens::scaled};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -1244,7 +1244,7 @@ impl WorktreesView {
             .flatten();
         v_flex()
             .w_full()
-            .max_w(px(CONTENT_MAX_WIDTH))
+            .max_w(scaled(px(CONTENT_MAX_WIDTH)))
             .mx_auto()
             .px_6()
             .pt_6()
@@ -1353,7 +1353,7 @@ impl WorktreesView {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH))
+                    .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                     .mx_auto()
                     .px_6()
                     .child(content),
@@ -1375,7 +1375,7 @@ impl WorktreesView {
             .gap_2()
             .px_3()
             .py_2()
-            .rounded_t(tokens::CORNER_RADIUS)
+            .rounded_t(scaled(tokens::CORNER_RADIUS))
             .border(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .bg(palette.surface.hsla())
@@ -1477,7 +1477,13 @@ impl WorktreesView {
                         .gap_1()
                         .cursor_pointer()
                         .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
-                        .child(div().flex_none().size(px(6.)).rounded_full().bg(color))
+                        .child(
+                            div()
+                                .flex_none()
+                                .size(scaled(px(6.)))
+                                .rounded_full()
+                                .bg(color),
+                        )
                         .child(
                             div()
                                 .min_w_0()
@@ -1579,7 +1585,7 @@ impl WorktreesView {
                 .mt_2()
                 .px_2()
                 .py_1p5()
-                .rounded(tokens::CONTROL_RADIUS)
+                .rounded(scaled(tokens::CONTROL_RADIUS))
                 .bg(palette.warning.hsla().opacity(0.1))
                 .child(
                     Label::new(format!(
@@ -1621,7 +1627,7 @@ impl WorktreesView {
             .border_b(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .bg(palette.surface.hsla())
-            .when(last, |this| this.rounded_b(tokens::CORNER_RADIUS))
+            .when(last, |this| this.rounded_b(scaled(tokens::CORNER_RADIUS)))
             .when(folder.exists == Some(false), |this| this.opacity(0.6))
             .child(
                 h_flex()
@@ -1629,7 +1635,7 @@ impl WorktreesView {
                     .gap_3()
                     .items_start()
                     .child(
-                        div().pt(px(2.)).child(
+                        div().pt(scaled(px(2.))).child(
                             Icon::new(IconName::GitWorktree)
                                 .size(IconSize::Small)
                                 .color(Color::Muted),
@@ -1727,7 +1733,7 @@ impl Render for WorktreesView {
                 this.child(
                     div()
                         .w_full()
-                        .max_w(px(CONTENT_MAX_WIDTH))
+                        .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                         .mx_auto()
                         .px_6()
                         .child(
@@ -1741,7 +1747,7 @@ impl Render for WorktreesView {
                 this.child(
                     div()
                         .w_full()
-                        .max_w(px(CONTENT_MAX_WIDTH))
+                        .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                         .mx_auto()
                         .px_6()
                         .child(

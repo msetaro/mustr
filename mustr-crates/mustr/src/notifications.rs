@@ -36,7 +36,7 @@ use gpui::{
     SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, SystemNotification,
     SystemNotificationResponse, Task, WeakEntity, Window, div, px,
 };
-use mustr_ui::{ButtonStyle, TextButton, tokens};
+use mustr_ui::{ButtonStyle, TextButton, tokens, tokens::scaled};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -950,10 +950,10 @@ impl Render for ThreadToast {
             .id("thread-toast")
             .occlude()
             .w_full()
-            .gap(px(10.))
-            .px(px(12.))
-            .py(px(10.))
-            .rounded(tokens::CORNER_RADIUS)
+            .gap(scaled(px(10.)))
+            .px(scaled(px(12.)))
+            .py(scaled(px(10.)))
+            .rounded(scaled(tokens::CORNER_RADIUS))
             .border(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .bg(palette.surface_2.hsla())
@@ -968,7 +968,7 @@ impl Render for ThreadToast {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap(px(2.))
+                    .gap(scaled(px(2.)))
                     .child(
                         div()
                             .text_size(tokens::text_size(tokens::TEXT_SIZE_MEDIUM))
@@ -1065,14 +1065,14 @@ impl Render for AttentionStatus {
                 h_flex()
                     .id("threads-waiting")
                     .cursor_pointer()
-                    .px(px(5.))
-                    .gap(px(5.))
-                    .rounded(tokens::KBD_RADIUS)
+                    .px(scaled(px(5.)))
+                    .gap(scaled(px(5.)))
+                    .rounded(scaled(tokens::KBD_RADIUS))
                     .hover(|style| style.bg(palette.surface_2.hsla()))
                     .child(
                         div()
                             .flex_none()
-                            .size(px(6.))
+                            .size(scaled(px(6.)))
                             .rounded_full()
                             .bg(palette.warning.hsla()),
                     )
