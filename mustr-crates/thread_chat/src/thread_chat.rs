@@ -41,6 +41,13 @@ pub use projects::AddProject;
 pub use sidebar::{SearchThreads, Section, ThreadListFilter, ThreadsSidebarEvent};
 #[cfg(test)]
 mod thread_list_tests;
+// WP10, history, agent status and usage:
+pub mod history;
+pub mod usage;
+pub use history::{CompactContext, RestartAgentSession};
+pub use usage::{ServerConfigs, ShowUsageLimits};
+#[cfg(test)]
+mod history_tests;
 
 #[cfg(test)]
 mod tests;
@@ -82,6 +89,9 @@ pub fn init(cx: &mut App) {
     organize::init(cx);
     sidebar::init(cx);
     // WP5, subagents and workflows:
+    // WP10, history, agent status and usage:
+    history::init(cx);
+    usage::init(cx);
 }
 
 /// mustr's key bindings for threads. The app binds them after Zed's, so users can rebind them:
