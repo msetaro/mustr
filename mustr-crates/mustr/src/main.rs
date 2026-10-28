@@ -71,6 +71,10 @@ struct Args {
     #[arg(long, value_name = "URL", verbatim_doc_comment)]
     t3_server: Option<String>,
 
+    /// Adds this folder as a project once connected (for smoke tests).
+    #[arg(long, hide = true, value_name = "PATH")]
+    add_project: Option<PathBuf>,
+
     /// Opens the first open pull request once the list loads (for smoke tests).
     #[arg(long, hide = true)]
     open_first_pr: bool,
@@ -121,6 +125,7 @@ fn main() {
     }
 
     let home_options = home::HomeOptions {
+        add_project: args.add_project.clone(),
         open_first_pull_request: args.open_first_pr,
         review_thread: args.review_thread.map(|thread_id| {
             (

@@ -367,6 +367,10 @@ pub struct T3Session {
 }
 
 impl T3Session {
+    pub fn kind(&self) -> EngineKind {
+        self.kind
+    }
+
     /// The scopes mustr needs that this session wasn't granted, for example when it was paired
     /// with a read-only credential.
     pub fn missing_scopes(&self) -> Vec<Scope> {

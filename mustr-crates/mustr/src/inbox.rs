@@ -182,6 +182,39 @@ pub fn recent_threads(snapshot: &Value, limit: usize) -> Vec<ThreadRow> {
         .collect()
 }
 
+/// A project in T3's shell snapshot: a folder agents work in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectRow {
+    pub id: String,
+    pub title: String,
+    pub workspace_root: Option<String>,
+}
+
+/// The shell snapshot's projects, without deleted ones, by title.
+pub fn projects(snapshot: &Value) -> Vec<ProjectRow> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Project {
+        id: String,
+        title: String,
+        #[serde(default)]
+        workspace_root: Option<String>,
+        #[serde(default)]
+        deleted_at: Option<String>,
+    }
+    let mut projects = decode_each::<Project>(snapshot.get("projects"), "project")
+        .into_iter()
+        .filter(|project| project.deleted_at.is_none())
+        .map(|project| ProjectRow {
+            id: project.id,
+            title: project.title,
+            workspace_root: project.workspace_root,
+        })
+        .collect::<Vec<_>>();
+    projects.sort_by_cached_key(|project| project.title.to_lowercase());
+    projects
+}
+
 /// Decodes each element of a JSON array on its own, skipping (and logging) the ones mustr can't
 /// read.
 pub(crate) fn decode_each<T: serde::de::DeserializeOwned>(
@@ -305,6 +338,34 @@ mod tests {
     use super::*;
     use serde_json::json;
     use t3_client::ChangedFile;
+
+    #[test]
+    fn projects_skip_deleted_ones_and_sort_by_title() {
+        let snapshot = json!({
+            "projects": [
+                { "id": "p2", "title": "web", "workspaceRoot": "/src/web" },
+                { "id": "p1", "title": "Api", "workspaceRoot": "/src/api" },
+                { "id": "p3", "title": "old", "deletedAt": "2026-10-01T00:00:00Z" },
+                { "id": 7 },
+            ],
+        });
+        assert_eq!(
+            projects(&snapshot),
+            [
+                ProjectRow {
+                    id: "p1".into(),
+                    title: "Api".into(),
+                    workspace_root: Some("/src/api".into()),
+                },
+                ProjectRow {
+                    id: "p2".into(),
+                    title: "web".into(),
+                    workspace_root: Some("/src/web".into()),
+                },
+            ]
+        );
+        assert!(projects(&json!({})).is_empty());
+    }
 
     fn pull_request_file(
         old_path: &str,
