@@ -11162,6 +11162,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mustr_release"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "hex",
+ "pretty_assertions",
+ "ring",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "mustr_ui"
 version = "0.1.0"
 dependencies = [
