@@ -9,18 +9,12 @@ use crate::{
     review_backend::{DRY_RUN_ENV, dry_run_requested},
     t3_connection::{CurrentSession, T3Connection, T3Session},
 };
-use anyhow::{Context as _, Result, anyhow, bail, ensure};
-use futures::{
-    AsyncReadExt as _, FutureExt as _, StreamExt as _, future::BoxFuture, stream::BoxStream,
-};
+use anyhow::{Context as _, Result, anyhow, bail};
+use futures::{FutureExt as _, StreamExt as _, future::BoxFuture, stream::BoxStream};
 use gpui::App;
-use http_client::{AsyncBody, HttpClient, Method, Request, Url};
+use http_client::{HttpClient, Url};
 use serde_json::Value;
-use std::{
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::sync::Arc;
 use t3_client::{
     RpcError,
     t3_api::{
@@ -120,63 +114,8 @@ fn refused<T: Send + 'static>(reason: String) -> BoxFuture<'static, Result<T>> {
     futures::future::ready(Err(anyhow!(reason))).boxed()
 }
 
-/// Where an upload goes: the URL T3 minted, which must be on T3's server.
-fn upload_url(server_url: &Url, relative_url: &str) -> Result<Url> {
-    let url = server_url
-        .join(relative_url)
-        .with_context(|| format!("T3's upload URL {relative_url:?} isn't valid"))?;
-    ensure!(
-        relative_url.starts_with('/') && url.origin() == server_url.origin(),
-        "T3's upload URL {relative_url:?} isn't on its server"
-    );
-    Ok(url)
-}
-
-fn upload_request(url: &Url, upload: AttachmentUpload) -> Result<Request<AsyncBody>> {
-    let size = upload.bytes.len();
-    let body = match upload.on_progress {
-        Some(on_progress) => AsyncBody::from_reader(ProgressReader {
-            bytes: futures::io::Cursor::new(upload.bytes),
-            sent: 0,
-            on_progress,
-        }),
-        None => AsyncBody::from(upload.bytes),
-    };
-    // As T3's web app sends it (`apps/web/src/lib/attachmentUploadQueue.ts`). T3 refuses a
-    // length other than the size the URL was minted for.
-    Ok(Request::builder()
-        .method(Method::POST)
-        .uri(url.as_str())
-        .header("Content-Type", upload.mime_type)
-        .header("Content-Length", size)
-        .body(body)?)
-}
-
-/// An upload's body, reporting how much of it has been read, which is about how much has been
-/// sent.
-struct ProgressReader {
-    bytes: futures::io::Cursor<Vec<u8>>,
-    sent: u64,
-    on_progress: Arc<dyn Fn(u64) + Send + Sync>,
-}
-
-impl futures::AsyncRead for ProgressReader {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<std::io::Result<usize>> {
-        let this = &mut *self;
-        let poll = Pin::new(&mut this.bytes).poll_read(cx, buf);
-        if let Poll::Ready(Ok(read)) = &poll
-            && *read > 0
-        {
-            this.sent += *read as u64;
-            (this.on_progress)(this.sent);
-        }
-        poll
-    }
-}
+/// The largest asset mustr loads, such as a screenshot in a tool's output.
+const MAX_ASSET_BYTES: usize = 32 * 1024 * 1024;
 
 impl ThreadBackend for T3ThreadBackend {
     fn shell_snapshot(&self) -> BoxFuture<'static, Result<OrchestrationV2ShellSnapshot>> {
@@ -299,27 +238,35 @@ impl ThreadBackend for T3ThreadBackend {
         if let Some(reason) = self.blocked_reason(Access::Operate) {
             return refused(reason);
         }
-        let request = match &self.server_url {
-            Some(server_url) => upload_url(server_url, &upload.relative_url)
-                .and_then(|url| upload_request(&url, upload)),
-            None => Err(anyhow!("mustr has no T3 server to upload to")),
+        let Some(server_url) = self.server_url.clone() else {
+            return refused("mustr has no T3 server to upload to".to_string());
         };
         let http = self.http.clone();
         async move {
-            let mut response = http
-                .send(request?)
-                .await
-                .context("uploading the attachment")?;
-            if !response.status().is_success() {
-                let mut text = String::new();
-                response.body_mut().read_to_string(&mut text).await.ok();
-                bail!(
-                    "T3 refused the attachment ({}): {}",
-                    response.status(),
-                    text.trim()
-                );
-            }
-            Ok(())
+            t3_client::upload_attachment(
+                http.as_ref(),
+                &server_url,
+                &upload.relative_url,
+                &upload.mime_type,
+                upload.bytes,
+                upload.on_progress,
+            )
+            .await
+        }
+        .boxed()
+    }
+
+    fn fetch_asset(&self, relative_url: &str) -> BoxFuture<'static, Result<Vec<u8>>> {
+        let Some(server_url) = self.server_url.clone() else {
+            return refused("mustr has no T3 server to load assets from".to_string());
+        };
+        let http = self.http.clone();
+        let relative_url = relative_url.to_string();
+        async move {
+            let asset =
+                t3_client::fetch_asset(http.as_ref(), &server_url, &relative_url, MAX_ASSET_BYTES)
+                    .await?;
+            Ok(asset.bytes)
         }
         .boxed()
     }
@@ -341,8 +288,9 @@ impl ThreadBackend for T3ThreadBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::AsyncReadExt as _;
     use gpui::TestAppContext;
-    use http_client::{Response, http::HeaderValue};
+    use http_client::{AsyncBody, Request, Response, http::HeaderValue};
     use parking_lot::Mutex;
     use pretty_assertions::assert_eq;
 
@@ -478,6 +426,35 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "T3 refused the attachment (400 Bad Request): Content-Length must match the upload size."
+        );
+    }
+
+    #[gpui::test]
+    async fn assets_load_from_the_signed_url(_cx: &mut TestAppContext) {
+        let (backend, requests) = backend(200);
+        let bytes = backend
+            .fetch_asset("/api/assets/attachment/a1?expires=1&signature=s")
+            .await
+            .unwrap();
+        assert_eq!(bytes, b"Content-Length must match the upload size.");
+        assert_eq!(
+            *requests.lock(),
+            [SentRequest {
+                method: "GET".to_string(),
+                url: "http://127.0.0.1:3773/api/assets/attachment/a1?expires=1&signature=s"
+                    .to_string(),
+                content_type: None,
+                content_length: None,
+                body: Vec::new(),
+            }]
+        );
+        let error = backend
+            .fetch_asset("https://attacker.example/api/assets/x")
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("isn't on its server"),
+            "{error:#}"
         );
     }
 

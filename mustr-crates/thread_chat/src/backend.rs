@@ -5,7 +5,8 @@
 //!
 //! Every write goes through [`ThreadBackend::dispatch`], [`ThreadBackend::launch_thread`],
 //! [`ThreadBackend::call_raw`], [`ThreadBackend::subscribe_raw`], or [`ThreadBackend::upload`],
-//! so a fake can assert exactly what would be sent. [`ThreadBackendExt`] types the raw calls
+//! so a fake can assert exactly what would be sent. Images in messages load through
+//! [`ThreadBackend::fetch_asset`]. [`ThreadBackendExt`] types the raw calls
 //! with the method tables in `t3_api::rpc`, so any of T3's RPCs can be called without a method
 //! of its own here.
 
@@ -134,6 +135,14 @@ pub trait ThreadBackend: Send + Sync + 'static {
     /// (`POST /api/attachments/upload/:token`). It needs `orchestration:operate`, which T3's app
     /// checks before uploading too, and dry runs refuse it.
     fn upload(&self, upload: AttachmentUpload) -> BoxFuture<'static, Result<()>>;
+
+    /// Reads an asset, such as an image in a message, from the URL that `assets.createUrl`
+    /// signed (`GET /api/assets/*`). Assets are reads, so dry runs let them through. Backends
+    /// that can't reach T3's HTTP server leave it unsupported.
+    fn fetch_asset(&self, relative_url: &str) -> BoxFuture<'static, Result<Vec<u8>>> {
+        let error = anyhow!("mustr can't load {relative_url} from T3 here");
+        futures::future::ready(Err(error)).boxed()
+    }
 
     /// Why writes are refused before they're sent, if they are: the pairing lacks
     /// `orchestration:operate`, or writes are switched off for a dry run.
@@ -360,6 +369,10 @@ impl ThreadBackend for ReadOnlyBackend {
 
     fn upload(&self, _upload: AttachmentUpload) -> BoxFuture<'static, Result<()>> {
         self.refuse("an attachment upload")
+    }
+
+    fn fetch_asset(&self, relative_url: &str) -> BoxFuture<'static, Result<Vec<u8>>> {
+        self.inner.fetch_asset(relative_url)
     }
 
     fn write_blocked_reason(&self) -> Option<String> {
