@@ -8,7 +8,7 @@
 use review::{CommentableLines, FileChange, HunkLine, ReviewFileContents, UnavailableFile};
 use serde::Deserialize;
 use serde_json::Value;
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 use t3_client::{ChangeType, PatchHunk, PatchLine, PullRequestFile, PullRequestRef};
 use util::{paths::PathStyle, rel_path::RelPath};
 
@@ -127,92 +127,12 @@ impl ThreadStatus {
     }
 }
 
-/// The `limit` most recently updated threads of T3's shell snapshot
-/// (`GET /api/orchestration/shell`), newest first.
-pub fn recent_threads(snapshot: &Value, limit: usize) -> Vec<ThreadRow> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Thread {
-        id: String,
-        project_id: String,
-        title: String,
-        status: String,
-        #[serde(default)]
-        branch: Option<String>,
-        updated_at: String,
-        #[serde(default)]
-        pending_runtime_request: Option<Value>,
-        #[serde(default)]
-        deleted_at: Option<String>,
-    }
-
-    #[derive(Deserialize)]
-    struct Project {
-        id: String,
-        title: String,
-    }
-
-    let projects: HashMap<String, String> =
-        decode_each::<Project>(snapshot.get("projects"), "project")
-            .into_iter()
-            .map(|project| (project.id, project.title))
-            .collect();
-    let mut threads = decode_each::<Thread>(snapshot.get("threads"), "thread");
-    threads.retain(|thread| thread.deleted_at.is_none());
-    // Every timestamp is an ISO 8601 UTC string, so string order is time order.
-    threads.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
-    threads.truncate(limit);
-    threads
-        .into_iter()
-        .map(|thread| {
-            let status =
-                ThreadStatus::from_shell(thread.status, thread.pending_runtime_request.is_some());
-            ThreadRow {
-                id: thread.id,
-                title: if thread.title.trim().is_empty() {
-                    "Untitled thread".to_string()
-                } else {
-                    thread.title
-                },
-                status,
-                branch: thread.branch,
-                project: projects.get(&thread.project_id).cloned(),
-            }
-        })
-        .collect()
-}
-
 /// A project in T3's shell snapshot: a folder agents work in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectRow {
     pub id: String,
     pub title: String,
     pub workspace_root: Option<String>,
-}
-
-/// The shell snapshot's projects, without deleted ones, by title.
-pub fn projects(snapshot: &Value) -> Vec<ProjectRow> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Project {
-        id: String,
-        title: String,
-        #[serde(default)]
-        workspace_root: Option<String>,
-        #[serde(default)]
-        deleted_at: Option<String>,
-    }
-    let mut projects = decode_each::<Project>(snapshot.get("projects"), "project")
-        .into_iter()
-        .filter(|project| project.deleted_at.is_none())
-        .map(|project| ProjectRow {
-            id: project.id,
-            title: project.title,
-            workspace_root: project.workspace_root,
-        })
-        .collect::<Vec<_>>();
-    projects.sort_by_cached_key(|project| project.title.to_lowercase());
-    projects
 }
 
 /// Decodes each element of a JSON array on its own, skipping (and logging) the ones mustr can't
@@ -338,34 +258,6 @@ mod tests {
     use super::*;
     use serde_json::json;
     use t3_client::ChangedFile;
-
-    #[test]
-    fn projects_skip_deleted_ones_and_sort_by_title() {
-        let snapshot = json!({
-            "projects": [
-                { "id": "p2", "title": "web", "workspaceRoot": "/src/web" },
-                { "id": "p1", "title": "Api", "workspaceRoot": "/src/api" },
-                { "id": "p3", "title": "old", "deletedAt": "2026-10-01T00:00:00Z" },
-                { "id": 7 },
-            ],
-        });
-        assert_eq!(
-            projects(&snapshot),
-            [
-                ProjectRow {
-                    id: "p1".into(),
-                    title: "Api".into(),
-                    workspace_root: Some("/src/api".into()),
-                },
-                ProjectRow {
-                    id: "p2".into(),
-                    title: "web".into(),
-                    workspace_root: Some("/src/web".into()),
-                },
-            ]
-        );
-        assert!(projects(&json!({})).is_empty());
-    }
 
     fn pull_request_file(
         old_path: &str,
@@ -614,74 +506,5 @@ mod tests {
             parse_pull_request_list(json!(null)),
             PullRequestList::default()
         );
-    }
-
-    #[test]
-    fn recent_threads_are_newest_first_without_deleted_ones() {
-        let thread = |title: &str, status: &str, updated_at: &str| {
-            json!({
-                "id": title, "projectId": "p1", "title": title, "status": status,
-                "branch": format!("t3/{title}"), "updatedAt": updated_at,
-                "pendingRuntimeRequest": null, "deletedAt": null
-            })
-        };
-        let mut waiting = thread("waiting", "running", "2026-10-27T10:00:00.000Z");
-        waiting["pendingRuntimeRequest"] = json!({ "id": "r1", "kind": "approval" });
-        let mut deleted = thread("deleted", "idle", "2026-10-27T12:00:00.000Z");
-        deleted["deletedAt"] = json!("2026-10-27T12:00:00.000Z");
-        let mut unnamed = thread("", "failed", "2026-10-26T09:00:00.000Z");
-        unnamed["projectId"] = json!("unknown");
-        unnamed["branch"] = json!(null);
-
-        let threads = recent_threads(
-            &json!({
-                "schemaVersion": 1,
-                "snapshotSequence": 3,
-                "threads": [
-                    thread("old", "idle", "2026-10-20T00:00:00.000Z"),
-                    waiting,
-                    deleted,
-                    unnamed,
-                    thread("newest", "running", "2026-10-27T11:00:00.000Z"),
-                    { "title": "malformed" }
-                ],
-                "archivedThreads": [],
-                "projects": [{ "id": "p1", "title": "mustr", "workspaceRoot": "/src/mustr" }]
-            }),
-            3,
-        );
-
-        assert_eq!(
-            threads,
-            vec![
-                ThreadRow {
-                    id: "newest".into(),
-                    title: "newest".into(),
-                    status: ThreadStatus::Working("running".into()),
-                    branch: Some("t3/newest".into()),
-                    project: Some("mustr".into()),
-                },
-                ThreadRow {
-                    id: "waiting".into(),
-                    title: "waiting".into(),
-                    status: ThreadStatus::NeedsInput,
-                    branch: Some("t3/waiting".into()),
-                    project: Some("mustr".into()),
-                },
-                ThreadRow {
-                    id: "".into(),
-                    title: "Untitled thread".into(),
-                    status: ThreadStatus::Failed,
-                    branch: None,
-                    project: None,
-                },
-            ]
-        );
-        assert_eq!(threads[1].status.label(), "needs input");
-        assert_eq!(
-            ThreadStatus::from_shell("rolled_back".into(), false).label(),
-            "rolled back"
-        );
-        assert!(recent_threads(&json!({}), 10).is_empty());
     }
 }
