@@ -98,9 +98,9 @@ fn the_updater_runs_only_in_release_bundles_on_macos() {
             .contains("App Translocation")
     );
 
-    // The placeholder key file mustr ships with until the release key exists.
+    // A key file with only its comments, as before the release key existed.
     let placeholder = Environment {
-        public_key_file: PUBLIC_KEY_FILE,
+        public_key_file: "# mustr's update-signing public key\n#\n# PLACEHOLDER: no key line yet.\n",
         ..environment(true, true, Some(bundled))
     };
     assert_eq!(
@@ -136,9 +136,13 @@ fn the_updater_runs_only_in_release_bundles_on_macos() {
 }
 
 #[test]
-fn shipped_key_file_is_the_placeholder_or_a_key() {
-    // A malformed key file would turn updates off in every build; catch it here instead.
-    PublicKey::from_file_text(PUBLIC_KEY_FILE).unwrap();
+fn shipped_key_file_holds_the_release_key() {
+    // A malformed or emptied key file would turn updates off in every build; catch it here.
+    assert!(
+        PublicKey::from_file_text(PUBLIC_KEY_FILE)
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[test]
