@@ -875,7 +875,7 @@ impl ThreadState {
             }
             OrchestrationV2ThreadStreamItem::Event2(event) => {
                 // An event type this build doesn't know: skip it, but keep its place.
-                log::debug!("skipping T3 thread event {:?}", event.event.type_);
+                t3_api::forward_compat::note_unrecognized("thread event", &event.event.type_);
                 self.sequence = self.sequence.max(event.sequence);
                 Applied::default()
             }

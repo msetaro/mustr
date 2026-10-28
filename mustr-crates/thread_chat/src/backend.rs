@@ -55,6 +55,32 @@ impl Access {
     }
 }
 
+/// The error a backend gives for an RPC the server doesn't have, such as
+/// `orchestration.getThreadFamily` on T3 0.1.1, so callers can fall back to the older way.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnsupportedRpc {
+    pub tag: String,
+}
+
+impl std::fmt::Display for UnsupportedRpc {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "this T3 Code doesn't have {}; it's older than mustr's",
+            self.tag
+        )
+    }
+}
+
+impl std::error::Error for UnsupportedRpc {}
+
+/// Whether `error` says the server doesn't have the RPC ([`UnsupportedRpc`]).
+pub fn is_unsupported_rpc(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<UnsupportedRpc>().is_some())
+}
+
 /// An attachment's bytes, for [`ThreadBackend::upload`].
 pub struct AttachmentUpload {
     /// The `relativeUrl` that `attachments.createUploadUrl` minted for it.
@@ -181,8 +207,8 @@ pub trait ThreadBackendExt {
         M: RpcMethod,
         M::Success: Send + 'static;
 
-    /// Follows the streaming RPC `M`. An item this build can't decode is yielded as an error,
-    /// and the stream goes on.
+    /// Follows the streaming RPC `M`. An item this build can't decode at all (from a newer T3)
+    /// is skipped and logged once, and the stream goes on.
     fn stream<M>(
         &self,
         payload: M::Payload,
@@ -231,7 +257,21 @@ impl<B: ThreadBackend + ?Sized> ThreadBackendExt for B {
         }
         let payload = serde_json::to_value(&payload)?;
         let stream = self.subscribe_raw(M::TAG, payload, access)?;
-        Ok(stream.map(|item| item.and_then(decode::<M>)).boxed())
+        Ok(stream
+            .filter_map(|item| {
+                futures::future::ready(match item {
+                    Ok(value) => match serde_json::from_value::<M::Success>(value) {
+                        Ok(item) => Some(Ok(item)),
+                        Err(error) => {
+                            let what = format!("{} item", M::TAG);
+                            t3_api::forward_compat::note_skipped(&what, &error);
+                            None
+                        }
+                    },
+                    Err(error) => Some(Err(error)),
+                })
+            })
+            .boxed())
     }
 }
 
