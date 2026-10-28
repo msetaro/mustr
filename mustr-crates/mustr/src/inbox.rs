@@ -1,5 +1,6 @@
 //! The data behind mustr's home view: open pull requests and recent agent threads from T3,
-//! and turning a pull request's files into review contents.
+//! and turning a pull request's files into review contents. Agent threads with work to review
+//! come from `agent_threads`.
 //!
 //! Only the fields mustr shows are decoded, and every entry is decoded on its own, so one
 //! malformed or newer-shaped entry doesn't hide the rest.
@@ -29,6 +30,11 @@ pub struct PullRequestEntry {
     pub additions: u64,
     #[serde(default)]
     pub deletions: u64,
+    #[serde(default)]
+    pub viewer_review_requested: bool,
+    /// ISO 8601, for ordering the inbox.
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -100,7 +106,7 @@ pub enum ThreadStatus {
 }
 
 impl ThreadStatus {
-    fn from_shell(status: String, has_pending_request: bool) -> Self {
+    pub(crate) fn from_shell(status: String, has_pending_request: bool) -> Self {
         if has_pending_request {
             return Self::NeedsInput;
         }
@@ -122,7 +128,7 @@ impl ThreadStatus {
 
 /// The `limit` most recently updated threads of T3's shell snapshot
 /// (`GET /api/orchestration/shell`), newest first.
-pub fn recent_threads(snapshot: Value, limit: usize) -> Vec<ThreadRow> {
+pub fn recent_threads(snapshot: &Value, limit: usize) -> Vec<ThreadRow> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Thread {
@@ -523,6 +529,11 @@ mod tests {
         assert!(first.is_draft);
         assert!(first.has_line_counts());
         assert_eq!(
+            first.updated_at.as_deref(),
+            Some("2026-10-27T00:00:00.000Z")
+        );
+        assert!(!first.viewer_review_requested);
+        assert_eq!(
             first.reference(),
             PullRequestRef {
                 allow_stale: None,
@@ -559,7 +570,7 @@ mod tests {
         unnamed["branch"] = json!(null);
 
         let threads = recent_threads(
-            json!({
+            &json!({
                 "schemaVersion": 1,
                 "snapshotSequence": 3,
                 "threads": [
@@ -604,6 +615,6 @@ mod tests {
             ThreadStatus::from_shell("rolled_back".into(), false).label(),
             "rolled back"
         );
-        assert!(recent_threads(json!({}), 10).is_empty());
+        assert!(recent_threads(&json!({}), 10).is_empty());
     }
 }

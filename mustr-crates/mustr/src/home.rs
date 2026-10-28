@@ -1,19 +1,24 @@
 use crate::{
+    agent_review::{AgentReviewTarget, open_agent_review},
+    agent_review_store::{ReviewedMarks, agent_reviews_dir},
+    agent_threads::{AgentThread, agent_threads, agent_work_candidates},
     inbox::{self, PullRequestEntry, PullRequestList, ThreadRow, ThreadStatus},
     nav_panel::NavPanel,
     pull_request_review,
     review_backend::{self, DryRunRpc, T3ReviewBackend},
     review_drafts::{self, DraftStore},
     t3_connection::{self, ConnectionStatus, T3Connection, T3Session},
+    worktree_git::LocalGit,
 };
 use anyhow::{Context as _, anyhow};
 use editor::Editor;
+use futures::StreamExt as _;
 use gpui::{
     App, Entity, EventEmitter, FocusHandle, Focusable, Global, Subscription, Task, WeakEntity,
 };
-use mustr_ui::tokens;
-use review::{ReviewContents, ReviewView};
-use std::sync::Arc;
+use mustr_ui::{MustrIcon, Pill, SegmentedControl, tokens};
+use review::{ReviewContents, ReviewHeader, ReviewScope, ReviewView};
+use std::{path::Path, sync::Arc};
 use ui::{Button, ButtonStyle, DiffStat, Divider, Indicator, prelude::*};
 use workspace::{
     Toast, Workspace,
@@ -22,13 +27,19 @@ use workspace::{
 };
 
 const RECENT_THREADS: usize = 20;
+/// The most recently finished threads checked for work to review.
+const AGENT_WORK_CANDIDATES: usize = 25;
+/// Worktrees checked with git at once.
+const WORKTREE_CHECKS_IN_FLIGHT: usize = 4;
 const CONTENT_MAX_WIDTH: f32 = 880.;
 
 /// Startup options that change what the home view does on its own.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct HomeOptions {
     /// Opens the first open pull request once the list loads. For smoke tests.
     pub open_first_pull_request: bool,
+    /// Opens a review of this agent thread once the threads load. For smoke tests.
+    pub open_thread: Option<(String, ReviewScope)>,
 }
 
 impl Global for HomeOptions {}
@@ -40,12 +51,59 @@ enum Loadable<T> {
     Failed(SharedString),
 }
 
-struct OpeningPullRequest {
-    index: usize,
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum InboxKey {
+    PullRequest(usize),
+    Thread(String),
+}
+
+struct Opening {
+    key: InboxKey,
     _task: Task<()>,
 }
 
-/// mustr's home: the T3 connection, open pull requests, and recent agent threads.
+/// Which of the inbox's items show.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InboxFilter {
+    #[default]
+    All,
+    PullRequests,
+    AgentWork,
+}
+
+impl InboxFilter {
+    const ALL: [InboxFilter; 3] = [
+        InboxFilter::All,
+        InboxFilter::PullRequests,
+        InboxFilter::AgentWork,
+    ];
+
+    fn shows_pull_requests(self) -> bool {
+        self != InboxFilter::AgentWork
+    }
+
+    fn shows_agent_work(self) -> bool {
+        self != InboxFilter::PullRequests
+    }
+}
+
+/// An agent thread with changes ready to review.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentWork {
+    pub thread: AgentThread,
+    /// Files the branch changed against its base, when the worktree is on this machine.
+    pub files_changed: Option<usize>,
+}
+
+/// What the shell snapshot gives the home view.
+struct ThreadLists {
+    all: Vec<AgentThread>,
+    recent: Vec<ThreadRow>,
+    work: Vec<AgentWork>,
+}
+
+/// mustr's home: the T3 connection, the inbox (pull requests waiting on the reviewer and agent
+/// threads with changes ready to review), and recent agent threads.
 pub struct HomeView {
     focus_handle: FocusHandle,
     workspace: WeakEntity<Workspace>,
@@ -56,9 +114,14 @@ pub struct HomeView {
     loaded_generation: Option<usize>,
     pull_requests: Loadable<PullRequestList>,
     threads: Loadable<Vec<ThreadRow>>,
-    opening: Option<OpeningPullRequest>,
+    agent_work: Loadable<Vec<AgentWork>>,
+    /// Every thread of the last shell snapshot, for opening one by id.
+    all_threads: Vec<AgentThread>,
+    filter: InboxFilter,
+    opening: Option<Opening>,
     open_error: Option<SharedString>,
     open_first_pull_request: bool,
+    open_thread: Option<(String, ReviewScope)>,
     _load_tasks: Vec<Task<()>>,
     _subscription: Subscription,
 }
@@ -79,6 +142,7 @@ impl HomeView {
         let subscription = cx.observe_in(&connection, window, |this, _, window, cx| {
             this.connection_changed(window, cx)
         });
+        let options = cx.try_global::<HomeOptions>().cloned().unwrap_or_default();
         let mut this = Self {
             focus_handle: cx.focus_handle(),
             workspace,
@@ -88,11 +152,13 @@ impl HomeView {
             loaded_generation: None,
             pull_requests: Loadable::NotLoaded,
             threads: Loadable::NotLoaded,
+            agent_work: Loadable::NotLoaded,
+            all_threads: Vec::new(),
+            filter: InboxFilter::default(),
             opening: None,
             open_error: None,
-            open_first_pull_request: cx
-                .try_global::<HomeOptions>()
-                .is_some_and(|options| options.open_first_pull_request),
+            open_first_pull_request: options.open_first_pull_request,
+            open_thread: options.open_thread,
             _load_tasks: Vec::new(),
             _subscription: subscription,
         };
@@ -115,6 +181,7 @@ impl HomeView {
     fn load(&mut self, session: Arc<T3Session>, window: &mut Window, cx: &mut Context<Self>) {
         self.pull_requests = Loadable::Loading;
         self.threads = Loadable::Loading;
+        self.agent_work = Loadable::Loading;
         self.opening = None;
 
         let pull_requests = cx.spawn_in(window, {
@@ -146,16 +213,34 @@ impl HomeView {
 
         let threads = cx.spawn_in(window, async move |this, cx| {
             let result = cx
-                .background_spawn(async move { session.recent_threads(RECENT_THREADS).await })
+                .background_spawn(async move { load_threads(&session).await })
                 .await;
-            this.update(cx, |this, cx| {
-                this.threads = match result {
-                    Ok(threads) => Loadable::Loaded(threads),
+            this.update_in(cx, |this, window, cx| {
+                match result {
+                    Ok(lists) => {
+                        this.threads = Loadable::Loaded(lists.recent);
+                        this.agent_work = Loadable::Loaded(lists.work);
+                        this.all_threads = lists.all;
+                    }
                     Err(error) => {
                         log::error!("couldn't load agent threads: {error:#}");
-                        Loadable::Failed(format!("{error:#}").into())
+                        let error: SharedString = format!("{error:#}").into();
+                        this.threads = Loadable::Failed(error.clone());
+                        this.agent_work = Loadable::Failed(error);
                     }
-                };
+                }
+                if let Some((thread_id, scope)) = this.open_thread.take() {
+                    match this
+                        .all_threads
+                        .iter()
+                        .find(|thread| thread.id == thread_id)
+                    {
+                        Some(thread) => this.open_agent_work(thread.clone(), scope, window, cx),
+                        None => {
+                            this.open_error = Some(format!("T3 has no thread {thread_id}").into());
+                        }
+                    }
+                }
                 cx.notify();
             })
             .ok();
@@ -227,7 +312,8 @@ impl HomeView {
                 let mut permissions = review_data.permissions;
                 permissions.blocked = session.write_blocked_reason().map(Into::into);
                 let contents = ReviewContents {
-                    header: review_data.header,
+                    header: review_data.header.map(ReviewHeader::PullRequest),
+                    worktree: None,
                     files: review.files,
                     // The file tree lists these, dimmed, with the reason they aren't shown.
                     unavailable: review.unavailable,
@@ -277,7 +363,60 @@ impl HomeView {
             })
             .ok();
         });
-        self.opening = Some(OpeningPullRequest { index, _task: task });
+        self.opening = Some(Opening {
+            key: InboxKey::PullRequest(index),
+            _task: task,
+        });
+        cx.notify();
+    }
+
+    /// Opens a review of an agent thread's work.
+    fn open_agent_work(
+        &mut self,
+        thread: AgentThread,
+        scope: ReviewScope,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_error = None;
+        let key = InboxKey::Thread(thread.id.clone());
+        let workspace = self.workspace.clone();
+        let task = cx.spawn_in(window, async move |this, cx| {
+            let title = thread.title.clone();
+            let result = match workspace.update_in(cx, |workspace, window, cx| {
+                open_agent_review(
+                    workspace,
+                    AgentReviewTarget { thread, scope },
+                    None,
+                    window,
+                    cx,
+                )
+            }) {
+                Ok(task) => task.await.map(|_| ()),
+                Err(error) => Err(error),
+            };
+            this.update(cx, |this, cx| {
+                this.opening = None;
+                if let Err(error) = result {
+                    log::error!("couldn't open the review of {title}: {error:#}");
+                    this.open_error = Some(format!("{title}: {error:#}").into());
+                }
+                cx.notify();
+            })
+            .ok();
+        });
+        self.opening = Some(Opening { key, _task: task });
+        cx.notify();
+    }
+
+    fn is_opening(&self, key: &InboxKey) -> bool {
+        self.opening
+            .as_ref()
+            .is_some_and(|opening| opening.key == *key)
+    }
+
+    fn set_filter(&mut self, filter: InboxFilter, cx: &mut Context<Self>) {
+        self.filter = filter;
         cx.notify();
     }
 
@@ -440,33 +579,207 @@ impl HomeView {
             })
     }
 
-    fn render_pull_requests(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let count = match &self.pull_requests {
-            Loadable::Loaded(list) => Some(list.entries.len()),
+    fn render_inbox(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let pull_requests = match &self.pull_requests {
+            Loadable::Loaded(list) => Some(&list.entries),
             _ => None,
         };
-        let body = match &self.pull_requests {
-            Loadable::NotLoaded => None,
-            Loadable::Loading => Some(muted_line("Loading pull requests…").into_any_element()),
-            Loadable::Failed(error) => Some(error_line(error.clone()).into_any_element()),
-            Loadable::Loaded(list) if list.entries.is_empty() && list.errors.is_empty() => {
-                Some(muted_line("No open pull requests.").into_any_element())
-            }
-            Loadable::Loaded(list) => Some(
-                v_flex()
-                    .children(
-                        list.entries
-                            .iter()
-                            .enumerate()
-                            .map(|(index, entry)| self.render_pull_request(index, entry, cx)),
-                    )
-                    .children(list.errors.iter().map(|error| {
+        let agent_work = match &self.agent_work {
+            Loadable::Loaded(work) => Some(work),
+            _ => None,
+        };
+        let count = |filter: InboxFilter| {
+            let pull_requests = pull_requests
+                .filter(|_| filter.shows_pull_requests())
+                .map_or(0, Vec::len);
+            let agent_work = agent_work
+                .filter(|_| filter.shows_agent_work())
+                .map_or(0, Vec::len);
+            pull_requests + agent_work
+        };
+        let filter = self.filter;
+        let this = cx.entity().downgrade();
+        let filters = InboxFilter::ALL.iter().fold(
+            SegmentedControl::new("inbox-filter"),
+            |control, option| {
+                let label = match option {
+                    InboxFilter::All => "All",
+                    InboxFilter::PullRequests => "PRs",
+                    InboxFilter::AgentWork => "Agent work",
+                };
+                control.segment(format!("{label} {}", count(*option)))
+            },
+        );
+        let filters = filters
+            .selected(
+                InboxFilter::ALL
+                    .iter()
+                    .position(|option| *option == filter)
+                    .unwrap_or(0),
+            )
+            .on_select(move |index, _, cx| {
+                if let Some(filter) = InboxFilter::ALL.get(index).copied() {
+                    this.update(cx, |this, cx| this.set_filter(filter, cx)).ok();
+                }
+            });
+
+        // Newest first, pull requests and agent work together.
+        enum Item<'a> {
+            PullRequest(usize, &'a PullRequestEntry),
+            Agent(&'a AgentWork),
+        }
+        let mut items = Vec::new();
+        if filter.shows_pull_requests()
+            && let Some(entries) = pull_requests
+        {
+            items.extend(entries.iter().enumerate().map(|(index, entry)| {
+                (entry.updated_at.as_deref(), Item::PullRequest(index, entry))
+            }));
+        }
+        if filter.shows_agent_work()
+            && let Some(work) = agent_work
+        {
+            items.extend(work.iter().map(|work| {
+                (
+                    work.thread.latest_run_completed_at.as_deref(),
+                    Item::Agent(work),
+                )
+            }));
+        }
+        items.sort_by(|(left, _), (right, _)| right.cmp(left));
+
+        let mut body = v_flex().children(items.into_iter().map(|(_, item)| match item {
+            Item::PullRequest(index, entry) => self.render_pull_request(index, entry, cx),
+            Item::Agent(work) => self.render_agent_work(work, cx),
+        }));
+        let mut notes = Vec::new();
+        if filter.shows_pull_requests() {
+            match &self.pull_requests {
+                Loadable::NotLoaded => {}
+                Loadable::Loading => {
+                    notes.push(muted_line("Loading pull requests…").into_any_element())
+                }
+                Loadable::Failed(error) => notes.push(error_line(error.clone()).into_any_element()),
+                Loadable::Loaded(list) => {
+                    notes.extend(list.errors.iter().map(|error| {
                         muted_line(format!("Couldn't list {error}")).into_any_element()
                     }))
-                    .into_any_element(),
-            ),
+                }
+            }
+        }
+        if filter.shows_agent_work() {
+            match &self.agent_work {
+                Loadable::NotLoaded | Loadable::Loaded(_) => {}
+                Loadable::Loading => {
+                    notes.push(muted_line("Looking for agent work to review…").into_any_element())
+                }
+                Loadable::Failed(error) => notes.push(error_line(error.clone()).into_any_element()),
+            }
+        }
+        let loaded_any = (filter.shows_pull_requests() && pull_requests.is_some())
+            || (filter.shows_agent_work() && agent_work.is_some());
+        if count(filter) == 0 && loaded_any && notes.is_empty() {
+            notes.push(
+                muted_line(match filter {
+                    InboxFilter::All => "Nothing is waiting on you.",
+                    InboxFilter::PullRequests => "No open pull requests.",
+                    InboxFilter::AgentWork => "No agent work to review.",
+                })
+                .into_any_element(),
+            );
+        }
+        body = body.children(notes);
+
+        card(cx)
+            .gap_1()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .px_2()
+                    .pb_1()
+                    .child(Label::new("Inbox").weight(gpui::FontWeight::SEMIBOLD))
+                    .child(
+                        Label::new(count(InboxFilter::All).to_string())
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    )
+                    .child(div().flex_1())
+                    .child(filters),
+            )
+            .child(Divider::horizontal())
+            .child(body)
+    }
+
+    fn render_agent_work(&self, work: &AgentWork, cx: &mut Context<Self>) -> AnyElement {
+        let colors = cx.theme().colors();
+        let thread = &work.thread;
+        let is_opening = self.is_opening(&InboxKey::Thread(thread.id.clone()));
+        let details = [
+            thread.project.as_deref(),
+            thread.branch.as_deref(),
+            thread.agent.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
+        let agent_color = mustr_ui::palette(cx).agent.hsla();
+        let open = {
+            let thread = thread.clone();
+            cx.listener(move |this, _, window, cx| {
+                this.open_agent_work(thread.clone(), ReviewScope::Changes, window, cx)
+            })
         };
-        section("Open pull requests", count, body, cx)
+        h_flex()
+            .id(SharedString::from(format!("agent-work-{}", thread.id)))
+            .w_full()
+            .gap_3()
+            .px_2()
+            .py_1p5()
+            .rounded(tokens::CORNER_RADIUS / 2.)
+            .cursor_pointer()
+            .hover(|style| style.bg(colors.element_hover))
+            .on_click(open)
+            .child(
+                MustrIcon::Agent
+                    .icon()
+                    .size(IconSize::Small)
+                    .color(Color::Custom(agent_color)),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Label::new(thread.title.clone()).truncate())
+                    .when(!details.is_empty(), |this| {
+                        this.child(
+                            Label::new(details)
+                                .size(LabelSize::Small)
+                                .color(Color::Muted)
+                                .truncate(),
+                        )
+                    }),
+            )
+            .when_some(work.files_changed, |this, files| {
+                this.child(
+                    Label::new(if files == 1 {
+                        "1 file".to_string()
+                    } else {
+                        format!("{files} files")
+                    })
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+                )
+            })
+            .child(thread_status(&thread.status))
+            .when(is_opening, |this| {
+                this.child(
+                    Label::new("Opening…")
+                        .size(LabelSize::Small)
+                        .color(Color::Accent),
+                )
+            })
+            .into_any_element()
     }
 
     fn render_pull_request(
@@ -476,10 +789,7 @@ impl HomeView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors();
-        let is_opening = self
-            .opening
-            .as_ref()
-            .is_some_and(|opening| opening.index == index);
+        let is_opening = self.is_opening(&InboxKey::PullRequest(index));
         let mut details = vec![entry.display_ref()];
         if let Some(author) = &entry.author {
             details.push(format!("@{}", author.login));
@@ -500,6 +810,12 @@ impl HomeView {
                 cx.listener(move |this, _, window, cx| this.open_pull_request(index, window, cx)),
             )
             .child(
+                MustrIcon::PullRequest
+                    .icon()
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .child(
                 v_flex()
                     .flex_1()
                     .min_w_0()
@@ -511,6 +827,12 @@ impl HomeView {
                             .truncate(),
                     ),
             )
+            .when(entry.viewer_review_requested, |this| {
+                this.child(Pill::tinted(
+                    "Review requested",
+                    cx.theme().colors().text_accent,
+                ))
+            })
             .when(entry.has_line_counts(), |this| {
                 this.child(DiffStat::new(
                     ("pull-request-diff-stat", index),
@@ -555,13 +877,84 @@ impl HomeView {
     }
 }
 
-fn render_thread(index: usize, thread: &ThreadRow) -> impl IntoElement {
-    let color = match thread.status {
+/// The threads of T3's shell snapshot: the recent ones, and those with work to review. A
+/// candidate whose worktree is on this machine is kept only if git finds changes in it; one
+/// whose worktree is gone from a T3 on this machine has nothing left to diff.
+async fn load_threads(session: &T3Session) -> anyhow::Result<ThreadLists> {
+    let snapshot = session.shell_snapshot().await?;
+    let all = agent_threads(&snapshot);
+    let recent = inbox::recent_threads(&snapshot, RECENT_THREADS);
+    let reviewed = ReviewedMarks::new(&agent_reviews_dir()).load();
+    let server_is_local = session.server_is_local();
+    let mut candidates = agent_work_candidates(&all, &reviewed, usize::MAX);
+    // On T3's own machine, a worktree that's gone has nothing left to diff; most threads'
+    // worktrees are cleaned up eventually, so those are dropped before picking the newest.
+    if server_is_local {
+        candidates.retain(|thread| {
+            thread
+                .worktree_path
+                .as_deref()
+                .is_some_and(|path| Path::new(path).is_dir())
+        });
+    }
+    candidates.truncate(AGENT_WORK_CANDIDATES);
+    let work = futures::stream::iter(candidates.into_iter().map(|thread| async move {
+        let path = thread.worktree_path.clone()?;
+        match LocalGit::open(Path::new(&path)).await {
+            Some(local) => {
+                let branch = local.current_branch().await;
+                match local.changed_file_count(branch.as_deref()).await {
+                    Ok(0) => None,
+                    Ok(files) => Some(AgentWork {
+                        thread,
+                        files_changed: Some(files),
+                    }),
+                    Err(error) => {
+                        log::warn!("couldn't count the changes in {path}: {error:#}");
+                        Some(AgentWork {
+                            thread,
+                            files_changed: None,
+                        })
+                    }
+                }
+            }
+            None if server_is_local => None,
+            None => Some(AgentWork {
+                thread,
+                files_changed: None,
+            }),
+        }
+    }))
+    .buffered(WORKTREE_CHECKS_IN_FLIGHT)
+    .filter_map(futures::future::ready)
+    .collect::<Vec<_>>()
+    .await;
+    Ok(ThreadLists { all, recent, work })
+}
+
+fn status_color(status: &ThreadStatus) -> Color {
+    match status {
         ThreadStatus::NeedsInput => Color::Warning,
         ThreadStatus::Working(_) => Color::Accent,
         ThreadStatus::Failed => Color::Error,
         ThreadStatus::Settled(_) => Color::Muted,
-    };
+    }
+}
+
+fn thread_status(status: &ThreadStatus) -> impl IntoElement {
+    let color = status_color(status);
+    h_flex()
+        .gap_1()
+        .flex_none()
+        .child(Indicator::dot().color(color))
+        .child(
+            Label::new(status.label().to_string())
+                .size(LabelSize::Small)
+                .color(color),
+        )
+}
+
+fn render_thread(index: usize, thread: &ThreadRow) -> impl IntoElement {
     let details = [thread.branch.as_deref(), thread.project.as_deref()]
         .into_iter()
         .flatten()
@@ -587,17 +980,7 @@ fn render_thread(index: usize, thread: &ThreadRow) -> impl IntoElement {
                     )
                 }),
         )
-        .child(
-            h_flex()
-                .gap_1()
-                .flex_none()
-                .child(Indicator::dot().color(color))
-                .child(
-                    Label::new(thread.status.label().to_string())
-                        .size(LabelSize::Small)
-                        .color(color),
-                ),
-        )
+        .child(thread_status(&thread.status))
 }
 
 fn card(cx: &App) -> Div {
@@ -713,7 +1096,7 @@ impl Render for HomeView {
                                 this.child(card(cx).child(error_line(error)))
                             })
                             .when(show_lists, |this| {
-                                this.child(self.render_pull_requests(cx))
+                                this.child(self.render_inbox(cx))
                                     .child(self.render_threads(cx))
                             }),
                     ),

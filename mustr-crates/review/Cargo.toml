@@ -26,6 +26,7 @@ multi_buffer.workspace = true
 mustr_ui = { path = "../mustr_ui" }
 project.workspace = true
 pulldown-cmark.workspace = true
+schemars.workspace = true
 serde.workspace = true
 settings.workspace = true
 time.workspace = true

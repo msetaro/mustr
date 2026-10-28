@@ -46,6 +46,28 @@ where
 }
 
 /// Like [`call_endpoint_with`], but decodes the response as `R` instead of
+/// `E::Response`: for large responses of which mustr reads a few fields (such as a thread's
+/// snapshot), decoded leniently so a newer server's additions don't fail the whole call. The
+/// path, method, and headers still come from `E`'s table.
+pub async fn call_endpoint_as<E, R>(
+    http: &dyn HttpClient,
+    base_url: &Url,
+    access_token: Option<&AccessToken>,
+    params: &E::Params,
+    query: &E::Query,
+    body: &E::Request,
+) -> Result<R>
+where
+    E: HttpEndpoint,
+    E::Params: Serialize,
+    E::Query: Serialize,
+    E::Request: Serialize,
+    R: DeserializeOwned,
+{
+    send::<E, R>(http, base_url, access_token, params, query, body).await
+}
+
+/// Like [`call_endpoint_with`], but decodes the response as `R` instead of
 /// `E::Response`, for responses mustr must read from servers of any version.
 pub(crate) async fn send<E, R>(
     http: &dyn HttpClient,
@@ -170,6 +192,19 @@ mod tests {
         assert_eq!(
             url.as_str(),
             "http://127.0.0.1:3773/api/orchestration/threads/thread%201%2F2/messages?limit=5"
+        );
+
+        // Delegated tasks' thread ids hold escapes of their own, which must survive.
+        let url = endpoint_url::<t3_api::http::OrchestrationThreadBoundedSnapshot>(
+            &base_url,
+            &t3_api::types::HttpOrchestrationThreadBoundedSnapshotParams {
+                thread_id: "thread:delegated-task:command%3Amcp%3A1".to_string(),
+            },
+            &Default::default(),
+        )?;
+        assert_eq!(
+            url.as_str(),
+            "http://127.0.0.1:3773/api/orchestration/threads/thread:delegated-task:command%253Amcp%253A1/bounded"
         );
 
         let url = endpoint_url::<t3_api::http::MetadataDescriptor>(&base_url, &(), &())?;

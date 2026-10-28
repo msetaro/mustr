@@ -79,6 +79,9 @@ pub struct ReviewThread {
     /// How many comments the thread has, which can be more than `comments` holds when not all of
     /// them could be loaded.
     pub comment_count: usize,
+    /// A local comment on an agent's diff that was sent to the agent, rather than a forge's
+    /// thread.
+    pub sent_to_agent: bool,
 }
 
 /// Which editor of the diff a card is in.
@@ -904,6 +907,9 @@ impl Render for ThreadCard {
             .when(thread.is_resolved, |this| {
                 this.child(pill("Resolved", status.success))
             })
+            .when(thread.sent_to_agent, |this| {
+                this.child(pill("Sent to agent", mustr_ui::palette(cx).agent.hsla()))
+            })
             .when(!expanded && self.reply.is_some(), |this| {
                 this.child(pill("Reply in progress", colors.text_accent))
             })
@@ -1138,6 +1144,7 @@ mod tests {
                 edited: false,
                 can_edit: false,
             }],
+            sent_to_agent: false,
             comment_count: 1,
         };
         assert_eq!(estimated_card_lines(&thread, false), 2);

@@ -1,9 +1,10 @@
 //! mustr's connection to a T3 Code server: checking the server, pairing with it, keeping the
 //! bearer token, and holding the RPC socket open.
 //!
-//! mustr asks for exactly [`SCOPES`]: reading orchestration (pull requests, threads) and writing
-//! to pull requests (comments, reviews, viewed marks). A stored token that lacks one of them is
-//! replaced by pairing again.
+//! mustr asks for exactly [`SCOPES`]: reading orchestration (pull requests, threads), operating
+//! agent threads (sending them messages, such as a review), and writing to pull requests
+//! (comments, reviews, viewed marks). A stored token that lacks one of them is replaced by
+//! pairing again.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use futures::{AsyncReadExt as _, FutureExt as _, future::BoxFuture};
@@ -27,7 +28,7 @@ use t3_client::{
 };
 use util::ResultExt as _;
 
-use crate::inbox::{PullRequestList, ThreadRow};
+use crate::inbox::PullRequestList;
 
 pub const DEFAULT_SERVER_URL: &str = "http://127.0.0.1:3773";
 /// Overrides the server URL from settings (the `--t3-server` flag overrides both).
@@ -36,9 +37,12 @@ const SERVER_URL_ENV: &str = "MUSTR_T3_SERVER";
 /// only: the file is protected by file permissions alone.
 pub const CREDENTIALS_FILE_ENV: &str = "MUSTR_CREDENTIALS_FILE";
 
-/// The scopes mustr asks T3 for. Not `orchestration:operate` until mustr drives agents, and
-/// never `access:*` or `relay:*`.
-pub const SCOPES: [Scope; 2] = [Scope::OrchestrationRead, Scope::SourceControlWrite];
+/// The scopes mustr asks T3 for. Never `access:*` or `relay:*`.
+pub const SCOPES: [Scope; 3] = [
+    Scope::OrchestrationRead,
+    Scope::OrchestrationOperate,
+    Scope::SourceControlWrite,
+];
 const PAIRING_LABEL: &str = "mustr";
 const PAIRING_TTL: &str = "5m";
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(30);
@@ -470,7 +474,29 @@ impl T3Session {
         Ok(crate::inbox::parse_pull_request_list(list))
     }
 
-    pub async fn recent_threads(&self, limit: usize) -> Result<Vec<ThreadRow>> {
+    /// Why messages can't be sent to agent threads with this session, if they can't.
+    pub fn agent_send_blocked_reason(&self) -> Option<String> {
+        self.missing_scopes()
+            .contains(&Scope::OrchestrationOperate)
+            .then(|| {
+                format!(
+                    "mustr's pairing with T3 can't send messages to agents (it lacks {}). Pair \
+                     again from the home view: {}",
+                    Scope::OrchestrationOperate.as_str(),
+                    pairing_command()
+                )
+            })
+    }
+
+    /// Whether T3 runs on this machine, so the paths it reports (such as a thread's worktree)
+    /// are this machine's.
+    pub fn server_is_local(&self) -> bool {
+        server_is_local(&self.server_url)
+    }
+
+    /// T3's shell snapshot (`GET /api/orchestration/shell`): every thread and project, without
+    /// their histories. Decoded leniently by its readers.
+    pub async fn shell_snapshot(&self) -> Result<Value> {
         let url = self
             .server_url
             .join("/api/orchestration/shell")
@@ -494,9 +520,27 @@ impl T3Session {
                 truncate(&String::from_utf8_lossy(&body), 300)
             );
         }
-        let snapshot: Value =
-            serde_json::from_slice(&body).context("T3 sent a shell snapshot that isn't JSON")?;
-        Ok(crate::inbox::recent_threads(snapshot, limit))
+        serde_json::from_slice(&body).context("T3 sent a shell snapshot that isn't JSON")
+    }
+
+    /// One thread's snapshot with a bounded history (`/bounded`, about a megabyte where the
+    /// full snapshot of a long thread can be tens), which still lists every checkpoint.
+    pub async fn thread_snapshot(&self, thread_id: &str) -> Result<Value> {
+        t3_client::call_endpoint_as::<
+            t3_client::t3_api::http::OrchestrationThreadBoundedSnapshot,
+            Value,
+        >(
+            self.http.as_ref(),
+            &self.server_url,
+            Some(&self.token),
+            &t3_client::t3_api::types::HttpOrchestrationThreadBoundedSnapshotParams {
+                thread_id: thread_id.to_string(),
+            },
+            &Default::default(),
+            &(),
+        )
+        .await
+        .with_context(|| format!("loading thread {thread_id}"))
     }
 
     pub async fn pull_request_files(
@@ -515,6 +559,16 @@ impl T3Session {
 
     fn authorization(&self) -> String {
         format!("Bearer {}", self.token.access_token)
+    }
+}
+
+/// Whether a server URL names this machine.
+pub fn server_is_local(url: &Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
     }
 }
 
@@ -1222,21 +1276,42 @@ mod tests {
     }
 
     #[test]
-    fn mustr_asks_for_reading_and_pull_request_writes_only() {
+    fn mustr_asks_for_reading_operating_agents_and_pull_request_writes_only() {
         assert_eq!(
             SCOPES.map(Scope::as_str),
-            ["orchestration:read", "source-control:write"]
+            [
+                "orchestration:read",
+                "orchestration:operate",
+                "source-control:write"
+            ]
         );
         assert_eq!(
             pairing_command(),
-            "t3 auth pairing create --scope orchestration:read --scope source-control:write \
-             --label mustr"
+            "t3 auth pairing create --scope orchestration:read --scope orchestration:operate \
+             --scope source-control:write --label mustr"
         );
         assert_eq!(
             missing_scopes("orchestration:read".split_whitespace()),
-            [Scope::SourceControlWrite]
+            [Scope::OrchestrationOperate, Scope::SourceControlWrite]
         );
-        assert!(missing_scopes(["source-control:write", "orchestration:read"]).is_empty());
+        assert!(
+            missing_scopes([
+                "source-control:write",
+                "orchestration:read",
+                "orchestration:operate"
+            ])
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn local_servers() {
+        let local = |url: &str| server_is_local(&Url::parse(url).unwrap());
+        assert!(local("http://127.0.0.1:3773"));
+        assert!(local("http://localhost:3773"));
+        assert!(local("http://[::1]:3773"));
+        assert!(!local("https://box.tailnet.ts.net"));
+        assert!(!local("http://10.0.0.2:3773"));
     }
 
     #[test]
@@ -1245,10 +1320,10 @@ mod tests {
             accepted,
             scopes: scopes.map(|scopes| scopes.iter().map(|scope| scope.to_string()).collect()),
         };
-        let both = "orchestration:read source-control:write";
+        let all = "orchestration:read orchestration:operate source-control:write";
         assert_eq!(
-            stored_token_use(&check(true, None), both),
-            (StoredTokenUse::Use, both.to_string())
+            stored_token_use(&check(true, None), all),
+            (StoredTokenUse::Use, all.to_string())
         );
         // A token from M0, paired read-only.
         assert_eq!(
@@ -1257,24 +1332,41 @@ mod tests {
         );
         // T3's account of the session wins over what was stored.
         assert_eq!(
-            stored_token_use(&check(true, Some(&["orchestration:read"])), both),
+            stored_token_use(&check(true, Some(&["orchestration:read"])), all),
             (StoredTokenUse::PairAgain, "orchestration:read".to_string())
         );
         assert_eq!(
-            stored_token_use(&check(false, None), both).0,
+            stored_token_use(&check(false, None), all).0,
             StoredTokenUse::Discard
+        );
+
+        // A token from M1, without the scope to message agents.
+        assert_eq!(
+            stored_token_use(
+                &check(true, None),
+                "orchestration:read source-control:write"
+            )
+            .0,
+            StoredTokenUse::PairAgain
         );
 
         // What T3 0.1.1 answers for mustr's session: the write scope is only in `permissions`.
         let session = parse_session_check(
-            br#"{"authenticated":true,"auth":{},"scopes":["orchestration:read"],"permissions":["orchestration:read","source-control:write"],"sessionMethod":"bearer-access-token"}"#,
+            br#"{"authenticated":true,"auth":{},"scopes":["orchestration:read","orchestration:operate"],"permissions":["orchestration:read","orchestration:operate","source-control:write"],"sessionMethod":"bearer-access-token"}"#,
         )
         .unwrap();
         assert_eq!(
             session,
-            check(true, Some(&["orchestration:read", "source-control:write"]))
+            check(
+                true,
+                Some(&[
+                    "orchestration:read",
+                    "orchestration:operate",
+                    "source-control:write"
+                ])
+            )
         );
-        assert_eq!(stored_token_use(&session, both).0, StoredTokenUse::Use);
+        assert_eq!(stored_token_use(&session, all).0, StoredTokenUse::Use);
         // A server from before `permissions`.
         assert_eq!(
             parse_session_check(

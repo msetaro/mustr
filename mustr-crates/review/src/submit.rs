@@ -14,10 +14,15 @@ use ui::{
 };
 
 use crate::{
-    PendingReview, ReviewPermissions, ReviewSubmission, ReviewVerdict, ReviewView, can_submit,
+    DiffSide, DraftComment, PendingReview, QuotedCode, ReviewPermissions, ReviewSubmission,
+    ReviewVerdict, ReviewView, can_submit,
     composer::{CancelComment, Composer, ConfirmComment, SubmitReview, cancel_button, error_label},
     header::pill,
 };
+use std::collections::BTreeMap;
+
+/// Longer selections are quoted up to this many lines.
+const MAX_QUOTED_LINES: u32 = 40;
 
 /// What the submit form sends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +46,7 @@ impl SubmitForm {
     pub(crate) fn new(
         pending: &PendingReview,
         permissions: &ReviewPermissions,
+        to_agent: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
@@ -60,7 +66,11 @@ impl SubmitForm {
             verdict,
             summary: Composer::new(
                 &pending.summary,
-                "Leave a summary. Markdown is supported.",
+                if to_agent {
+                    "Anything else for the agent? Markdown is supported."
+                } else {
+                    "Leave a summary. Markdown is supported."
+                },
                 window,
                 cx,
             ),
@@ -71,6 +81,38 @@ impl SubmitForm {
 }
 
 impl ReviewView {
+    /// The lines a draft is on, as the diff shows them now: the head text for the right side,
+    /// the base text for the left.
+    pub fn quoted_code(&self, draft: &DraftComment, cx: &App) -> Option<QuotedCode> {
+        let shown = self.files.iter().find(|file| file.has_path(&draft.path))?;
+        let last = draft.position.line();
+        let first = draft
+            .start_line
+            .filter(|start| *start <= last)
+            .unwrap_or(last)
+            .max(last.saturating_sub(MAX_QUOTED_LINES - 1))
+            .max(1);
+        let buffer = shown.buffer.read(cx);
+        let language = buffer
+            .language()
+            .map(|language| language.code_fence_block_name().to_string());
+        let text = match draft.position.side() {
+            DiffSide::Right => buffer.snapshot().text,
+            DiffSide::Left => shown.diff.read(cx).base_text(cx).text,
+        };
+        let max_row = text.max_point().row;
+        if first - 1 > max_row {
+            return None;
+        }
+        let start = language::Point::new(first - 1, 0);
+        let end_row = (last - 1).min(max_row);
+        let end = language::Point::new(end_row, text.line_len(end_row));
+        Some(QuotedCode {
+            language,
+            text: text.text_for_range(start..end).collect(),
+        })
+    }
+
     /// Drafts that go with the review when it's submitted.
     pub fn added_draft_count(&self, cx: &App) -> usize {
         self.draft_cards()
@@ -155,8 +197,11 @@ impl ReviewView {
                     .collect::<Vec<_>>();
                 let verdict = self.submit.verdict;
                 if !can_submit(verdict, &body, comments.len()) {
-                    self.submit.error =
-                        Some("Write a summary or add a comment to the review first.".into());
+                    self.submit.error = Some(if self.sends_to_agent() {
+                        "Add a comment or write a message for the agent first.".into()
+                    } else {
+                        "Write a summary or add a comment to the review first.".into()
+                    });
                     cx.notify();
                     return;
                 }
@@ -164,10 +209,15 @@ impl ReviewView {
                     .iter()
                     .map(|draft| draft.id.clone())
                     .collect::<HashSet<_>>();
+                let quotes = comments
+                    .iter()
+                    .filter_map(|draft| Some((draft.id.clone(), self.quoted_code(draft, cx)?)))
+                    .collect::<BTreeMap<_, _>>();
                 let submission = ReviewSubmission {
                     verdict,
                     body: body.clone(),
                     comments,
+                    quotes,
                 };
                 (writes.backend.submit_review(submission, cx), ids)
             }
@@ -184,6 +234,7 @@ impl ReviewView {
             }
         };
         let mode = self.submit.mode;
+        let to_agent = self.sends_to_agent();
         self.submit.error = None;
         self.submit.in_flight = Some(cx.spawn_in(window, async move |this, cx| {
             let result = task.await;
@@ -202,6 +253,9 @@ impl ReviewView {
                         }
                         this.submit.open = false;
                         this.notice = Some(match mode {
+                            SubmitMode::Review if to_agent => {
+                                "Sent to the agent. Its reply shows in the thread.".into()
+                            }
                             SubmitMode::Review => "Your review was submitted.".into(),
                             SubmitMode::Comment => "Your comment was posted.".into(),
                         });
@@ -210,7 +264,14 @@ impl ReviewView {
                         this.reload_threads(window, cx);
                     }
                     Err(error) => {
-                        log::error!("couldn't submit the review: {error:#}");
+                        log::error!(
+                            "couldn't {}: {error:#}",
+                            if to_agent {
+                                "send the review to the agent"
+                            } else {
+                                "submit the review"
+                            }
+                        );
                         this.submit.error = Some(format!("{error:#}").into());
                     }
                 }
@@ -247,7 +308,9 @@ impl ReviewView {
                 .child(
                     Button::new(
                         "open-submit-review",
-                        if permissions.can_review() {
+                        if self.sends_to_agent() {
+                            "Send to agent"
+                        } else if permissions.can_review() {
                             "Submit review"
                         } else {
                             "Comment"
@@ -307,8 +370,28 @@ impl ReviewView {
                 .on_click(cx.listener(move |this, _, _, cx| this.set_submit_mode(button_mode, cx)))
         };
 
+        let to_agent = self.sends_to_agent();
         let mut notes = Vec::new();
-        if mode == SubmitMode::Review {
+        if mode == SubmitMode::Review && to_agent {
+            notes.push(match added {
+                0 => "No comments are pending: only the message goes to the agent.".to_string(),
+                1 => "1 comment, with the code it's on, goes to the agent in one message."
+                    .to_string(),
+                count => format!(
+                    "{count} comments, with the code they're on, go to the agent in one message."
+                ),
+            });
+            if unfinished > 0 {
+                notes.push(if unfinished == 1 {
+                    "1 comment is still being written and won't be sent until it's added."
+                        .to_string()
+                } else {
+                    format!(
+                        "{unfinished} comments are still being written and won't be sent until they're added."
+                    )
+                });
+            }
+        } else if mode == SubmitMode::Review {
             notes.push(match added {
                 0 => "No line comments are pending.".to_string(),
                 1 => "1 line comment will be posted with the review.".to_string(),
@@ -329,6 +412,7 @@ impl ReviewView {
         }
 
         let submit_label = match (mode, self.submit.verdict) {
+            (SubmitMode::Review, _) if to_agent => "Send to agent",
             (SubmitMode::Comment, _) => "Comment",
             (SubmitMode::Review, ReviewVerdict::Approve) => "Approve",
             (SubmitMode::Review, ReviewVerdict::RequestChanges) => "Request changes",
@@ -356,6 +440,7 @@ impl ReviewView {
                         .gap_1()
                         .child(
                             Label::new(match mode {
+                                SubmitMode::Review if to_agent => "Send your review to the agent",
                                 SubmitMode::Review => "Submit your review",
                                 SubmitMode::Comment => "Comment on the pull request",
                             })
@@ -408,13 +493,17 @@ impl ReviewView {
                         h_flex()
                             .gap_2()
                             .child(
-                                Label::new(if stranded == 1 {
-                                    "1 draft no longer matches the diff, so it won't be posted."
-                                        .to_string()
-                                } else {
-                                    format!(
-                                        "{stranded} drafts no longer match the diff, so they won't be posted."
-                                    )
+                                Label::new({
+                                    let verb = if to_agent { "sent" } else { "posted" };
+                                    if stranded == 1 {
+                                        format!(
+                                            "1 draft no longer matches the diff, so it won't be {verb}."
+                                        )
+                                    } else {
+                                        format!(
+                                            "{stranded} drafts no longer match the diff, so they won't be {verb}."
+                                        )
+                                    }
                                 })
                                 .size(LabelSize::Small)
                                 .color(Color::Warning),

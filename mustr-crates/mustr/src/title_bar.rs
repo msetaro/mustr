@@ -125,11 +125,11 @@ impl MustrTitleBar {
                 // Home is always there, so it can't be closed from its tab.
                 let closable = item.downcast::<HomeView>().is_none();
                 let weak_pane = self.pane.downgrade();
-                // Pull requests are labeled `owner/repo#123`, as in the mockups; the tooltip
-                // has the title.
+                // Pull requests are labeled `owner/repo#123`, as in the mockups, and agent
+                // threads by their title; the tooltip has the rest.
                 let label = item
                     .downcast::<ReviewView>()
-                    .and_then(|review| Some(review.read(cx).header()?.reference().into()))
+                    .and_then(|review| Some(review.read(cx).header()?.tab_label()))
                     .unwrap_or_else(|| item.tab_content_text(0, cx));
                 WindowTab::new(("title-bar-tab", item_id.as_u64()), label)
                     .active(index == active_index)
