@@ -22,6 +22,7 @@ Ignore the rest of `.rules`, which is for Zed's own repository: the README banne
 - Per crate: `cargo test -p <crate>`, `cargo clippy -p <crate> --all-targets`, and `cargo fmt -p <crate>`. Fix every warning.
 - Linux builds need Zed's system packages (`script/linux`). GPUI tests use the test platform and don't need them.
 - First builds of Zed crates take minutes; run them in the background.
+- mustr leaves out Zed's AI and Zed's hosted services (`mustr-docs/ZED-SERVICES.md`). Don't depend on or initialize them; `script/mustr-check-no-ai` fails if a mustr crate depends on one. When a new Zed action, setting, or host belongs to them, hide or block it in `mustr-crates/mustr` (`hidden_actions.rs`, `default_overrides.json`, `zed_services.rs`).
 
 ## T3 Code servers
 

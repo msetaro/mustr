@@ -325,6 +325,7 @@ fn main() {
 
 ### Init inventory (`main.rs:479-1004`, `zed.rs`): keep or drop
 Keep = mustr calls it. Drop = mustr doesn't call it. *None of these require patching Zed.*
+How the dropped AI and service features are also hidden and blocked: `mustr-docs/ZED-SERVICES.md`.
 
 | Init / registration | Decision |
 |---|---|
