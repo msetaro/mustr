@@ -11116,6 +11116,7 @@ dependencies = [
  "node_runtime",
  "parking_lot",
  "paths",
+ "platform_title_bar",
  "project",
  "rayon",
  "release_channel",

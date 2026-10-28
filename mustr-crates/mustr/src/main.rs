@@ -8,6 +8,7 @@ mod inbox;
 mod keymap;
 mod t3_connection;
 mod themes;
+mod title_bar;
 mod window;
 
 use anyhow::{Context as _, Result};
@@ -337,5 +338,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     inspector_ui::init(app_state.clone(), cx);
     which_key::init(cx);
     app_settings::observe_app_settings(cx);
+    title_bar::init(cx);
     window::init(cx);
 }
