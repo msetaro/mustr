@@ -85,7 +85,7 @@ use language::{
 };
 use multi_buffer::PathKey;
 use multi_buffer::{MultiBufferRow, RowInfo};
-use mustr_ui::tokens;
+use mustr_ui::{tokens, tokens::scaled};
 use project::{
     Project, ProjectPath, WorktreeId,
     trusted_worktrees::{TrustedWorktrees, TrustedWorktreesEvent},
@@ -1249,11 +1249,11 @@ impl ReviewView {
                     this.child(
                         v_flex()
                             .id("unshown-thread-list")
-                            .max_h(px(320.))
+                            .max_h(scaled(px(320.)))
                             .overflow_y_scroll()
                             .gap_2()
                             .p_2()
-                            .rounded(tokens::CORNER_RADIUS)
+                            .rounded(scaled(tokens::CORNER_RADIUS))
                             .border(tokens::BORDER_WIDTH)
                             .border_color(colors.border_variant)
                             .children(self.unshown_thread_cards.iter().cloned()),

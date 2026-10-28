@@ -21,7 +21,7 @@ use gpui::{
     MouseButton, ParentElement as _, Render, RenderOnce, SharedString, Styled as _, Task,
     WeakEntity, Window, actions, div, px,
 };
-use mustr_ui::{palette, tokens};
+use mustr_ui::{palette, tokens, tokens::scaled};
 use std::{rc::Rc, sync::Arc};
 use t3_api::{
     tagged::OrchestrationV2Command,
@@ -571,6 +571,7 @@ impl Render for ThreadSettingsBar {
             .id("thread-settings-bar")
             .gap_0p5()
             .min_w_0()
+            .flex_wrap()
             .child(model)
             .children(options)
             .child(access)
@@ -754,7 +755,7 @@ fn choice_row(
 ) -> AnyElement {
     h_flex()
         .w_full()
-        .min_w(px(220.))
+        .min_w(scaled(px(220.)))
         .gap_2()
         .py_0p5()
         .when_some(icon, |this, icon| {
@@ -773,7 +774,7 @@ fn choice_row(
                     )
                 }),
         )
-        .child(div().w(px(14.)).flex_none().when(selected, |this| {
+        .child(div().w(scaled(px(14.))).flex_none().when(selected, |this| {
             this.child(
                 Icon::new(IconName::Check)
                     .size(IconSize::Small)
@@ -895,9 +896,9 @@ impl RenderOnce for ComposerControl {
             .id(self.id)
             .flex_none()
             .gap_1()
-            .px(px(6.))
-            .py(px(2.))
-            .rounded(tokens::CONTROL_RADIUS)
+            .px(scaled(px(6.)))
+            .py(scaled(px(2.)))
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .bg(background)
             .text_color(text)
             .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))

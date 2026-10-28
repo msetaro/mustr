@@ -29,7 +29,7 @@ use gpui::{
     MouseButton, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task,
     WeakEntity, Window, div, px,
 };
-use mustr_ui::{TextButton, palette, tokens};
+use mustr_ui::{TextButton, palette, tokens, tokens::scaled};
 use std::sync::Arc;
 use t3_api::{
     rpc,
@@ -374,7 +374,7 @@ impl ThreadFamilyBar {
         let parent_title = parent.title.clone();
         h_flex()
             .w_full()
-            .h(px(26.))
+            .h(scaled(px(26.)))
             .gap_2()
             .child(
                 Icon::new(IconName::ArrowUp)
@@ -443,7 +443,7 @@ impl ThreadFamilyBar {
         let header = h_flex()
             .id("family-children-toggle")
             .w_full()
-            .h(px(24.))
+            .h(scaled(px(24.)))
             .gap_1p5()
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -481,7 +481,7 @@ impl ThreadFamilyBar {
                         v_flex()
                             .id("family-children-list")
                             .w_full()
-                            .max_h(px(ROW_HEIGHT * MAX_ROWS_SHOWN))
+                            .max_h(scaled(px(ROW_HEIGHT * MAX_ROWS_SHOWN)))
                             .overflow_y_scroll()
                             .children(
                                 self.family
@@ -502,8 +502,8 @@ impl ThreadFamilyBar {
                         this.child(
                             h_flex()
                                 .id("family-show-more")
-                                .h(px(24.))
-                                .pl(px(20.))
+                                .h(scaled(px(24.)))
+                                .pl(scaled(px(20.)))
                                 .cursor_pointer()
                                 .text_color(palette.text_muted.hsla())
                                 .hover(|style| style.text_color(palette.text.hsla()))
@@ -529,11 +529,11 @@ impl ThreadFamilyBar {
             .debug_selector(|| selector)
             .flex_none()
             .w_full()
-            .h(px(ROW_HEIGHT))
-            .pl(px(20.))
+            .h(scaled(px(ROW_HEIGHT)))
+            .pl(scaled(px(20.)))
             .pr_1()
             .gap_2()
-            .rounded(tokens::CONTROL_RADIUS)
+            .rounded(scaled(tokens::CONTROL_RADIUS))
     }
 
     fn render_child(&self, index: usize, child: &Relative, cx: &mut Context<Self>) -> AnyElement {
@@ -621,7 +621,7 @@ impl ThreadFamilyBar {
         let header = h_flex()
             .id(("family-workflow", index))
             .w_full()
-            .h(px(26.))
+            .h(scaled(px(26.)))
             .gap_1p5()
             .child(
                 h_flex()
@@ -745,13 +745,13 @@ impl ThreadFamilyBar {
             };
             div()
                 .id(("family-workflow-script", index))
-                .ml(px(20.))
+                .ml(scaled(px(20.)))
                 .mb_1()
-                .max_h(px(240.))
+                .max_h(scaled(px(240.)))
                 .overflow_y_scroll()
                 .px_2()
                 .py_1p5()
-                .rounded(tokens::CONTROL_RADIUS)
+                .rounded(scaled(tokens::CONTROL_RADIUS))
                 .border(tokens::BORDER_WIDTH)
                 .border_color(palette.border.hsla())
                 .bg(palette.background.hsla())
@@ -773,8 +773,8 @@ impl ThreadFamilyBar {
                                 .when_some(phase.title.clone(), |this, phase_title| {
                                     this.child(
                                         h_flex()
-                                            .h(px(22.))
-                                            .pl(px(20.))
+                                            .h(scaled(px(22.)))
+                                            .pl(scaled(px(20.)))
                                             .gap_2()
                                             .child(
                                                 Label::new(phase_title)
@@ -806,7 +806,7 @@ impl ThreadFamilyBar {
                 )
                 .when(workflow.phases.is_empty(), |this| {
                     this.child(
-                        div().h(px(22.)).pl(px(20.)).child(
+                        div().h(scaled(px(22.))).pl(scaled(px(20.))).child(
                             Label::new("No agents yet")
                                 .size(LabelSize::XSmall)
                                 .color(Color::Muted),
@@ -830,7 +830,7 @@ impl ThreadFamilyBar {
             ("family-workflow-member", index),
             format!("family-workflow-member-{}", member.label),
         )
-        .pl(px(32.))
+        .pl(scaled(px(32.)))
         .when_some(
             member.thread_id.clone().filter(|_| member.available),
             |this, thread_id| {
@@ -855,7 +855,7 @@ impl ThreadFamilyBar {
         );
         h_flex()
             .w_full()
-            .h(px(26.))
+            .h(scaled(px(26.)))
             .gap_1p5()
             .child(Indicator::dot().color(Color::Custom(palette(cx).text_muted.hsla())))
             .child(section_label("Background"))
@@ -907,7 +907,7 @@ impl Render for ThreadFamilyBar {
             .flex_none()
             .w_full()
             .px_4()
-            .py(px(4.))
+            .py(scaled(px(4.)))
             .border_b(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .bg(palette.surface.hsla())
@@ -934,7 +934,7 @@ impl Render for ThreadFamilyBar {
             .when(family.waiting_on_thread, |this| {
                 this.child(
                     h_flex()
-                        .h(px(24.))
+                        .h(scaled(px(24.)))
                         .gap_1p5()
                         .child(
                             Icon::new(IconName::Clock)

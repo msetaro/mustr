@@ -7,7 +7,7 @@ use gpui::{
     AnyElement, App, Context, Entity, FontWeight, IntoElement, ParentElement as _, SharedString,
     Styled as _, Task, Window,
 };
-use mustr_ui::tokens;
+use mustr_ui::{tokens, tokens::scaled};
 use ui::{
     Button, ButtonSize, ButtonStyle, Color, Label, LabelCommon as _, LabelSize, TintColor, Tooltip,
     prelude::*,
@@ -303,6 +303,7 @@ impl ReviewView {
                             format!("{count} pending comments")
                         },
                         accent,
+                        cx,
                     ))
                 })
                 .child(
@@ -425,7 +426,7 @@ impl ReviewView {
                 .w_full()
                 .p_2()
                 .gap_2()
-                .rounded(tokens::CORNER_RADIUS)
+                .rounded(scaled(tokens::CORNER_RADIUS))
                 .border(tokens::BORDER_WIDTH)
                 .border_color(colors.border)
                 .bg(colors.background)
