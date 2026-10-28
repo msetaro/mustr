@@ -23,7 +23,8 @@ use zed_actions::{OpenKeymapFile, OpenSettingsFile, Quit};
 /// The Wayland app ID and X11 `WM_CLASS`. It must match the `.desktop` file name.
 const APP_ID: &str = "dev.mustr.mustr";
 
-const INITIAL_KEYMAP: &str = "// mustr key bindings\n//\n// mustr uses Zed's keymap format. See https://zed.dev/docs/key-bindings\n[\n]\n";
+const INITIAL_KEYMAP: &str =
+    "// mustr key bindings\n//\n// mustr uses Zed's keymap format.\n[\n]\n";
 
 #[cfg(target_os = "macos")]
 gpui::actions!(
