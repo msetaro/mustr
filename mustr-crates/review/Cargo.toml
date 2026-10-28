@@ -24,6 +24,7 @@ markdown.workspace = true
 multi_buffer.workspace = true
 mustr_ui = { path = "../mustr_ui" }
 project.workspace = true
+pulldown-cmark.workspace = true
 settings.workspace = true
 time.workspace = true
 time_format.workspace = true
@@ -35,6 +36,7 @@ workspace.workspace = true
 editor = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 language = { workspace = true, features = ["test-support"] }
+pretty_assertions.workspace = true
 project = { workspace = true, features = ["test-support"] }
 settings = { workspace = true, features = ["test-support"] }
 theme.workspace = true

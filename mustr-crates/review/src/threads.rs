@@ -23,7 +23,7 @@ use time::{OffsetDateTime, UtcOffset};
 use time_format::TimestampFormat;
 use ui::{Color, Icon, IconName, IconSize, Label, LabelCommon as _, LabelSize, prelude::*};
 
-use crate::header::pill;
+use crate::{comment_html::comment_markdown, header::pill};
 
 /// Cards are capped at this many columns of the editor's font, so long comments stay readable
 /// on wide screens.
@@ -221,7 +221,7 @@ impl ThreadCard {
             .comments
             .iter()
             .map(|comment| {
-                let body = SharedString::from(comment.body.clone());
+                let body = SharedString::from(comment_markdown(&comment.body));
                 let language_registry = language_registry.clone();
                 cx.new(|cx| Markdown::new(body, language_registry, None, cx))
             })
@@ -514,6 +514,7 @@ impl Render for OutdatedThreads {
 /// The first line of a comment with the most common Markdown markers removed, for a one-line
 /// summary.
 fn plain_summary(body: &str) -> String {
+    let body = comment_markdown(body);
     let line = body
         .lines()
         .map(str::trim)
@@ -562,6 +563,10 @@ mod tests {
             "Critical src/main.rs:3"
         );
         assert_eq!(plain_summary("> quoted"), "quoted");
+        assert_eq!(
+            plain_summary("<!-- bot -->\n<details><summary>Review <b>status</b></summary>"),
+            "Review status"
+        );
         assert_eq!(plain_summary(""), "");
     }
 

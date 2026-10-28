@@ -2,12 +2,14 @@
 //! memory (for example, fetched from a T3 Code server) rather than read from a local checkout,
 //! with the pull request's header, its review threads as cards in the diff, and a file tree.
 
+mod comment_html;
 mod file_tree;
 mod file_tree_panel;
 mod header;
 mod threads;
 mod toolbar;
 
+pub use comment_html::comment_markdown;
 pub use file_tree::{FileChange, FileTreeFile, FileTreeModel, FileTreeRow, FileViewedState};
 pub use file_tree_panel::{FileTreePanel, ToggleFileTree};
 pub use header::{ChecksState, ChecksSummary, PullRequestHeader, PullRequestState};
