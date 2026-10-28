@@ -6,7 +6,7 @@ pub mod tokens;
 
 use anyhow::{Context as _, Result};
 use gpui::App;
-use theme::ThemeRegistry;
+use theme::{ActiveTheme as _, ThemeRegistry};
 use theme_settings::ThemeFamilyContent;
 
 /// The mustr theme family, in Zed's theme JSON format.
@@ -41,6 +41,20 @@ pub fn register_themes(cx: &mut App) -> Result<()> {
     Ok(())
 }
 
+/// The design tokens behind the active theme. Themes other than mustr's get the Dark or Light
+/// palette by appearance, for the few colors Zed's theme format has no slot for (such as
+/// [`tokens::Palette::pending`]).
+pub fn palette(cx: &App) -> &'static tokens::Palette {
+    let theme = cx.theme();
+    if theme.name == COLORBLIND_SAFE_THEME_NAME {
+        &tokens::COLORBLIND_SAFE
+    } else if theme.appearance().is_light() {
+        &tokens::LIGHT
+    } else {
+        &tokens::DARK
+    }
+}
+
 /// Parses the embedded mustr theme family.
 pub fn theme_family_content() -> Result<ThemeFamilyContent> {
     theme_settings::deserialize_user_theme(THEME_FAMILY_JSON.as_bytes())
@@ -55,7 +69,7 @@ mod tests {
     use serde_json::Value;
     use settings::{SettingsStore, ThemeName, ThemeSelection};
     use std::collections::BTreeSet;
-    use theme::{ActiveTheme as _, Appearance, LoadThemes, Theme};
+    use theme::{Appearance, LoadThemes, Theme};
 
     const THEMES: [(&str, Appearance, &Palette); 3] = [
         (DARK_THEME_NAME, Appearance::Dark, &tokens::DARK),
