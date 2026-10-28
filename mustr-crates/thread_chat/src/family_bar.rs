@@ -3,10 +3,13 @@
 //! tasks with Open and Stop, its workflows with their agents, script, and Stop, and the
 //! background work its agent left running.
 //!
-//! On T3 0.1.1 the family comes from the shell's threads and their `lineage`, which
-//! [`crate::ThreadShells`] keeps for the whole app, and from the thread's own projection
-//! (`family_bar/family.rs`). 0.1.3 adds `orchestration.getThreadFamily`, whose snapshots leave
-//! out idle subagent children; switch to it when the pin moves.
+//! The family comes from the shell's threads and their `lineage`, which [`crate::ThreadShells`]
+//! keeps for the whole app, and from the thread's own projection (`family_bar/family.rs`).
+//! T3 0.1.3 adds `orchestration.getThreadFamily`: shells that opt into `omitIdleSubagents` (as
+//! T3's own client does) leave idle subagent children out, and the family read has them. So the
+//! bar reads the family once per thread and shell generation and merges it behind the shell's
+//! rows, which win, as T3's client does (`threadFamilies.ts`). T3 0.1.1 doesn't have the call,
+//! and its shell holds every child, so there the shell alone is the family.
 
 mod family;
 #[cfg(test)]
@@ -18,9 +21,9 @@ use family::{
 };
 
 use crate::{
-    backend::{Access, ThreadBackend, ThreadBackendExt as _},
+    backend::{Access, ThreadBackend, ThreadBackendExt as _, is_unsupported_rpc},
     commands,
-    shell::ThreadShells,
+    shell::{Shell, ThreadShells},
     thread_view::ThreadView,
 };
 use collections::{HashMap, HashSet};
@@ -33,7 +36,10 @@ use mustr_ui::{TextButton, palette, tokens};
 use std::sync::Arc;
 use t3_api::{
     rpc,
-    types::{OrchestrationV2GetWorkflowScriptInput, OrchestrationV2StopWorkflowInput},
+    types::{
+        OrchestrationV2GetThreadFamilyInput, OrchestrationV2GetWorkflowScriptInput,
+        OrchestrationV2StopWorkflowInput, OrchestrationV2ThreadFamily,
+    },
 };
 use ui::{
     Color, Icon, IconName, IconSize, Indicator, Label, LabelCommon as _, LabelSize, Tooltip,
@@ -62,12 +68,26 @@ enum Script {
     Failed(SharedString),
 }
 
+/// What `orchestration.getThreadFamily` said about the thread's family.
+#[derive(Clone, Debug, Default, PartialEq)]
+enum FamilyRead {
+    /// Not read yet, being read, or the read failed: the shell alone is the family.
+    #[default]
+    None,
+    Loaded(OrchestrationV2ThreadFamily),
+    /// The server is older than 0.1.3 and has no such call. Its shell has every child.
+    Unsupported,
+}
+
 /// The family of one [`ThreadView`]'s thread.
 pub struct ThreadFamilyBar {
     thread_view: WeakEntity<ThreadView>,
     shells: Entity<ThreadShells>,
     backend: Option<Arc<dyn ThreadBackend>>,
     thread_id: Option<String>,
+    /// The family read and the thread and shell generation it was asked for.
+    family_read: FamilyRead,
+    family_read_for: Option<(String, usize)>,
     family: Family,
     /// Whether the children are listed; `None` until the user says, which lists them while any
     /// works.
@@ -105,6 +125,8 @@ impl ThreadFamilyBar {
             shells,
             backend: None,
             thread_id: None,
+            family_read: FamilyRead::None,
+            family_read_for: None,
             family: Family::default(),
             expanded: None,
             show_all_children: false,
@@ -117,24 +139,34 @@ impl ThreadFamilyBar {
         }
     }
 
-    /// Works the family out again from the thread and the shell.
+    /// Works the family out again from the thread, the shell, and the family read.
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let Some(view) = self.thread_view.upgrade() else {
             return;
         };
         let view = view.read(cx);
         let backend = view.backend.clone();
+        let shells = self.shells.read(cx);
+        let generation = shells.generation();
         let (thread_id, family) = match view.thread_state() {
-            Some(state) => (
-                Some(state.thread_id().to_string()),
-                Family::derive(
-                    &state.thread,
-                    self.shells.read(cx).shell(),
-                    state.subagents(),
-                ),
-            ),
+            Some(state) => {
+                let merged = match &self.family_read {
+                    FamilyRead::Loaded(read) => {
+                        Some(merge_family(shells.shell(), read, &state.thread))
+                    }
+                    FamilyRead::None | FamilyRead::Unsupported => None,
+                };
+                let shell = merged.as_ref().or(shells.shell());
+                (
+                    Some(state.thread_id().to_string()),
+                    Family::derive(&state.thread, shell, state.subagents()),
+                )
+            }
             None => (None, Family::default()),
         };
+        if let Some(thread_id) = &thread_id {
+            self.read_family(&backend, thread_id, generation, cx);
+        }
         self.backend = Some(backend);
         if thread_id != self.thread_id {
             self.thread_id = thread_id;
@@ -149,6 +181,58 @@ impl ThreadFamilyBar {
             self.family = family;
             cx.notify();
         }
+    }
+
+    /// Reads the thread's family (`orchestration.getThreadFamily`) once per thread and shell
+    /// generation, once the shell has loaded. On a server without the call (T3 0.1.1) it stays
+    /// with the shell.
+    fn read_family(
+        &mut self,
+        backend: &Arc<dyn ThreadBackend>,
+        thread_id: &str,
+        generation: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let key = (thread_id.to_string(), generation);
+        if generation == 0 || self.family_read_for.as_ref() == Some(&key) {
+            return;
+        }
+        let thread_changed = self
+            .family_read_for
+            .as_ref()
+            .is_none_or(|(read_for, _)| read_for != thread_id);
+        self.family_read_for = Some(key.clone());
+        if thread_changed && self.family_read != FamilyRead::Unsupported {
+            self.family_read = FamilyRead::None;
+        }
+        let read = backend.call::<rpc::OrchestrationGetThreadFamily>(
+            OrchestrationV2GetThreadFamilyInput {
+                thread_id: thread_id.to_string(),
+            },
+            Access::Read,
+        );
+        self._tasks.push(cx.spawn(async move |this, cx| {
+            let result = read.await;
+            this.update(cx, |this, cx| {
+                // A newer read was asked for in the meantime.
+                if this.family_read_for.as_ref() != Some(&key) {
+                    return;
+                }
+                this.family_read = match result {
+                    Ok(family) => FamilyRead::Loaded(family),
+                    Err(error) if is_unsupported_rpc(&error) => {
+                        log::debug!("{error:#}; the family comes from the shell");
+                        FamilyRead::Unsupported
+                    }
+                    Err(error) => {
+                        log::warn!("couldn't read thread {}'s family: {error:#}", key.0);
+                        FamilyRead::None
+                    }
+                };
+                this.refresh(cx);
+            })
+            .ok();
+        }));
     }
 
     fn blocked_reason(&self, access: Access) -> Option<String> {
@@ -962,4 +1046,36 @@ impl Render for ThreadFamilyBar {
             })
             .into_any_element()
     }
+}
+
+/// The shell, with the family's rows that it doesn't have: the threads sharing the thread's root
+/// that a shell omitting idle subagents leaves out. The shell's rows win, since its changes are
+/// newer, and a row the shell dropped after the read stays dropped.
+fn merge_family(
+    shell: Option<&Shell>,
+    read: &OrchestrationV2ThreadFamily,
+    thread: &t3_api::types::OrchestrationV2AppThread,
+) -> Shell {
+    let root = &thread.lineage.root_thread_id;
+    let mut merged = Shell::default();
+    for row in &read.threads {
+        let dropped = shell
+            .and_then(|shell| shell.removed.get(&row.id))
+            .is_some_and(|sequence| *sequence > read.snapshot_sequence);
+        if !dropped {
+            merged.threads.insert(row.id.clone(), row.clone());
+        }
+    }
+    if let Some(shell) = shell {
+        merged.sequence = shell.sequence;
+        for (id, row) in &shell.threads {
+            if merged.threads.contains_key(id)
+                || &row.lineage.root_thread_id == root
+                || row.id == thread.id
+            {
+                merged.threads.insert(id.clone(), row.clone());
+            }
+        }
+    }
+    merged
 }

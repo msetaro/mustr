@@ -28,6 +28,9 @@ pub struct Shell {
     pub threads: HashMap<String, OrchestrationV2ThreadShell>,
     pub projects: HashMap<String, OrchestrationProjectShell>,
     pub sequence: i64,
+    /// Threads the shell dropped since its snapshot (removed, or archived), with the sequence
+    /// that dropped them, so rows read elsewhere (`getThreadFamily`) aren't shown again.
+    pub removed: HashMap<String, i64>,
 }
 
 impl Shell {
@@ -44,6 +47,7 @@ impl Shell {
                 .map(|project| (project.id.clone(), project.clone()))
                 .collect(),
             sequence: snapshot.snapshot_sequence,
+            removed: HashMap::default(),
         }
     }
 
@@ -85,13 +89,18 @@ impl Shell {
             // Archived threads have a shell of their own; T3 drops them from this one.
             OrchestrationV2ShellStreamItem::ThreadUpdated(update) => {
                 if update.location == OrchestrationV2ShellStreamItemThreadUpdatedLocation::Active {
+                    self.removed.remove(&update.thread.id);
                     self.threads.insert(update.thread.id.clone(), update.thread);
                 } else {
+                    self.removed
+                        .insert(update.thread.id.clone(), update.sequence);
                     self.threads.remove(&update.thread.id);
                 }
                 true
             }
             OrchestrationV2ShellStreamItem::ThreadRemoved(removed) => {
+                self.removed
+                    .insert(removed.thread_id.clone(), removed.sequence);
                 self.threads.remove(&removed.thread_id).is_some()
             }
             OrchestrationV2ShellStreamItem::ProjectUpdated(update) => {
@@ -111,6 +120,9 @@ impl Shell {
 /// The app's one follower of T3's shell. Views observe it to hear of changes.
 pub struct ThreadShells {
     shell: Option<Shell>,
+    /// Bumped by every snapshot of the whole shell, after which rows read elsewhere are read
+    /// again, as T3's client does (`threadFamilies.ts`).
+    generation: usize,
     error: Option<SharedString>,
     _follow: Option<Task<()>>,
 }
@@ -128,6 +140,7 @@ impl ThreadShells {
         let shells = cx.new(|cx| {
             let mut shells = Self {
                 shell: None,
+                generation: 0,
                 error: None,
                 _follow: None,
             };
@@ -141,6 +154,11 @@ impl ThreadShells {
     /// The shell, once it has loaded.
     pub fn shell(&self) -> Option<&Shell> {
         self.shell.as_ref()
+    }
+
+    /// How many times the whole shell has loaded; 0 until it has.
+    pub fn generation(&self) -> usize {
+        self.generation
     }
 
     /// One active thread's record.
@@ -193,6 +211,7 @@ async fn follow_shell(
         let shell = Shell::from_snapshot(&snapshot);
         let sequence = shell.sequence;
         this.shell = Some(shell);
+        this.generation += 1;
         this.error = None;
         cx.notify();
         sequence
@@ -206,9 +225,15 @@ async fn follow_shell(
     while let Some(item) = stream.next().await {
         let item = item?;
         this.update(cx, |this, cx| {
+            let replaces = matches!(
+                &item,
+                OrchestrationV2ShellStreamItem::Snapshot(snapshot)
+                    if snapshot.resolved_repository_identity_roots.is_none()
+            );
             if let Some(shell) = &mut this.shell
                 && shell.apply(item)
             {
+                this.generation += usize::from(replaces);
                 cx.notify();
             }
         })?;

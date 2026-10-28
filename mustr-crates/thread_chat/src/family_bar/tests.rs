@@ -593,6 +593,11 @@ struct RawCall {
 #[derive(Default)]
 struct FakeBackend {
     projections: HashMap<String, Value>,
+    shell: Option<Value>,
+    /// `orchestration.getThreadFamily`'s answer; without one, the server is T3 0.1.1, which
+    /// doesn't have the call.
+    family: Option<Value>,
+    family_calls: Mutex<Vec<RawCall>>,
     commands: Mutex<Vec<OrchestrationV2Command>>,
     raw_calls: Mutex<Vec<RawCall>>,
     raw_responses: Mutex<Vec<Value>>,
@@ -600,6 +605,10 @@ struct FakeBackend {
 
 impl FakeBackend {
     fn new() -> Arc<Self> {
+        Arc::new(Self::on_0_1_1())
+    }
+
+    fn on_0_1_1() -> Self {
         let mut backend = Self::default();
         backend
             .projections
@@ -607,7 +616,7 @@ impl FakeBackend {
         backend
             .projections
             .insert("child-delegated".into(), child_projection());
-        Arc::new(backend)
+        backend
     }
 
     fn commands(&self) -> Vec<Value> {
@@ -625,7 +634,8 @@ fn ready<T: Send + 'static>(value: Result<T>) -> BoxFuture<'static, Result<T>> {
 
 impl ThreadBackend for FakeBackend {
     fn shell_snapshot(&self) -> BoxFuture<'static, Result<OrchestrationV2ShellSnapshot>> {
-        ready(serde_json::from_value(shell_json()).map_err(Into::into))
+        let shell = self.shell.clone().unwrap_or_else(shell_json);
+        ready(serde_json::from_value(shell).map_err(Into::into))
     }
 
     fn subscribe_shell(
@@ -691,11 +701,18 @@ impl ThreadBackend for FakeBackend {
         payload: Value,
         access: Access,
     ) -> BoxFuture<'static, Result<Value>> {
-        self.raw_calls.lock().push(RawCall {
+        let call = RawCall {
             tag: tag.to_string(),
             payload,
             access,
-        });
+        };
+        if tag == "orchestration.getThreadFamily" {
+            self.family_calls.lock().push(call);
+            return ready(self.family.clone().ok_or_else(|| {
+                anyhow::Error::new(crate::backend::UnsupportedRpc { tag: tag.into() })
+            }));
+        }
+        self.raw_calls.lock().push(call);
         let mut responses = self.raw_responses.lock();
         ready(Ok(if responses.is_empty() {
             Value::Null
@@ -896,4 +913,86 @@ async fn read_only_backends_disable_stop(cx: &mut TestAppContext) {
     // Reads and opening still work.
     click("family-child-child-done", cx);
     assert_eq!(open_thread_ids(&workspace, cx), [PARENT, "child-done"]);
+}
+
+// T3 0.1.3's `getThreadFamily`, and T3 0.1.1 without it.
+
+/// A 0.1.3 shell that leaves idle subagent children out (`omitIdleSubagents`): the parent, its
+/// running child, and an unrelated thread.
+fn shell_without_idle_children() -> Value {
+    let mut shell = shell_json();
+    shell["threads"].as_array_mut().unwrap().retain(|thread| {
+        ["parent-1", "child-delegated", "unrelated"].contains(&thread["id"].as_str().unwrap())
+    });
+    shell
+}
+
+/// `orchestration.getThreadFamily` for the parent: every thread under its root.
+fn family_json() -> Value {
+    let mut threads = shell_json()["threads"].as_array().unwrap().clone();
+    threads.retain(|thread| thread["id"] != "unrelated");
+    json!({ "snapshotSequence": 7, "threads": threads })
+}
+
+#[test]
+fn the_family_read_fills_in_what_the_shell_leaves_out() {
+    let shell = Shell::from_snapshot(&decode(shell_without_idle_children()));
+    let read: t3_api::types::OrchestrationV2ThreadFamily = decode(family_json());
+    let thread: OrchestrationV2AppThread = decode(parent_projection()["thread"].clone());
+    let subagents: Vec<OrchestrationV2Subagent> = decode(json!(parent_subagents()));
+
+    let merged = super::merge_family(Some(&shell), &read, &thread);
+    assert_eq!(
+        Family::derive(&thread, Some(&merged), &subagents),
+        parent_family()
+    );
+    assert!(!merged.threads.contains_key("unrelated"));
+
+    // The shell's rows win: they're newer.
+    let mut newer = shell.clone();
+    newer.threads.get_mut("child-delegated").unwrap().title = "Renamed".into();
+    let merged = super::merge_family(Some(&newer), &read, &thread);
+    assert_eq!(merged.threads["child-delegated"].title, "Renamed");
+
+    // A child the shell removed after the read stays removed.
+    let mut removed = shell.clone();
+    removed.removed.insert("child-done".into(), 8);
+    let merged = super::merge_family(Some(&removed), &read, &thread);
+    assert!(!merged.threads.contains_key("child-done"));
+    assert!(merged.threads.contains_key("child-native"));
+}
+
+#[gpui::test]
+async fn on_0_1_3_idle_children_come_from_the_family_read(cx: &mut TestAppContext) {
+    let mut backend = FakeBackend::on_0_1_1();
+    backend.shell = Some(shell_without_idle_children());
+    backend.family = Some(family_json());
+    let backend = Arc::new(backend);
+    let (workspace, _view, cx) = open_thread(backend.clone(), PARENT, cx).await;
+
+    assert_eq!(
+        backend.family_calls.lock().clone(),
+        [RawCall {
+            tag: "orchestration.getThreadFamily".into(),
+            payload: json!({ "threadId": PARENT }),
+            access: Access::Read,
+        }]
+    );
+    // `child-done` finished, so only the family read has it.
+    click("family-child-child-done", cx);
+    assert_eq!(open_thread_ids(&workspace, cx), [PARENT, "child-done"]);
+    assert!(cx.debug_bounds("family-error").is_none());
+}
+
+#[gpui::test]
+async fn on_0_1_1_the_family_comes_from_the_shell(cx: &mut TestAppContext) {
+    let backend = FakeBackend::new();
+    let (workspace, _view, cx) = open_thread(backend.clone(), PARENT, cx).await;
+
+    // It asked once, heard the server doesn't have the call, and used the shell.
+    assert_eq!(backend.family_calls.lock().len(), 1);
+    click("family-child-child-done", cx);
+    assert_eq!(open_thread_ids(&workspace, cx), [PARENT, "child-done"]);
+    assert!(cx.debug_bounds("family-error").is_none());
+    assert!(backend.raw_calls.lock().is_empty());
 }

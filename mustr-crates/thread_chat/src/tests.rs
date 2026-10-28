@@ -868,6 +868,11 @@ impl ThreadBackend for FakeBackend {
         payload: Value,
         access: Access,
     ) -> BoxFuture<'static, Result<Value>> {
+        // Like T3 0.1.1, which has no `getThreadFamily`: the family bar falls back to the shell.
+        if tag == "orchestration.getThreadFamily" {
+            let error = crate::backend::UnsupportedRpc { tag: tag.into() };
+            return ready(Err(error.into()));
+        }
         self.record_raw(tag, payload, access);
         let mut responses = self.raw_responses.lock();
         ready(Ok(if responses.is_empty() {
