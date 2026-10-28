@@ -44,13 +44,6 @@ impl Global for RailEntries {}
 /// they're added. Clicking it dispatches `action` from the rail, so the workspace's handlers get
 /// it. `is_active` says whether the active item is the entry's destination, which highlights the
 /// button. Call it from the package's `init`, before windows open.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the schedules page and the worktrees view register their entries"
-    )
-)]
 pub fn register_rail_entry(
     id: impl Into<SharedString>,
     icon: Icon,

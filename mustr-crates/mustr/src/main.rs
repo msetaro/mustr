@@ -32,6 +32,7 @@ mod zed_services;
 // merge without conflicts (`mustr-docs/PARITY.md` §3).
 // WP4, ship the work:
 // WP5, scheduled tasks:
+mod schedules;
 // WP6, terminals and worktrees:
 
 use anyhow::{Context as _, Result};
@@ -440,5 +441,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     // (`mustr-docs/PARITY.md` §3).
     // WP4, ship the work:
     // WP5, scheduled tasks:
+    schedules::init(cx);
     // WP6, terminals and worktrees:
 }
