@@ -24,7 +24,7 @@ use gpui::{
     Focusable, FontWeight, KeyBinding, Pixels, SharedString, Subscription, Task, WeakEntity,
     Window, actions,
 };
-use mustr_ui::{TextButton, WindowTab, kbds_for_action, palette, tokens};
+use mustr_ui::{TextButton, WindowTab, kbds_for_action, palette, tokens, tokens::scaled};
 use project::Project;
 use std::{
     collections::HashMap,
@@ -680,7 +680,7 @@ impl ThreadTerminalPanel {
         h_flex()
             .flex_none()
             .w_full()
-            .h(px(32.))
+            .h(scaled(px(32.)))
             .gap_1()
             .pl_2()
             .pr_1()
@@ -839,9 +839,9 @@ impl ThreadTerminalPanel {
     ) -> impl IntoElement {
         let palette = palette(cx);
         let hint = kbds_for_action(&ToggleThreadTerminal, "Workspace", window).map(|keys| {
-            h_flex().gap(px(3.)).children(keys).child(
+            h_flex().gap(scaled(px(3.))).children(keys).child(
                 div()
-                    .ml(px(2.))
+                    .ml(scaled(px(2.)))
                     .text_size(tokens::text_size(tokens::TEXT_SIZE_XSMALL))
                     .text_color(palette.text_muted.hsla())
                     .child("shows or hides terminals"),
@@ -915,8 +915,8 @@ impl Panel for ThreadTerminalPanel {
 
     fn set_position(&mut self, _: DockPosition, _: &mut Window, _: &mut Context<Self>) {}
 
-    fn default_size(&self, _: &Window, _: &App) -> Pixels {
-        px(300.)
+    fn default_size(&self, _: &Window, cx: &App) -> Pixels {
+        tokens::scaled_pixels(px(300.), cx)
     }
 
     fn set_active(&mut self, active: bool, window: &mut Window, cx: &mut Context<Self>) {

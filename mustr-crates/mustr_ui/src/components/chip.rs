@@ -1,4 +1,4 @@
-use crate::{components::ClickHandler, palette, tokens};
+use crate::{components::ClickHandler, palette, tokens, tokens::scaled};
 use gpui::{
     App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _,
@@ -94,9 +94,9 @@ impl RenderOnce for Chip {
         h_flex()
             .id(self.id)
             .flex_none()
-            .gap(px(5.))
-            .px(px(8.))
-            .py(px(1.))
+            .gap(scaled(px(5.)))
+            .px(scaled(px(8.)))
+            .py(scaled(px(1.)))
             .rounded_full()
             .border(tokens::BORDER_WIDTH)
             .border_color(border)
@@ -105,7 +105,13 @@ impl RenderOnce for Chip {
             .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
             .whitespace_nowrap()
             .when_some(self.dot, |this, color| {
-                this.child(div().flex_none().size(px(6.)).rounded_full().bg(color))
+                this.child(
+                    div()
+                        .flex_none()
+                        .size(scaled(px(6.)))
+                        .rounded_full()
+                        .bg(color),
+                )
             })
             .child(self.label)
             .when(self.menu_indicator, |this| this.child("▾"))
@@ -163,8 +169,8 @@ impl RenderOnce for Pill {
         };
         div()
             .flex_none()
-            .px(px(7.))
-            .py(px(1.))
+            .px(scaled(px(7.)))
+            .py(scaled(px(1.)))
             .rounded_full()
             .bg(background)
             .text_color(text)

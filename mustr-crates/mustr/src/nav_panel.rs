@@ -14,8 +14,10 @@ use gpui::{
     Focusable, Global, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render,
     SharedString, Styled as _, Subscription, WeakEntity, Window, div, px,
 };
-use mustr_ui::{MustrIcon, RailButton, tokens};
+use mustr_ui::{MustrIcon, RailButton, tokens, tokens::scaled};
 use review::{FileTreePanel, ReviewView, ToggleFileTree};
+use settings::{Settings as _, SettingsStore};
+use theme_settings::ThemeSettings;
 use thread_chat::{ThreadView, ThreadsSidebar, ThreadsSidebarEvent};
 use ui::{FluentBuilder as _, Icon, h_flex, v_flex};
 use workspace::{
@@ -24,6 +26,7 @@ use workspace::{
 };
 use zed_actions::OpenSettingsFile;
 
+/// The tree's or the threads' width, next to the rail, at mustr's design size (`scaled`).
 const DEFAULT_TREE_WIDTH: Pixels = px(280.);
 
 /// A rail button added with [`register_rail_entry`].
@@ -93,6 +96,9 @@ pub struct NavPanel {
     /// The panel's width with each sidebar, restored when that sidebar shows again.
     file_tree_width: Option<Pixels>,
     threads_width: Option<Pixels>,
+    /// The `ui_font_size` the panel was sized at. Zooming scales its widths by as much as the
+    /// font size changes, as it does the rail.
+    sized_at_font_size: Pixels,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -121,6 +127,9 @@ impl NavPanel {
                 }
             },
         );
+        let zoom = cx.observe_global_in::<SettingsStore>(window, |this, _, cx| {
+            this.ui_font_size_changed(cx)
+        });
         Self {
             focus_handle: cx.focus_handle(),
             workspace: workspace.downgrade(),
@@ -132,7 +141,8 @@ impl NavPanel {
             sized_for: None,
             file_tree_width: None,
             threads_width: None,
-            _subscriptions: vec![subscription, reveal],
+            sized_at_font_size: ThemeSettings::get_global(cx).ui_font_size(cx),
+            _subscriptions: vec![subscription, reveal, zoom],
         }
     }
 
@@ -203,12 +213,16 @@ impl NavPanel {
             Sidebar::Threads => self
                 .threads_width
                 .unwrap_or_else(|| self.default_size(window, cx)),
-            Sidebar::None => tokens::RAIL_WIDTH,
+            Sidebar::None => tokens::scaled_pixels(tokens::RAIL_WIDTH, cx),
         };
         self.sized_for = Some(sidebar);
+        Self::set_width(&panel, left_dock, width, cx);
+    }
+
+    fn set_width(panel: &Entity<Self>, left_dock: &Entity<Dock>, width: Pixels, cx: &mut App) {
         left_dock.update(cx, |dock, cx| {
             dock.set_panel_size_state(
-                &panel,
+                panel,
                 PanelSizeState {
                     size: Some(width),
                     flex: None,
@@ -216,6 +230,46 @@ impl NavPanel {
                 cx,
             );
         });
+    }
+
+    /// Zooming scales the panel with the rest of the UI: the rail's width exactly, and the
+    /// sidebars' widths, including ones the user dragged, by as much as the font size changed.
+    ///
+    /// The dock resets a panel to its default size when that changes (`Dock::add_panel` in
+    /// `crates/workspace/src/dock.rs`), as [`Panel::default_size`] does here with the font size.
+    /// So the new width is set after the dock has seen the change.
+    fn ui_font_size_changed(&mut self, cx: &mut Context<Self>) {
+        let font_size = ThemeSettings::get_global(cx).ui_font_size(cx);
+        if font_size == self.sized_at_font_size {
+            return;
+        }
+        let factor = font_size / self.sized_at_font_size;
+        self.sized_at_font_size = font_size;
+        self.file_tree_width = self.file_tree_width.map(|width| width * factor);
+        self.threads_width = self.threads_width.map(|width| width * factor);
+        let Some(sidebar) = self.sized_for else {
+            return;
+        };
+        let Some(left_dock) = self
+            .workspace
+            .read_with(cx, |workspace, _| workspace.left_dock().clone())
+            .ok()
+        else {
+            return;
+        };
+        let panel = cx.entity();
+        let width = match sidebar {
+            Sidebar::None => tokens::scaled_pixels(tokens::RAIL_WIDTH, cx),
+            Sidebar::FileTree | Sidebar::Threads => left_dock
+                .read(cx)
+                .stored_panel_size_state(&panel)
+                .and_then(|size_state| size_state.size)
+                .map_or_else(
+                    || tokens::scaled_pixels(tokens::RAIL_WIDTH + DEFAULT_TREE_WIDTH, cx),
+                    |width| width * factor,
+                ),
+        };
+        cx.defer(move |cx| Self::set_width(&panel, &left_dock, width, cx));
     }
 
     /// The rail's Agents button: shows or hides the threads next to the rail.
@@ -273,11 +327,11 @@ impl NavPanel {
         };
         v_flex()
             .flex_none()
-            .w(tokens::RAIL_WIDTH)
+            .w(scaled(tokens::RAIL_WIDTH))
             .h_full()
             .items_center()
-            .gap(px(6.))
-            .py(px(10.))
+            .gap(scaled(px(6.)))
+            .py(scaled(px(10.)))
             .bg(palette.surface.hsla())
             .when(self.sidebar() != Sidebar::None, |this| {
                 this.border_r(tokens::BORDER_WIDTH)
@@ -391,8 +445,8 @@ impl Panel for NavPanel {
 
     fn set_position(&mut self, _: DockPosition, _: &mut Window, _: &mut Context<Self>) {}
 
-    fn default_size(&self, _: &Window, _: &App) -> Pixels {
-        tokens::RAIL_WIDTH + DEFAULT_TREE_WIDTH
+    fn default_size(&self, _: &Window, cx: &App) -> Pixels {
+        tokens::scaled_pixels(tokens::RAIL_WIDTH + DEFAULT_TREE_WIDTH, cx)
     }
 
     fn starts_open(&self, _: &Window, _: &App) -> bool {
@@ -449,9 +503,9 @@ mod tests {
     use super::*;
     use anyhow::{Result, anyhow};
     use futures::{FutureExt as _, future::BoxFuture, stream::BoxStream};
+    use gpui::UpdateGlobal as _;
     use gpui::{TestAppContext, VisualTestContext};
     use serde_json::Value;
-    use settings::SettingsStore;
     use std::sync::Arc;
     use std::{cell::Cell, rc::Rc};
     use t3_client::t3_api::{
@@ -606,6 +660,75 @@ mod tests {
             assert_eq!(nav_panel.destination, Destination::Thread);
             assert_eq!(nav_panel.sidebar(), Sidebar::Threads);
         });
+    }
+
+    fn panel_width(
+        workspace: &Entity<Workspace>,
+        nav_panel: &Entity<NavPanel>,
+        cx: &mut VisualTestContext,
+    ) -> Pixels {
+        workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .left_dock()
+                .read(cx)
+                .stored_panel_size_state(nav_panel)
+                .and_then(|size_state| size_state.size)
+                .expect("the panel has a width")
+        })
+    }
+
+    fn set_ui_font_size(size: f32, cx: &mut VisualTestContext) {
+        cx.update(|_, cx| {
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.theme.ui_font_size = Some(size.into());
+                });
+            });
+        });
+        cx.run_until_parked();
+    }
+
+    /// The panel is sized in rems of `ui_font_size`, like what it draws, and a zoom scales it,
+    /// including a width the user dragged.
+    #[gpui::test]
+    async fn the_panel_scales_with_the_ui_font_size(cx: &mut TestAppContext) {
+        let (workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;
+        set_ui_font_size(13., cx);
+        let left_dock = workspace.read_with(cx, |workspace, _| workspace.left_dock().clone());
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            nav_panel.active_item_changed(None, &left_dock, window, cx)
+        });
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(38.));
+
+        set_ui_font_size(26., cx);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(76.));
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            nav_panel.toggle_threads(window, cx)
+        });
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(636.));
+
+        // A width the user chose scales too, and comes back when the threads show again.
+        left_dock.update(cx, |dock, cx| {
+            dock.set_panel_size_state(
+                &nav_panel,
+                PanelSizeState {
+                    size: Some(px(500.)),
+                    flex: None,
+                },
+                cx,
+            )
+        });
+        set_ui_font_size(13., cx);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(250.));
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            nav_panel.toggle_threads(window, cx)
+        });
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(38.));
+        set_ui_font_size(26., cx);
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            nav_panel.toggle_threads(window, cx)
+        });
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(500.));
     }
 
     #[gpui::test]

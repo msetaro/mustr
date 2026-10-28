@@ -1,4 +1,4 @@
-use crate::{palette, tokens};
+use crate::{palette, tokens, tokens::scaled};
 use gpui::{
     App, ElementId, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
     RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
@@ -74,7 +74,7 @@ impl RenderOnce for SegmentedControl {
             .flex_none()
             .border(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
-            .rounded(tokens::CONTROL_RADIUS)
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .overflow_hidden()
             .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
             .children(
@@ -87,8 +87,8 @@ impl RenderOnce for SegmentedControl {
                         div()
                             .id(("segment", index))
                             .debug_selector(move || format!("segment-{label}"))
-                            .px(px(8.))
-                            .py(px(1.))
+                            .px(scaled(px(8.)))
+                            .py(scaled(px(1.)))
                             .whitespace_nowrap()
                             .map(|this| {
                                 if is_selected {

@@ -2,16 +2,23 @@
 //! connection, and the window controls.
 //!
 //! Zed's `title_bar` crate is collab-centric (sign-in, calls, project and branch pickers), so
-//! mustr wraps `PlatformTitleBar` directly, the way `TitleBar` does in
-//! `crates/title_bar/src/title_bar.rs`. `PlatformTitleBar`
-//! (`crates/platform_title_bar/src/platform_title_bar.rs`) handles each platform:
+//! mustr draws the bar the way Zed's `PlatformTitleBar`
+//! (`crates/platform_title_bar/src/platform_title_bar.rs`) does, copied in [`MustrTitleBar`]'s
+//! `render`, so that the bar's height scales with `ui_font_size` like the rest of mustr. Zed's
+//! bar is `1.75` rems tall with a 34px minimum, which is 34px at mustr's design size (13px) but
+//! only 45.5px, not 68, at twice that. Per platform:
 //! - On Linux, it draws the client-side window controls and the window menu, and double-click
 //!   maximizes.
-//! - On macOS, it draws no controls and leaves room on the left for the traffic lights, which
-//!   `build_window_options` places at (9, 9). Double-click does what the user chose in System
-//!   Settings (zoom, minimize, or nothing).
+//! - On macOS, it draws no controls and leaves room on the left for the traffic lights, which are
+//!   native and don't scale. `build_window_options` places them at the left, vertically centered
+//!   in the bar ([`traffic_light_position`]), and the bar moves them when a zoom changes its
+//!   height. Double-click does what the user chose in System Settings (zoom, minimize, or
+//!   nothing).
 //! - Everywhere, dragging the empty parts of the bar moves the window. mustr's window options set
 //!   `app_owns_titlebar_drag`, so on macOS this drag is the app's, not AppKit's.
+//! - With Zed's `use_system_window_tabs` setting on, mustr uses `PlatformTitleBar` itself, which
+//!   draws the macOS window tabs under the bar (`SystemWindowTabs` is private to its crate), at
+//!   Zed's height.
 //!
 //! The tabs replace Zed's pane tab bar, which mustr's default settings hide
 //! (`tab_bar.show: false`). They show the items of the workspace's active pane, and switch and
@@ -24,17 +31,57 @@ use crate::{
     t3_engine::T3Mode,
 };
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, Hsla, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, TaskExt as _, WeakEntity, Window, WindowButtonLayout, div, px,
+    AnyElement, App, AppContext as _, Context, Decorations, Entity, Hsla, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement as _, Pixels, Point, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, TaskExt as _, WeakEntity, Window,
+    WindowButtonLayout, WindowControlArea, div, point, px,
 };
-use mustr_ui::{Chip, WindowTab, kbds_for_action, tokens};
-use platform_title_bar::PlatformTitleBar;
+use mustr_ui::{Chip, WindowTab, kbds_for_action, tokens, tokens::scaled};
+use platform_title_bar::{
+    PlatformTitleBar, render_left_window_controls, render_right_window_controls,
+};
 use review::ReviewView;
 use settings::{RegisterSetting, Settings, SettingsContent};
 use theme::ActiveTheme as _;
-use ui::{FluentBuilder as _, Tooltip, h_flex};
-use workspace::{Pane, SaveIntent, Workspace};
+use theme_settings::ThemeSettings;
+use ui::{FluentBuilder as _, PlatformStyle, Tooltip, h_flex, utils::TRAFFIC_LIGHT_PADDING};
+use workspace::{Pane, SaveIntent, Workspace, WorkspaceSettings};
+
+/// The title bar's height at mustr's design size, and its minimum: Zed's minimum
+/// (`platform_title_bar_height` in `crates/ui/src/utils/constants.rs`), which fits the traffic
+/// lights.
+const TITLE_BAR_HEIGHT: Pixels = px(34.);
+
+/// Where Zed places the traffic lights in its 34px title bar (`build_window_options` in
+/// `crates/zed/src/zed.rs`): 9px from the left, and vertically centered.
+const TRAFFIC_LIGHT_INSET: Pixels = px(9.);
+
+/// The title bar's height at `ui_font_size` `font_size`: [`TITLE_BAR_HEIGHT`], scaled.
+///
+/// With system window tabs on, mustr uses Zed's bar (see the module docs), so it's Zed's height.
+/// On Windows it's Zed's fixed height too, which Windows' window frame expects.
+fn title_bar_height(font_size: Pixels, cx: &App) -> Pixels {
+    if cfg!(target_os = "windows") {
+        px(32.)
+    } else if WorkspaceSettings::get_global(cx).use_system_window_tabs {
+        (1.75 * font_size).max(TITLE_BAR_HEIGHT)
+    } else {
+        scaled(TITLE_BAR_HEIGHT)
+            .to_pixels(font_size)
+            .max(TITLE_BAR_HEIGHT)
+    }
+}
+
+/// Where the macOS traffic lights go: at Zed's spot, moved down by half of what the title bar
+/// grew, so they stay vertically centered in it. They're native, so they don't scale; they stay
+/// 9px from the left, inside the fixed room the bar leaves them (`TRAFFIC_LIGHT_PADDING`).
+pub fn traffic_light_position(cx: &App) -> Point<Pixels> {
+    let height = title_bar_height(ThemeSettings::get_global(cx).ui_font_size(cx), cx);
+    point(
+        TRAFFIC_LIGHT_INSET,
+        TRAFFIC_LIGHT_INSET + (height - TITLE_BAR_HEIGHT) / 2.,
+    )
+}
 
 pub fn init(cx: &mut App) {
     PlatformTitleBar::init(cx);
@@ -69,7 +116,10 @@ impl Settings for ButtonLayoutSetting {
 }
 
 pub struct MustrTitleBar {
+    /// Zed's title bar, used only with system window tabs on (see the module docs).
     platform_title_bar: Entity<PlatformTitleBar>,
+    /// Whether a press on the bar may start moving the window. Copied from `PlatformTitleBar`.
+    should_move: bool,
     connection: Entity<T3Connection>,
     workspace: WeakEntity<Workspace>,
     /// The pane whose items are shown as tabs: the workspace's active pane.
@@ -105,14 +155,35 @@ impl MustrTitleBar {
                 }
             }),
         ];
+        #[cfg(target_os = "macos")]
+        let subscriptions = {
+            let mut subscriptions = subscriptions;
+            subscriptions.push(Self::keep_traffic_lights_centered(window, cx));
+            subscriptions
+        };
         Self {
             platform_title_bar: cx.new(|cx| PlatformTitleBar::new("mustr-title-bar", cx)),
+            should_move: false,
             connection,
             workspace: workspace.downgrade(),
             _pane_subscriptions: Self::watch_pane(&pane, cx),
             pane,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Moves the traffic lights when a zoom (or the system window tabs setting) changes the title
+    /// bar's height. `build_window_options` places them for the height a window opens with.
+    #[cfg(target_os = "macos")]
+    fn keep_traffic_lights_centered(window: &mut Window, cx: &mut Context<Self>) -> Subscription {
+        let mut position = traffic_light_position(cx);
+        cx.observe_global_in::<settings::SettingsStore>(window, move |_, window, cx| {
+            let new_position = traffic_light_position(cx);
+            if new_position != position {
+                position = new_position;
+                window.set_traffic_light_position(position);
+            }
+        })
     }
 
     /// Re-renders when the pane's items, active item, or item titles change.
@@ -179,9 +250,9 @@ impl MustrTitleBar {
         div()
             .id("title-bar-new-tab")
             .flex_none()
-            .px(px(8.))
-            .py(px(1.))
-            .rounded(tokens::CONTROL_RADIUS)
+            .px(scaled(px(8.)))
+            .py(scaled(px(1.)))
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .text_color(palette.text_muted.hsla())
             .text_size(tokens::text_size(tokens::TEXT_SIZE_LARGE))
             .cursor_pointer()
@@ -210,11 +281,11 @@ impl MustrTitleBar {
         h_flex()
             .id("title-bar-search")
             .flex_none()
-            .w(px(220.))
-            .gap(px(8.))
-            .px(px(8.))
-            .py(px(2.))
-            .rounded(tokens::CONTROL_RADIUS)
+            .w(scaled(px(220.)))
+            .gap(scaled(px(8.)))
+            .px(scaled(px(8.)))
+            .py(scaled(px(2.)))
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .border(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .bg(palette.background.hsla())
@@ -330,7 +401,7 @@ impl Render for MustrTitleBar {
             h_flex()
                 .id("title-bar-tabs")
                 .min_w_0()
-                .gap(px(4.))
+                .gap(scaled(px(4.)))
                 .overflow_x_scroll()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .children(self.render_tabs(cx))
@@ -340,17 +411,210 @@ impl Render for MustrTitleBar {
                 .flex_none()
                 .pl_2()
                 .pr_1()
-                .gap(px(8.))
+                .gap(scaled(px(8.)))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(self.render_search_box(window, cx))
                 .child(self.render_connection_status(cx))
                 .into_any_element(),
         ];
         let button_layout = ButtonLayoutSetting::get_global(cx).0;
-        self.platform_title_bar.update(cx, |title_bar, _| {
-            title_bar.set_button_layout(button_layout);
-            title_bar.set_children(children);
+        if WorkspaceSettings::get_global(cx).use_system_window_tabs {
+            self.platform_title_bar.update(cx, |title_bar, _| {
+                title_bar.set_button_layout(button_layout);
+                title_bar.set_children(children);
+            });
+            return self.platform_title_bar.clone().into_any_element();
+        }
+        self.render_bar(children, button_layout, window, cx)
+            .into_any_element()
+    }
+}
+
+impl MustrTitleBar {
+    /// Copied from `PlatformTitleBar`'s `render` (`crates/platform_title_bar/src/
+    /// platform_title_bar.rs`), with mustr's height and without Zed's threads sidebar, which
+    /// mustr leaves out.
+    fn render_bar(
+        &mut self,
+        children: [AnyElement; 2],
+        button_layout: Option<WindowButtonLayout>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let platform_style = PlatformStyle::platform();
+        let supported_controls = window.window_controls();
+        let decorations = window.window_decorations();
+        let height = title_bar_height(window.rem_size(), cx);
+        // `PlatformTitleBar::effective_button_layout`.
+        let button_layout = if platform_style == PlatformStyle::Linux
+            && matches!(decorations, Decorations::Client { .. })
+        {
+            button_layout.or_else(|| cx.button_layout())
+        } else {
+            None
+        };
+        // `PlatformTitleBar::title_bar_color`.
+        let colors = cx.theme().colors();
+        let titlebar_color = if cfg!(any(target_os = "linux", target_os = "freebsd"))
+            && !(window.is_window_active() && !self.should_move)
+        {
+            colors.title_bar_inactive_background
+        } else {
+            colors.title_bar_background
+        };
+        let fullscreen = window.is_fullscreen() || window.is_simple_fullscreen();
+
+        h_flex()
+            .id("mustr-title-bar")
+            .window_control_area(WindowControlArea::Drag)
+            .w_full()
+            .h(height)
+            .on_mouse_down_out(cx.listener(|this, _, _, _| this.should_move = false))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| this.should_move = false),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| this.should_move = true),
+            )
+            .on_mouse_move(cx.listener(|this, _, window, _| {
+                if this.should_move {
+                    this.should_move = false;
+                    window.start_window_move();
+                }
+            }))
+            .when(platform_style == PlatformStyle::Mac, |this| {
+                this.on_click(|event, window, _| {
+                    if event.click_count() == 2 {
+                        window.titlebar_double_click();
+                    }
+                })
+            })
+            .when(
+                platform_style == PlatformStyle::Linux
+                    && supported_controls.maximize
+                    && window.is_resizable(),
+                |this| {
+                    this.on_click(|event, window, _| {
+                        if event.click_count() == 2 {
+                            window.zoom_window();
+                        }
+                    })
+                },
+            )
+            .map(|this| {
+                if fullscreen {
+                    this.pl_2()
+                } else if platform_style == PlatformStyle::Mac {
+                    // The traffic lights don't scale, so neither does their room.
+                    this.pl(px(TRAFFIC_LIGHT_PADDING))
+                } else if let Some(controls) = render_left_window_controls(
+                    button_layout,
+                    Box::new(workspace::CloseWindow),
+                    window,
+                ) {
+                    this.child(controls)
+                } else {
+                    this.pl_2()
+                }
+            })
+            .map(|this| match decorations {
+                Decorations::Server => this,
+                Decorations::Client { tiling, .. } => this
+                    .when(!(tiling.top || tiling.right), |this| {
+                        this.rounded_tr(theme::CLIENT_SIDE_DECORATION_ROUNDING)
+                    })
+                    .when(!(tiling.top || tiling.left), |this| {
+                        this.rounded_tl(theme::CLIENT_SIDE_DECORATION_ROUNDING)
+                    })
+                    .mt(-theme::CLIENT_SIDE_DECORATION_BORDER)
+                    .mb(-theme::CLIENT_SIDE_DECORATION_BORDER)
+                    .border(theme::CLIENT_SIDE_DECORATION_BORDER)
+                    .border_color(titlebar_color),
+            })
+            .bg(titlebar_color)
+            .content_stretch()
+            .child(
+                div()
+                    .id("mustr-title-bar-content")
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .justify_between()
+                    .overflow_x_hidden()
+                    .w_full()
+                    .children(children),
+            )
+            .when(!fullscreen, |this| {
+                let this = this.children(render_right_window_controls(
+                    button_layout,
+                    Box::new(workspace::CloseWindow),
+                    window,
+                ));
+                if platform_style == PlatformStyle::Linux
+                    && matches!(decorations, Decorations::Client { .. })
+                {
+                    this.when(supported_controls.window_menu, |this| {
+                        this.on_mouse_down(MouseButton::Right, |event, window, _| {
+                            window.show_window_menu(event.position)
+                        })
+                    })
+                } else {
+                    this
+                }
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{TestAppContext, UpdateGlobal as _};
+    use settings::SettingsStore;
+
+    fn set_settings(ui_font_size: f32, system_window_tabs: bool, cx: &mut App) {
+        SettingsStore::update_global(cx, |store, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings.theme.ui_font_size = Some(ui_font_size.into());
+                settings.workspace.use_system_window_tabs = Some(system_window_tabs);
+            });
         });
-        self.platform_title_bar.clone()
+    }
+
+    /// The bar is 34px, as Zed's, at mustr's design size, and grows with `ui_font_size`. The
+    /// traffic lights stay 9px from the left and move down by half of what it grew, so they stay
+    /// centered.
+    #[gpui::test]
+    fn the_traffic_lights_stay_centered_as_the_bar_grows(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            for (ui_font_size, system_window_tabs, height, top) in [
+                (13., false, 34., 9.),
+                (26., false, 68., 26.),
+                (19.5, false, 51., 17.5),
+                // Smaller than mustr's design size: Zed's minimum height, and Zed's position.
+                (10., false, 34., 9.),
+                // Zed's own bar, which draws the system window tabs: 1.75 rems, at least 34px.
+                (13., true, 34., 9.),
+                (26., true, 45.5, 14.75),
+            ] {
+                set_settings(ui_font_size, system_window_tabs, cx);
+                if cfg!(not(target_os = "windows")) {
+                    assert_eq!(
+                        title_bar_height(px(ui_font_size), cx),
+                        px(height),
+                        "{ui_font_size}px, system window tabs {system_window_tabs}"
+                    );
+                    assert_eq!(
+                        traffic_light_position(cx),
+                        point(px(9.), px(top)),
+                        "{ui_font_size}px, system window tabs {system_window_tabs}"
+                    );
+                }
+            }
+        });
     }
 }

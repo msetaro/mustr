@@ -15,7 +15,7 @@ use gpui::{
     App, Entity, EventEmitter, FocusHandle, Focusable, Global, PathPromptOptions, Subscription,
     Task, WeakEntity,
 };
-use mustr_ui::{MustrIcon, Pill, SegmentedControl, tokens};
+use mustr_ui::{MustrIcon, Pill, SegmentedControl, tokens, tokens::scaled};
 use review::ReviewScope;
 use std::{
     path::{Path, PathBuf},
@@ -817,7 +817,7 @@ impl HomeView {
                 div()
                     .px_2()
                     .py_1()
-                    .rounded(tokens::CORNER_RADIUS / 2.)
+                    .rounded(scaled(tokens::CORNER_RADIUS / 2.))
                     .bg(colors.editor_background)
                     .child(
                         Label::new(t3_connection::pairing_command())
@@ -837,7 +837,7 @@ impl HomeView {
                             .flex_1()
                             .px_2()
                             .py_1()
-                            .rounded(tokens::CORNER_RADIUS / 2.)
+                            .rounded(scaled(tokens::CORNER_RADIUS / 2.))
                             .border(tokens::BORDER_WIDTH)
                             .border_color(colors.border)
                             .bg(colors.editor_background)
@@ -1013,7 +1013,7 @@ impl HomeView {
             .gap_3()
             .px_2()
             .py_1p5()
-            .rounded(tokens::CORNER_RADIUS / 2.)
+            .rounded(scaled(tokens::CORNER_RADIUS / 2.))
             .cursor_pointer()
             .hover(|style| style.bg(colors.element_hover))
             .on_click(open)
@@ -1080,7 +1080,7 @@ impl HomeView {
             .gap_3()
             .px_2()
             .py_1p5()
-            .rounded(tokens::CORNER_RADIUS / 2.)
+            .rounded(scaled(tokens::CORNER_RADIUS / 2.))
             .cursor_pointer()
             .hover(|style| style.bg(colors.element_hover))
             .on_click(
@@ -1468,7 +1468,7 @@ fn render_thread(index: usize, thread: &ThreadRow, cx: &mut Context<HomeView>) -
         .gap_3()
         .px_2()
         .py_1p5()
-        .rounded(tokens::CORNER_RADIUS / 2.)
+        .rounded(scaled(tokens::CORNER_RADIUS / 2.))
         .cursor_pointer()
         .hover(|style| style.bg(cx.theme().colors().element_hover))
         .on_click(cx.listener(move |this, _, window, cx| {
@@ -1502,7 +1502,7 @@ fn card(cx: &App) -> Div {
     v_flex()
         .w_full()
         .p_3()
-        .rounded(tokens::CORNER_RADIUS)
+        .rounded(scaled(tokens::CORNER_RADIUS))
         .border(tokens::BORDER_WIDTH)
         .border_color(colors.border)
         .bg(colors.surface_background)
@@ -1589,7 +1589,7 @@ impl Render for HomeView {
                     .child(
                         v_flex()
                             .w_full()
-                            .max_w(px(CONTENT_MAX_WIDTH))
+                            .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                             .mx_auto()
                             .px_6()
                             .py_6()

@@ -1,4 +1,4 @@
-use crate::{components::Kbd, palette, tokens};
+use crate::{components::Kbd, palette, tokens, tokens::scaled};
 use gpui::{
     App, IntoElement, ParentElement as _, RenderOnce, SharedString, Styled as _, Window, div, px,
 };
@@ -28,11 +28,11 @@ impl RenderOnce for StatusHint {
         let palette = palette(cx);
         h_flex()
             .flex_none()
-            .gap(px(3.))
+            .gap(scaled(px(3.)))
             .children(self.keys.into_iter().map(Kbd::new))
             .child(
                 div()
-                    .ml(px(2.))
+                    .ml(scaled(px(2.)))
                     .text_size(tokens::text_size(tokens::TEXT_SIZE_XSMALL))
                     .text_color(palette.text_muted.hsla())
                     .child(self.label),

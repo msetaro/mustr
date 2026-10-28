@@ -1,8 +1,9 @@
 use super::*;
+use crate::tokens;
 use crate::{COLORBLIND_SAFE_THEME_NAME, DARK_THEME_NAME, LIGHT_THEME_NAME};
 use gpui::{
-    Context, IntoElement, Modifiers, ParentElement as _, Render, Styled as _, TestAppContext,
-    UpdateGlobal as _, VisualTestContext, Window, div,
+    Context, IntoElement, Modifiers, ParentElement as _, Pixels, Render, Styled as _,
+    TestAppContext, UpdateGlobal as _, VisualTestContext, Window, div, px,
 };
 use settings::{SettingsStore, ThemeName, ThemeSelection};
 use std::{cell::RefCell, rc::Rc};
@@ -152,6 +153,43 @@ fn closing_a_window_tab_does_not_activate_it(cx: &mut TestAppContext) {
     let (log, cx) = open_gallery(cx);
     click(cx, "window-tab-close");
     assert_eq!(*log.borrow(), ["close"]);
+}
+
+/// mustr's components are drawn in rems of `ui_font_size` (`tokens::scaled`), so at twice the
+/// font size each one is twice as big, as when a web page zooms. Line heights round to whole
+/// pixels and hairline borders stay 1px, so allow a pixel or two.
+#[gpui::test]
+fn components_scale_with_the_ui_font_size(cx: &mut TestAppContext) {
+    init_test(cx);
+    let (_, cx) = open_gallery(cx);
+    let selectors = [
+        "segment-Unified",
+        "segment-Split",
+        "split-button-main",
+        "split-button-menu",
+        "window-tab-close",
+    ];
+    let mut measure = |rem_size: Pixels| {
+        cx.update(|window, _| {
+            window.set_rem_size(rem_size);
+            window.refresh();
+        });
+        cx.run_until_parked();
+        selectors.map(|selector| cx.debug_bounds(selector).unwrap())
+    };
+    let small = measure(tokens::UI_FONT_SIZE);
+    let large = measure(tokens::UI_FONT_SIZE * 2.);
+    for ((selector, small), large) in selectors.iter().zip(small).zip(large) {
+        for (what, small, large) in [
+            ("width", small.size.width, large.size.width),
+            ("height", small.size.height, large.size.height),
+        ] {
+            assert!(
+                (large - small * 2.).abs() <= px(2.),
+                "{selector}'s {what} is {small:?} at 13px and {large:?} at 26px"
+            );
+        }
+    }
 }
 
 #[test]

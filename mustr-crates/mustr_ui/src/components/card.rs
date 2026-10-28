@@ -1,4 +1,4 @@
-use crate::{palette, tokens};
+use crate::{palette, tokens, tokens::scaled};
 use gpui::{
     AnyElement, App, IntoElement, ParentElement, Refineable as _, RenderOnce, StyleRefinement,
     Styled, Window, div, px,
@@ -39,9 +39,9 @@ impl RenderOnce for Card {
         let mut card = div()
             .flex()
             .flex_col()
-            .px(px(10.))
-            .py(px(8.))
-            .rounded(tokens::CORNER_RADIUS)
+            .px(scaled(px(10.)))
+            .py(scaled(px(8.)))
+            .rounded(scaled(tokens::CORNER_RADIUS))
             .border(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .bg(palette.surface.hsla());

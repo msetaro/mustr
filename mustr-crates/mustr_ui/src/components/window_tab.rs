@@ -1,4 +1,4 @@
-use crate::{components::ClickHandler, palette, tokens};
+use crate::{components::ClickHandler, palette, tokens, tokens::scaled};
 use gpui::{
     App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, MouseButton,
     ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _,
@@ -62,11 +62,11 @@ impl RenderOnce for WindowTab {
         h_flex()
             .id(self.id)
             .flex_none()
-            .max_w(px(240.))
-            .gap(px(8.))
-            .px(px(10.))
-            .py(px(3.))
-            .rounded(tokens::CONTROL_RADIUS)
+            .max_w(scaled(px(240.)))
+            .gap(scaled(px(8.)))
+            .px(scaled(px(10.)))
+            .py(scaled(px(3.)))
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .border(tokens::BORDER_WIDTH)
             .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
             .whitespace_nowrap()
@@ -98,8 +98,8 @@ impl RenderOnce for WindowTab {
                         .id("close")
                         .debug_selector(|| "window-tab-close".into())
                         .flex_none()
-                        .px(px(2.))
-                        .rounded(tokens::KBD_RADIUS)
+                        .px(scaled(px(2.)))
+                        .rounded(scaled(tokens::KBD_RADIUS))
                         .opacity(0.6)
                         .cursor_pointer()
                         .hover(|style| style.opacity(1.).bg(palette.border.hsla()))

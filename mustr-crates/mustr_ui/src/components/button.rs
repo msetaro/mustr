@@ -1,4 +1,4 @@
-use crate::{components::ClickHandler, palette, tokens, tokens::Palette};
+use crate::{components::ClickHandler, palette, tokens, tokens::Palette, tokens::scaled};
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _,
@@ -106,7 +106,7 @@ impl RenderOnce for TextButton {
         button_frame(self.style, &colors)
             .child(
                 clickable_part(self.id, &colors, self.disabled, self.tooltip, self.on_click)
-                    .px(px(10.))
+                    .px(scaled(px(10.)))
                     .child(content),
             )
             .when(self.disabled, |this| this.opacity(0.5))
@@ -196,8 +196,8 @@ impl RenderOnce for SplitButton {
             .child(
                 clickable_part(self.id, &colors, self.disabled, self.tooltip, self.on_click)
                     .debug_selector(|| "split-button-main".into())
-                    .pl(px(10.))
-                    .pr(px(8.))
+                    .pl(scaled(px(10.)))
+                    .pr(scaled(px(8.)))
                     .child(content),
             )
             .child(div().w(tokens::BORDER_WIDTH).h_full().bg(colors.subtle))
@@ -210,7 +210,7 @@ impl RenderOnce for SplitButton {
                     self.on_menu_click,
                 )
                 .debug_selector(|| "split-button-menu".into())
-                .px(px(6.))
+                .px(scaled(px(6.)))
                 .child("▾"),
             )
             .when(self.disabled, |this| this.opacity(0.5))
@@ -221,7 +221,7 @@ fn button_frame(style: ButtonStyle, colors: &ButtonColors) -> gpui::Div {
     h_flex()
         .flex_none()
         .items_stretch()
-        .rounded(tokens::CONTROL_RADIUS)
+        .rounded(scaled(tokens::CONTROL_RADIUS))
         .border(tokens::BORDER_WIDTH)
         .border_color(colors.border)
         .bg(colors.background)
@@ -244,9 +244,9 @@ fn button_content(
         .when_some(count, |this, count| {
             this.child(
                 div()
-                    .ml(px(5.))
-                    .px(px(5.))
-                    .rounded(px(8.))
+                    .ml(scaled(px(5.)))
+                    .px(scaled(px(5.)))
+                    .rounded(scaled(px(8.)))
                     .bg(colors.subtle)
                     .text_size(tokens::text_size(tokens::TEXT_SIZE_TINY))
                     .child(count),
@@ -265,7 +265,7 @@ fn clickable_part(
     let hover_background = colors.hover_background;
     h_flex()
         .id(id)
-        .py(px(3.))
+        .py(scaled(px(3.)))
         .when_some(tooltip, |this, tooltip| {
             this.tooltip(Tooltip::text(tooltip))
         })
