@@ -164,6 +164,7 @@ fn load_default_keymap(cx: &mut App) {
     // WP4, ship the work:
     // WP5, scheduled tasks:
     // WP6, terminals and worktrees:
+    mustr_bindings.extend(crate::terminal_panel::key_bindings());
     for key_binding in &mut mustr_bindings {
         key_binding.set_meta(KeybindSource::Default.meta());
     }

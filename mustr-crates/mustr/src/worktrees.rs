@@ -1970,6 +1970,7 @@ pub(crate) mod tests {
             theme_settings::init(theme::LoadThemes::JustBase, cx);
             thread_chat::set_backend(backend, cx);
             init(cx);
+            crate::terminal_panel::init(cx);
             cx.set_global(LocalFolders(if local { |_| true } else { |_| false }));
         });
         let fs = project::FakeFs::new(cx.executor());

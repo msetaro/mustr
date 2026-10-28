@@ -33,6 +33,7 @@ mod zed_services;
 // WP4, ship the work:
 // WP5, scheduled tasks:
 // WP6, terminals and worktrees:
+mod terminal_panel;
 mod worktrees;
 
 use anyhow::{Context as _, Result};
@@ -443,4 +444,5 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     // WP5, scheduled tasks:
     // WP6, terminals and worktrees:
     worktrees::init(cx);
+    terminal_panel::init(cx);
 }
