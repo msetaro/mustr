@@ -705,6 +705,9 @@ struct FakeBackend {
     refused_commands: Mutex<Vec<String>>,
     /// The relative URLs `fetch_asset` was asked for.
     fetched_assets: Mutex<Vec<String>>,
+    /// Why calls that read files on T3's machine are refused, as for a pairing without
+    /// `filesystem:read`.
+    files_blocked: Mutex<Option<String>>,
 }
 
 impl FakeBackend {
@@ -905,6 +908,13 @@ impl ThreadBackend for FakeBackend {
     fn fetch_asset(&self, relative_url: &str) -> BoxFuture<'static, Result<Vec<u8>>> {
         self.fetched_assets.lock().push(relative_url.to_string());
         ready(Ok(composer_and_timeline::png(4, 3)))
+    }
+
+    fn blocked_reason(&self, access: Access) -> Option<String> {
+        match access {
+            Access::FilesystemRead => self.files_blocked.lock().clone(),
+            _ => None,
+        }
     }
 }
 

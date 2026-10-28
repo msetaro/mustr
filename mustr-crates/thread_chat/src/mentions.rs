@@ -46,7 +46,7 @@ use std::{
 use t3_api::types::{
     OrchestrationMessageContext, OrchestrationMessageContextVersion,
     OrchestrationV2AppThreadLineageRelationshipToParent, OrchestrationV2ThreadShell,
-    PullRequestListInput, PullRequestListState,
+    ProjectSearchEntriesInput, PullRequestListInput, PullRequestListState,
 };
 use ui::{
     Color, Icon, IconName, IconSize, Label, LabelCommon as _, LabelSize, Tooltip, prelude::*,
@@ -66,6 +66,9 @@ const PULL_REQUEST_RESULT_LIMIT: usize = 12;
 const PULL_REQUEST_QUERY_DELAY: Duration = Duration::from_millis(180);
 /// The most files and folders mustr indexes in one folder (T3's `WORKSPACE_INDEX_MAX_ENTRIES`).
 const PATH_INDEX_MAX_ENTRIES: usize = 25_000;
+/// How long `@` waits for typing to pause before it searches T3's machine (T3's
+/// `PROJECT_PATH_SEARCH_DEBOUNCE_MS`).
+const REMOTE_PATH_QUERY_DELAY: Duration = Duration::from_millis(120);
 /// How long a folder's index is reused before a new `@` reads the folder again.
 const PATH_INDEX_TTL: Duration = Duration::from_secs(30);
 /// How long T3's config (its agents' commands and skills) is reused.
@@ -1097,7 +1100,6 @@ pub(crate) struct ComposerMenu {
     pub(crate) note: Option<SharedString>,
     scroll: ScrollHandle,
     /// The folder `@` searches, its index, and when it was read.
-    folder: Folder,
     paths: Option<(PathBuf, Arc<PathIndex>, Instant)>,
     indexing: Option<(PathBuf, Task<()>)>,
     path_error: Option<SharedString>,
@@ -1181,14 +1183,13 @@ impl ComposerMenu {
 }
 
 /// Where a thread's files are: its worktree, or its project's checkout.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Folder {
     /// On this machine, so mustr searches it itself.
     Local(PathBuf),
     /// On the machine T3 runs on.
     Remote(String),
     /// Not known yet, or the thread has none.
-    #[default]
     Unknown,
 }
 
@@ -1507,13 +1508,19 @@ impl ThreadView {
             }));
         }
         let folder = self.mention_folder(cx);
-        self.composer_state.menu.folder = folder.clone();
         self.find_thread_mentions(cx);
         let query = trigger.query.trim().to_string();
         let Folder::Local(root) = folder else {
-            let menu = &mut self.composer_state.menu;
-            menu.path_items.clear();
-            menu.search = None;
+            match folder {
+                Folder::Remote(cwd) if !query.is_empty() => {
+                    self.search_remote_paths(cwd, query, cx)
+                }
+                _ => {
+                    let menu = &mut self.composer_state.menu;
+                    menu.path_items.clear();
+                    menu.search = None;
+                }
+            }
             self.show_mentions(cx);
             return;
         };
@@ -1584,6 +1591,59 @@ impl ThreadView {
         self.show_mentions(cx);
     }
 
+    /// Searches the folder on T3's machine (`projects.searchEntries`), for a thread whose folder
+    /// isn't on this one. It needs the `filesystem:read` grant; without it, `@` says why.
+    fn search_remote_paths(&mut self, cwd: String, query: String, cx: &mut Context<Self>) {
+        let blocked = self.backend.blocked_reason(Access::FilesystemRead);
+        let menu = &mut self.composer_state.menu;
+        if let Some(reason) = blocked {
+            menu.path_error = Some(
+                format!(
+                    "This thread's files are on T3's machine, so only threads are searched. \
+                     {reason}"
+                )
+                .into(),
+            );
+            menu.path_items.clear();
+            menu.search = None;
+            return;
+        }
+        let input = ProjectSearchEntriesInput {
+            cwd,
+            image_only: None,
+            kind: None,
+            limit: PATH_RESULT_LIMIT as i64,
+            query,
+        };
+        let backend = self.backend.clone();
+        menu.search = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(REMOTE_PATH_QUERY_DELAY)
+                .await;
+            let found = search_remote_entries(backend.as_ref(), input).await;
+            this.update(cx, |this, cx| {
+                let menu = &mut this.composer_state.menu;
+                menu.search = None;
+                match found {
+                    Ok(entries) => {
+                        menu.path_error = None;
+                        menu.path_items = entries.into_iter().map(MenuItem::Path).collect();
+                    }
+                    Err(error) => {
+                        log::warn!("couldn't search the files on T3's machine: {error:#}");
+                        menu.path_error = Some(
+                            format!("Couldn't search the files on T3's machine: {error:#}").into(),
+                        );
+                        menu.path_items.clear();
+                    }
+                }
+                this.show_mentions(cx);
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
     /// The threads `@` finds, once T3's environment id is known: a thread's record needs it.
     fn find_thread_mentions(&mut self, cx: &mut Context<Self>) {
         let query = self
@@ -1623,20 +1683,16 @@ impl ThreadView {
         let mut items = menu.thread_items.clone();
         items.extend(menu.path_items.iter().cloned());
         menu.loading = !query.is_empty() && (menu.indexing.is_some() || menu.search.is_some());
-        menu.note = if !items.is_empty() {
-            None
-        } else if query.is_empty() {
-            Some("Type to search files, folders, and threads.".into())
-        } else if menu.loading {
-            Some("Searching workspace files…".into())
+        menu.note = if query.is_empty() {
+            items
+                .is_empty()
+                .then(|| "Type to search files, folders, and threads.".into())
         } else if let Some(error) = &menu.path_error {
             Some(error.clone())
-        } else if let Folder::Remote(_) = menu.folder {
-            Some(
-                "This thread's files are on the machine T3 runs on, so only threads are \
-                 searched."
-                    .into(),
-            )
+        } else if !items.is_empty() {
+            None
+        } else if menu.loading {
+            Some("Searching workspace files…".into())
         } else {
             Some("No matching files or folders.".into())
         };
@@ -2214,6 +2270,42 @@ fn pull_request_state(state: &str, is_draft: bool) -> String {
     } else {
         state.to_string()
     }
+}
+
+/// Searches the files on T3's machine (`projects.searchEntries`), reading the entries
+/// leniently.
+async fn search_remote_entries(
+    backend: &dyn ThreadBackend,
+    input: ProjectSearchEntriesInput,
+) -> Result<Vec<PathEntry>> {
+    #[derive(Deserialize)]
+    struct Found {
+        #[serde(default)]
+        entries: Vec<Entry>,
+    }
+    #[derive(Deserialize)]
+    struct Entry {
+        path: String,
+        #[serde(default)]
+        kind: String,
+    }
+    let payload = serde_json::to_value(&input)?;
+    let found = backend
+        .call_raw(
+            <t3_api::rpc::ProjectsSearchEntries as t3_api::RpcMethod>::TAG,
+            payload,
+            Access::FilesystemRead,
+        )
+        .await?;
+    let found: Found = serde_json::from_value(found).context("reading projects.searchEntries")?;
+    Ok(found
+        .entries
+        .into_iter()
+        .map(|entry| PathEntry {
+            is_dir: entry.kind == "directory",
+            path: entry.path,
+        })
+        .collect())
 }
 
 /// Lists pull requests (`pullRequests.list`), reading the entries leniently.

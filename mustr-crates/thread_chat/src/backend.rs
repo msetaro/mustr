@@ -43,12 +43,15 @@ pub enum Access {
     Operate,
     /// Needs `source-control:write`: commits, pushes, pull requests, branches, and worktrees.
     SourceControlWrite,
+    /// Needs `filesystem:read`: searches the files on T3's machine, for the composer's `@` on a
+    /// thread whose folder isn't on this one. A read, so dry runs let it through.
+    FilesystemRead,
 }
 
 impl Access {
     /// Whether dry runs refuse calls that need this.
     pub fn is_write(self) -> bool {
-        self != Self::Read
+        matches!(self, Self::Operate | Self::SourceControlWrite)
     }
 }
 

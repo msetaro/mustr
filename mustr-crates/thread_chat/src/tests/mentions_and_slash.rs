@@ -567,3 +567,76 @@ async fn drafts_keep_their_mentions_when_the_thread_closes(cx: &mut TestAppConte
         json!([thread_record("env-local", "old", "Old thread")])
     );
 }
+
+#[gpui::test]
+async fn at_searches_t3s_machine_when_the_folder_isnt_here(cx: &mut TestAppContext) {
+    let backend = backend_in(None);
+    backend.raw_responses.lock().extend([
+        server_config(),
+        json!({
+            "entries": [
+                { "path": "src/webhooks/dispatcher.rs", "kind": "file" },
+                { "path": "src/webhooks", "kind": "directory" }
+            ],
+            "truncated": false
+        }),
+    ]);
+    cx.update(|cx| crate::set_local_folders(|_| false, cx));
+    let (view, cx) = open_view(backend.clone(), Some(THREAD), cx);
+
+    type_in(&view, "@webh", cx);
+    // T3 is asked once typing pauses, with the `filesystem:read` grant.
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(150));
+    cx.run_until_parked();
+    assert_eq!(
+        *backend.raw_calls.lock(),
+        [
+            get_config_call(),
+            RawCall {
+                tag: "projects.searchEntries".into(),
+                payload: json!({
+                    "cwd": "/tmp/worktrees/retry-backoff",
+                    "query": "webh",
+                    "limit": 80
+                }),
+                access: Access::FilesystemRead,
+            }
+        ]
+    );
+    assert_eq!(
+        menu_labels(&view, cx),
+        ["src/webhooks/dispatcher.rs", "src/webhooks"]
+    );
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+    assert_eq!(
+        composer_text(&view, cx),
+        "[dispatcher.rs](src/webhooks/dispatcher.rs) "
+    );
+}
+
+#[gpui::test]
+async fn at_says_why_it_cant_search_t3s_machine(cx: &mut TestAppContext) {
+    let backend = backend_in(None);
+    backend.raw_responses.lock().push(server_config());
+    *backend.files_blocked.lock() =
+        Some("mustr's pairing with T3 can't read files on T3's machine.".into());
+    cx.update(|cx| crate::set_local_folders(|_| false, cx));
+    let (view, cx) = open_view(backend.clone(), Some(THREAD), cx);
+
+    type_in(&view, "@webh", cx);
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(150));
+    cx.run_until_parked();
+    assert_eq!(*backend.raw_calls.lock(), [get_config_call()]);
+    assert_eq!(menu_labels(&view, cx), Vec::<String>::new());
+    assert_eq!(
+        view.read_with(cx, |view, _| view.composer_state.menu.note.clone()),
+        Some(
+            "This thread's files are on T3's machine, so only threads are searched. mustr's \
+             pairing with T3 can't read files on T3's machine."
+                .into()
+        )
+    );
+}

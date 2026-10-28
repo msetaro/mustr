@@ -36,6 +36,7 @@ pub enum Scope {
     SourceControlWrite,
     TerminalRead,
     TerminalOperate,
+    FilesystemRead,
 }
 
 impl Scope {
@@ -46,6 +47,7 @@ impl Scope {
             Scope::SourceControlWrite => "source-control:write",
             Scope::TerminalRead => "terminal:read",
             Scope::TerminalOperate => "terminal:operate",
+            Scope::FilesystemRead => "filesystem:read",
         }
     }
 }
@@ -247,6 +249,7 @@ mod tests {
             Scope::SourceControlWrite,
             Scope::TerminalRead,
             Scope::TerminalOperate,
+            Scope::FilesystemRead,
         ] {
             assert!(
                 t3_api::types::AuthEnvironmentScope::KNOWN_VALUES.contains(&scope.as_str()),

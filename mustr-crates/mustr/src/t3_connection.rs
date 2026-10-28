@@ -4,8 +4,9 @@
 //! socket open.
 //!
 //! mustr asks for exactly [`SCOPES`]: reading orchestration (pull requests, threads), driving
-//! agents (messages, approvals, new threads), and writing to pull requests (comments, reviews,
-//! viewed marks). A stored token that lacks one of them is replaced by pairing again.
+//! agents (messages, approvals, new threads), writing to pull requests (comments, reviews,
+//! viewed marks), and reading files on T3's machine (the composer's `@`, for a thread whose
+//! folder isn't on this one). A stored token that lacks one of them is replaced by pairing again.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use futures::{AsyncReadExt as _, FutureExt as _, future::BoxFuture};
@@ -47,10 +48,11 @@ pub const SERVER_URL_ENV: &str = "MUSTR_T3_SERVER";
 pub const CREDENTIALS_FILE_ENV: &str = "MUSTR_CREDENTIALS_FILE";
 
 /// The scopes mustr asks T3 for. Never `access:*` or `relay:*`.
-pub const SCOPES: [Scope; 3] = [
+pub const SCOPES: [Scope; 4] = [
     Scope::OrchestrationRead,
     Scope::OrchestrationOperate,
     Scope::SourceControlWrite,
+    Scope::FilesystemRead,
 ];
 const PAIRING_LABEL: &str = "mustr";
 const PAIRING_TTL: &str = "5m";
@@ -401,6 +403,20 @@ impl T3Session {
                     "mustr's pairing with T3 can't write to pull requests (it lacks {}). Pair \
                      again from the home view: {}",
                     Scope::SourceControlWrite.as_str(),
+                    pairing_command()
+                )
+            })
+    }
+
+    /// Why files on T3's machine can't be searched with this session, if they can't.
+    pub fn filesystem_blocked_reason(&self) -> Option<String> {
+        self.missing_scopes()
+            .contains(&Scope::FilesystemRead)
+            .then(|| {
+                format!(
+                    "mustr's pairing with T3 can't read files on T3's machine (it lacks {}). \
+                     Pair again from the home view: {}",
+                    Scope::FilesystemRead.as_str(),
                     pairing_command()
                 )
             })
@@ -1923,28 +1939,34 @@ mod tests {
     }
 
     #[test]
-    fn mustr_asks_for_reading_operating_agents_and_pull_request_writes_only() {
+    fn mustr_asks_for_reading_operating_agents_pull_request_writes_and_file_reads_only() {
         assert_eq!(
             SCOPES.map(Scope::as_str),
             [
                 "orchestration:read",
                 "orchestration:operate",
-                "source-control:write"
+                "source-control:write",
+                "filesystem:read"
             ]
         );
         assert_eq!(
             pairing_command(),
             "t3 auth pairing create --scope orchestration:read --scope orchestration:operate \
-             --scope source-control:write --label mustr"
+             --scope source-control:write --scope filesystem:read --label mustr"
         );
         assert_eq!(
             missing_scopes("orchestration:read".split_whitespace()),
-            [Scope::OrchestrationOperate, Scope::SourceControlWrite]
+            [
+                Scope::OrchestrationOperate,
+                Scope::SourceControlWrite,
+                Scope::FilesystemRead
+            ]
         );
         assert!(
             missing_scopes([
                 "source-control:write",
                 "orchestration:read",
+                "filesystem:read",
                 "orchestration:operate"
             ])
             .is_empty()
@@ -1967,10 +1989,16 @@ mod tests {
             accepted,
             scopes: scopes.map(|scopes| scopes.iter().map(|scope| scope.to_string()).collect()),
         };
-        let all = "orchestration:read orchestration:operate source-control:write";
+        let all = "orchestration:read orchestration:operate source-control:write filesystem:read";
         assert_eq!(
             stored_token_use(&check(true, None), all),
             (StoredTokenUse::Use, all.to_string())
+        );
+        // A token from before the composer's `@` searched files on T3's machine.
+        let without_files = "orchestration:read orchestration:operate source-control:write";
+        assert_eq!(
+            stored_token_use(&check(true, None), without_files).0,
+            StoredTokenUse::PairAgain
         );
         // A token from M0, paired read-only.
         assert_eq!(
@@ -2005,7 +2033,7 @@ mod tests {
 
         // What T3 0.1.1 answers for mustr's session: the write scope is only in `permissions`.
         let session = parse_session_check(
-            br#"{"authenticated":true,"auth":{},"scopes":["orchestration:read","orchestration:operate"],"permissions":["orchestration:read","orchestration:operate","source-control:write"],"sessionMethod":"bearer-access-token"}"#,
+            br#"{"authenticated":true,"auth":{},"scopes":["orchestration:read","orchestration:operate"],"permissions":["orchestration:read","orchestration:operate","source-control:write","filesystem:read"],"sessionMethod":"bearer-access-token"}"#,
         )
         .unwrap();
         assert_eq!(
@@ -2015,7 +2043,8 @@ mod tests {
                 Some(&[
                     "orchestration:read",
                     "orchestration:operate",
-                    "source-control:write"
+                    "source-control:write",
+                    "filesystem:read"
                 ])
             )
         );
