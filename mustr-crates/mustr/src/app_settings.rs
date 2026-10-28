@@ -266,7 +266,13 @@ mod tests {
         }
         // mustr's title bar shows the tabs.
         assert_eq!(merged["tab_bar"]["show"], Value::Bool(false));
-        assert_eq!(merged["ui_font_size"], Value::from(13));
+        // Twice the mockups' 13px, the size `mustr_ui::tokens::UI_FONT_SIZE` says they're
+        // drawn at.
+        assert_eq!(
+            merged["ui_font_size"].as_f64(),
+            Some(2. * f64::from(f32::from(mustr_ui::tokens::UI_FONT_SIZE)))
+        );
+        assert_eq!(merged["buffer_font_size"], merged["ui_font_size"]);
         assert_eq!(
             merged["theme"]["dark"],
             Value::from(mustr_ui::DARK_THEME_NAME)

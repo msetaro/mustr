@@ -69,7 +69,8 @@ cargo run -p mustr
   ⌘↩ sends, ⇧↩ adds a new line, and ⌘⇧↩ steers the running agent. In a review, `c` comments on
   the selected lines, ⌘↩ adds the comment, and ⎋ cancels it.
 - **Zoom.** ⌘= (or ⌘+) and ⌘- make all of mustr bigger or smaller, about 10% a step, the way a
-  browser zooms a page: text, code, and layout together. ⌘0 goes back to mustr's default size.
+  browser zooms a page: text, code, and layout together. ⌘0 goes back to mustr's default size,
+  `ui_font_size` and `buffer_font_size` 26, twice the size its designs are drawn at.
   They work wherever the focus is. A zoom changes `ui_font_size` and `buffer_font_size` in your
   settings file, by the same factor, so it lasts; ⌘0 removes both. The command palette has them
   too: "mustr: zoom in", "mustr: zoom out", and "mustr: reset zoom".
