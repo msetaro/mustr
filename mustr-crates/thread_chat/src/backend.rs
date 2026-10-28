@@ -56,7 +56,8 @@ impl Access {
 }
 
 /// The error a backend gives for an RPC the server doesn't have, such as
-/// `orchestration.getThreadFamily` on T3 0.1.1, so callers can fall back to the older way.
+/// `orchestration.getThreadFamily` on T3 0.1.1 or `server.getSettings` on the 0.1.4 nightlies,
+/// so callers can fall back to another way.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnsupportedRpc {
     pub tag: String,
@@ -64,11 +65,7 @@ pub struct UnsupportedRpc {
 
 impl std::fmt::Display for UnsupportedRpc {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "this T3 Code doesn't have {}; it's older than mustr's",
-            self.tag
-        )
+        write!(formatter, "this T3 Code doesn't have {}", self.tag)
     }
 }
 
