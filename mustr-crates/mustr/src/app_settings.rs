@@ -260,7 +260,8 @@ mod tests {
                 "Zed auto-installs the {extension} extension; turn it off in default_overrides.json"
             );
         }
-        assert_eq!(merged["tab_bar"], defaults["tab_bar"]);
+        // mustr's title bar shows the tabs.
+        assert_eq!(merged["tab_bar"]["show"], Value::Bool(false));
         assert_eq!(
             merged["theme"]["dark"],
             Value::from(mustr_ui::DARK_THEME_NAME)

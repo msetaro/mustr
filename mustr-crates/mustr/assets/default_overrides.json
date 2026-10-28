@@ -21,6 +21,10 @@
   },
   "suggest_extensions": false,
   "window_title_format": "mustr",
+  // mustr's title bar shows a tab per open item, so the panes don't.
+  "tab_bar": {
+    "show": false
+  },
   // mustr's own themes (assets/themes/mustr), registered by `mustr_ui::init`.
   "theme": {
     "mode": "dark",

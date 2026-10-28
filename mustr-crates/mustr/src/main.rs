@@ -6,6 +6,7 @@ mod data_dir;
 mod home;
 mod inbox;
 mod keymap;
+mod navigation;
 mod pull_request_review;
 mod t3_connection;
 mod themes;
