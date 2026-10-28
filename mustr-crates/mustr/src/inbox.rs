@@ -298,6 +298,7 @@ mod tests {
                 new_path: new_path.to_string(),
                 change_type,
                 binary: unavailable == Some("Binary file"),
+                hunks: Vec::new(),
             },
             old_text: old_text.map(str::to_string),
             new_text: new_text.map(str::to_string),

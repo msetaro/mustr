@@ -59,6 +59,25 @@ pub struct ChangedFile {
     pub new_path: String,
     pub change_type: ChangeType,
     pub binary: bool,
+    /// The patch's hunks. Forges accept line comments only on these lines.
+    pub hunks: Vec<PatchHunk>,
+}
+
+/// One `@@ -old_start,… +new_start,… @@` hunk of a file's patch, line by line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PatchHunk {
+    /// The 1-based base line the hunk starts at (0 when it adds lines to an empty file).
+    pub old_start: u32,
+    /// The 1-based head line the hunk starts at (0 when it deletes every line).
+    pub new_start: u32,
+    pub lines: Vec<PatchLine>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PatchLine {
+    Context,
+    Added,
+    Deleted,
 }
 
 /// A changed file with its texts. `old_text` is `None` for added files and `new_text` is
@@ -120,7 +139,7 @@ pub fn changed_files(patch: &str) -> Vec<ChangedFile> {
         let mut new_file = false;
         let mut deleted_file = false;
         let mut renamed = false;
-        let mut has_hunks = false;
+        let mut hunks = Vec::new();
         let mut binary = false;
         while let Some(next) = lines.peek() {
             if next.starts_with("diff --git ") {
@@ -146,7 +165,7 @@ pub fn changed_files(patch: &str) -> Vec<ChangedFile> {
                     new_path = strip_side_prefix(&unquote(path), "b/");
                 }
             } else if next.starts_with("@@") {
-                has_hunks = true;
+                hunks.extend(parse_hunk(next, &mut lines));
             } else if next.starts_with("Binary files ") || next == "GIT binary patch" {
                 binary = true;
             }
@@ -162,7 +181,7 @@ pub fn changed_files(patch: &str) -> Vec<ChangedFile> {
             ChangeType::New
         } else if deleted_file {
             ChangeType::Deleted
-        } else if renamed && has_hunks {
+        } else if renamed && !hunks.is_empty() {
             ChangeType::RenameChanged
         } else if renamed {
             ChangeType::RenamePure
@@ -174,9 +193,60 @@ pub fn changed_files(patch: &str) -> Vec<ChangedFile> {
             new_path,
             change_type,
             binary,
+            hunks,
         });
     }
     files
+}
+
+/// Reads a hunk's lines after its `@@` header, by the counts the header gives, so lines such as
+/// `--- x` inside the hunk aren't mistaken for headers. `None` for an unreadable header.
+fn parse_hunk<'a>(
+    header: &str,
+    lines: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>,
+) -> Option<PatchHunk> {
+    let ranges = header.strip_prefix("@@ ")?.split(" @@").next()?;
+    let (old, new) = ranges.split_once(' ')?;
+    let range = |range: &str, sign: char| -> Option<(u32, u32)> {
+        let range = range.strip_prefix(sign)?;
+        Some(match range.split_once(',') {
+            Some((start, count)) => (start.parse().ok()?, count.parse().ok()?),
+            None => (range.parse().ok()?, 1),
+        })
+    };
+    let (old_start, mut old_left) = range(old, '-')?;
+    let (new_start, mut new_left) = range(new, '+')?;
+    let mut hunk = PatchHunk {
+        old_start,
+        new_start,
+        lines: Vec::new(),
+    };
+    while old_left > 0 || new_left > 0 {
+        let Some(line) = lines.peek() else {
+            break;
+        };
+        let line = match line.as_bytes().first() {
+            Some(b'+') => PatchLine::Added,
+            Some(b'-') => PatchLine::Deleted,
+            // Some tools trim the space off empty context lines.
+            Some(b' ') | None => PatchLine::Context,
+            // `\ No newline at end of file`
+            Some(b'\\') => {
+                lines.next();
+                continue;
+            }
+            _ => break,
+        };
+        lines.next();
+        if line != PatchLine::Added {
+            old_left = old_left.saturating_sub(1);
+        }
+        if line != PatchLine::Deleted {
+            new_left = new_left.saturating_sub(1);
+        }
+        hunk.lines.push(line);
+    }
+    Some(hunk)
 }
 
 /// Fetches old and new texts for every non-binary file, a few requests at a time.
@@ -402,13 +472,21 @@ index 9999999..aaaaaaa 100644
             new_path: new.to_string(),
             change_type,
             binary,
+            hunks: Vec::new(),
         }
     }
 
     #[test]
     fn parses_every_kind_of_change() {
+        let without_hunks = changed_files(PATCH)
+            .into_iter()
+            .map(|file| ChangedFile {
+                hunks: Vec::new(),
+                ..file
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
-            changed_files(PATCH),
+            without_hunks,
             vec![
                 file("src/main.rs", "src/main.rs", ChangeType::Change, false),
                 file(
@@ -429,6 +507,92 @@ index 9999999..aaaaaaa 100644
                 file("café.txt", "café.txt", ChangeType::Change, false),
             ]
         );
+    }
+
+    #[test]
+    fn parses_hunks_line_by_line() {
+        use PatchLine::{Added, Context, Deleted};
+        let hunks = |patch: &str| {
+            changed_files(patch)
+                .into_iter()
+                .map(|file| file.hunks)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            hunks(PATCH),
+            vec![
+                vec![PatchHunk {
+                    old_start: 1,
+                    new_start: 1,
+                    lines: vec![Context, Deleted, Added, Context],
+                }],
+                vec![PatchHunk {
+                    old_start: 0,
+                    new_start: 1,
+                    lines: vec![Added],
+                }],
+                vec![PatchHunk {
+                    old_start: 1,
+                    new_start: 0,
+                    lines: vec![Deleted],
+                }],
+                vec![],
+                vec![PatchHunk {
+                    old_start: 1,
+                    new_start: 1,
+                    lines: vec![Deleted, Added],
+                }],
+                vec![],
+                vec![PatchHunk {
+                    old_start: 1,
+                    new_start: 1,
+                    lines: vec![Deleted, Added],
+                }],
+            ]
+        );
+
+        // Lines that look like headers inside a hunk, a missing newline at the end, and two
+        // hunks in one file.
+        let patch = "diff --git a/a.md b/a.md\n\
+            --- a/a.md\n\
+            +++ b/a.md\n\
+            @@ -1,2 +1,2 @@ intro\n\
+            --- a rule\n\
+            +++ a bolder rule\n\
+            \x20kept\n\
+            @@ -10 +10,2 @@\n\
+            -end\n\
+            \\ No newline at end of file\n\
+            +end\n\
+            +more\n\
+            diff --git a/b.md b/b.md\n\
+            @@ -1 +1 @@\n\
+            -x\n\
+            +y\n";
+        let files = changed_files(patch);
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.new_path.as_str())
+                .collect::<Vec<_>>(),
+            ["a.md", "b.md"]
+        );
+        assert_eq!(
+            files[0].hunks,
+            vec![
+                PatchHunk {
+                    old_start: 1,
+                    new_start: 1,
+                    lines: vec![Deleted, Added, Context],
+                },
+                PatchHunk {
+                    old_start: 10,
+                    new_start: 10,
+                    lines: vec![Deleted, Added, Added],
+                },
+            ]
+        );
+        assert_eq!(files[1].hunks.len(), 1);
     }
 
     #[test]
