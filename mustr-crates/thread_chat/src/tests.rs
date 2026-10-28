@@ -3,10 +3,12 @@
 //! payload it would send, and the tests assert those payloads exactly.
 
 use crate::{
-    backend::{ReadOnlyBackend, ThreadBackend},
+    backend::{Access, AttachmentUpload, ReadOnlyBackend, ThreadBackend, ThreadBackendExt as _},
+    composer::{SendMessage, SteerMessage},
     model::{ItemKind, ItemStatus, Row, ThreadActivity, ThreadState},
+    shell::{Shell, ThreadShells},
     sidebar::{ShellStatus, ThreadList},
-    thread_view::{SendMessage, SteerMessage, ThreadView},
+    thread_view::ThreadView,
 };
 use anyhow::{Result, anyhow};
 use futures::{
@@ -19,6 +21,7 @@ use serde_json::{Value, json};
 use settings::SettingsStore;
 use std::sync::Arc;
 use t3_api::{
+    rpc,
     tagged::{
         OrchestrationV2Command, OrchestrationV2ShellStreamItem, OrchestrationV2ThreadStreamItem,
     },
@@ -28,7 +31,7 @@ use t3_api::{
         OrchestrationV2SubscribeShellInput, OrchestrationV2SubscribeThreadInput,
         OrchestrationV2ThreadDetailSnapshot, OrchestrationV2ThreadLaunchInput,
         OrchestrationV2ThreadLaunchResult, OrchestrationV2ThreadProjection,
-        ProviderApprovalDecision, ServerProvider,
+        ProviderApprovalDecision, ServerGetConfigPayload, ServerProvider,
     },
 };
 
@@ -616,7 +619,86 @@ fn the_thread_list_follows_the_shell() {
     assert_eq!(list.sequence, 9);
 }
 
+// The app's shell.
+
+fn shell_update(sequence: i64, location: &str, thread: Value) -> OrchestrationV2ShellStreamItem {
+    serde_json::from_value(json!({
+        "kind": "thread.updated", "sequence": sequence, "location": location, "thread": thread
+    }))
+    .unwrap()
+}
+
+fn shell_removal(sequence: i64, thread_id: &str) -> OrchestrationV2ShellStreamItem {
+    serde_json::from_value(json!({
+        "kind": "thread.removed", "sequence": sequence, "location": "active", "threadId": thread_id
+    }))
+    .unwrap()
+}
+
+#[test]
+fn the_shell_keeps_t3s_records_of_active_threads() {
+    let snapshot: OrchestrationV2ShellSnapshot = serde_json::from_value(shell_json()).unwrap();
+    let mut shell = Shell::from_snapshot(&snapshot);
+    assert_eq!(shell.sequence, 7);
+    assert_eq!(shell.projects["project-1"].title, "api");
+
+    // A subagent names its parent in its lineage.
+    let mut child = shell_thread("child", "Write the tests", "running", NOW);
+    child["lineage"] = json!({
+        "rootThreadId": THREAD, "parentThreadId": THREAD, "relationshipToParent": "subagent"
+    });
+    assert!(shell.apply(shell_update(8, "active", child)));
+    assert_eq!(
+        shell.threads["child"].lineage.parent_thread_id.as_deref(),
+        Some(THREAD)
+    );
+
+    // Events the shell already has change nothing.
+    assert!(!shell.apply(shell_removal(8, THREAD)));
+    assert!(shell.threads.contains_key(THREAD));
+
+    // Archived threads leave it, as do removed ones.
+    let archived = shell_thread("old", "Old thread", "completed", NOW);
+    assert!(shell.apply(shell_update(9, "archive", archived)));
+    assert!(shell.apply(shell_removal(10, "child")));
+    assert_eq!(shell.threads.keys().collect::<Vec<_>>(), [THREAD]);
+    assert_eq!(shell.sequence, 10);
+}
+
+#[gpui::test]
+async fn the_app_follows_the_shell_once(cx: &mut TestAppContext) {
+    let backend = Arc::new(FakeBackend::default());
+    cx.update(|cx| crate::set_backend(backend, cx));
+    let shells = cx.update(ThreadShells::global);
+    cx.run_until_parked();
+    shells.read_with(cx, |shells, _| {
+        assert_eq!(
+            shells.thread(THREAD).map(|thread| thread.title.as_str()),
+            Some("Add retries to the webhook dispatcher")
+        );
+        assert_eq!(shells.error(), None);
+    });
+    let again = cx.update(ThreadShells::global);
+    assert_eq!(again.entity_id(), shells.entity_id());
+}
+
 // A recording backend.
+
+/// One call of [`ThreadBackend::call_raw`] or [`ThreadBackend::subscribe_raw`].
+#[derive(Clone, Debug, PartialEq)]
+struct RawCall {
+    tag: String,
+    payload: Value,
+    access: Access,
+}
+
+/// One [`ThreadBackend::upload`], without its progress callback.
+#[derive(Clone, Debug, PartialEq)]
+struct Upload {
+    relative_url: String,
+    mime_type: String,
+    bytes: Vec<u8>,
+}
 
 #[derive(Default)]
 struct FakeBackend {
@@ -626,6 +708,12 @@ struct FakeBackend {
     subscriptions: Mutex<Vec<OrchestrationV2SubscribeThreadInput>>,
     events: Mutex<Option<mpsc::UnboundedSender<Result<OrchestrationV2ThreadStreamItem>>>>,
     turn_items: Mutex<Vec<OrchestrationV2GetTurnItemInput>>,
+    raw_calls: Mutex<Vec<RawCall>>,
+    /// What `call_raw` answers, in order; `null` once they run out.
+    raw_responses: Mutex<Vec<Value>>,
+    /// The items each `subscribe_raw` stream yields.
+    raw_stream_items: Mutex<Vec<Value>>,
+    uploads: Mutex<Vec<Upload>>,
 }
 
 impl FakeBackend {
@@ -653,6 +741,14 @@ impl FakeBackend {
             .iter()
             .map(|command| serde_json::to_value(command).unwrap())
             .collect()
+    }
+
+    fn record_raw(&self, tag: &str, payload: Value, access: Access) {
+        self.raw_calls.lock().push(RawCall {
+            tag: tag.to_string(),
+            payload,
+            access,
+        });
     }
 }
 
@@ -766,6 +862,44 @@ impl ThreadBackend for FakeBackend {
             }))
             .map_err(Into::into),
         )
+    }
+
+    fn call_raw(
+        &self,
+        tag: &str,
+        payload: Value,
+        access: Access,
+    ) -> BoxFuture<'static, Result<Value>> {
+        self.record_raw(tag, payload, access);
+        let mut responses = self.raw_responses.lock();
+        ready(Ok(if responses.is_empty() {
+            Value::Null
+        } else {
+            responses.remove(0)
+        }))
+    }
+
+    fn subscribe_raw(
+        &self,
+        tag: &str,
+        payload: Value,
+        access: Access,
+    ) -> Result<BoxStream<'static, Result<Value>>> {
+        self.record_raw(tag, payload, access);
+        let items = self.raw_stream_items.lock().clone();
+        Ok(futures::stream::iter(items.into_iter().map(Ok)).boxed())
+    }
+
+    fn upload(&self, upload: AttachmentUpload) -> BoxFuture<'static, Result<()>> {
+        if let Some(on_progress) = &upload.on_progress {
+            on_progress(upload.bytes.len() as u64);
+        }
+        self.uploads.lock().push(Upload {
+            relative_url: upload.relative_url,
+            mime_type: upload.mime_type,
+            bytes: upload.bytes,
+        });
+        ready(Ok(()))
     }
 }
 
@@ -1160,4 +1294,216 @@ async fn idle_threads_offer_send(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("thread-send").is_some());
     assert!(cx.debug_bounds("thread-stop").is_none());
     assert!(cx.debug_bounds("thread-queue").is_none());
+}
+
+// RPCs without a method of their own on the backend.
+
+#[gpui::test]
+async fn typed_calls_and_streams_go_through_the_raw_ones(_cx: &mut TestAppContext) {
+    let recording = Arc::new(FakeBackend::default());
+    let backend: Arc<dyn ThreadBackend> = recording.clone();
+
+    recording.raw_responses.lock().push(json!({
+        "attachmentId": "attachment-1",
+        "expiresAt": 1761566400000_i64,
+        "relativeUrl": "/api/attachments/upload/token.signature"
+    }));
+    let minted = backend
+        .call::<rpc::AttachmentsCreateUploadUrl>(
+            serde_json::from_value(json!({
+                "type": "image", "name": "screenshot.png", "mimeType": "image/png", "sizeBytes": 9
+            }))
+            .unwrap(),
+            Access::Operate,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        minted.relative_url,
+        "/api/attachments/upload/token.signature"
+    );
+    assert_eq!(
+        *recording.raw_calls.lock(),
+        [RawCall {
+            tag: "attachments.createUploadUrl".into(),
+            payload: json!({
+                "type": "image", "name": "screenshot.png", "mimeType": "image/png", "sizeBytes": 9
+            }),
+            access: Access::Operate,
+        }]
+    );
+
+    // Streams decode each item with the method's types.
+    recording.raw_stream_items.lock().push(json!({
+        "kind": "thread.removed", "sequence": 9, "location": "active", "threadId": THREAD
+    }));
+    let shell_input = || OrchestrationV2SubscribeShellInput {
+        after_sequence: Some(8),
+        request_completion_marker: None,
+    };
+    let items = backend
+        .stream::<rpc::OrchestrationSubscribeShell>(shell_input(), Access::Read)
+        .unwrap()
+        .collect::<Vec<_>>()
+        .await;
+    assert!(matches!(
+        items.as_slice(),
+        [Ok(OrchestrationV2ShellStreamItem::ThreadRemoved(removed))] if removed.thread_id == THREAD
+    ));
+    assert_eq!(
+        recording.raw_calls.lock()[1],
+        RawCall {
+            tag: "orchestration.subscribeShell".into(),
+            payload: json!({ "afterSequence": 8 }),
+            access: Access::Read,
+        }
+    );
+
+    // The tables say which way a method is called.
+    assert!(
+        backend
+            .call::<rpc::OrchestrationSubscribeShell>(shell_input(), Access::Read)
+            .await
+            .is_err()
+    );
+    assert!(
+        backend
+            .stream::<rpc::ServerGetConfig>(
+                ServerGetConfigPayload(Default::default()),
+                Access::Read
+            )
+            .is_err()
+    );
+    assert_eq!(recording.raw_calls.lock().len(), 2);
+}
+
+#[gpui::test]
+async fn a_read_only_backend_refuses_raw_writes_and_uploads(_cx: &mut TestAppContext) {
+    let recording = Arc::new(FakeBackend::default());
+    let backend = ReadOnlyBackend::new(recording.clone(), "MUSTR_DRY_RUN_WRITES is set");
+
+    // Reads go through.
+    backend
+        .call_raw("server.getSettings", json!({}), Access::Read)
+        .await
+        .unwrap();
+    let _status = backend
+        .subscribe_raw("subscribeVcsStatus", json!({}), Access::Read)
+        .unwrap();
+
+    let progress = Arc::new(Mutex::new(Vec::new()));
+    let refused = [
+        backend
+            .call_raw(
+                "shell.openInEditor",
+                json!({ "cwd": "/tmp/worktrees/retry-backoff", "editor": "zed" }),
+                Access::Operate,
+            )
+            .await,
+        backend
+            .call_raw(
+                "vcs.switchRef",
+                json!({ "cwd": "/tmp/worktrees/retry-backoff", "ref": "main" }),
+                Access::SourceControlWrite,
+            )
+            .await,
+        backend
+            .subscribe_raw(
+                "git.runStackedAction",
+                json!({}),
+                Access::SourceControlWrite,
+            )
+            .map(|_| Value::Null),
+        backend
+            .upload(AttachmentUpload {
+                relative_url: "/api/attachments/upload/token.signature".into(),
+                mime_type: "image/png".into(),
+                bytes: b"png bytes".to_vec(),
+                on_progress: Some(Arc::new({
+                    let progress = progress.clone();
+                    move |sent| progress.lock().push(sent)
+                })),
+            })
+            .await
+            .map(|()| Value::Null),
+    ];
+    for result in refused {
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Not sent: MUSTR_DRY_RUN_WRITES is set."
+        );
+    }
+    assert_eq!(
+        recording
+            .raw_calls
+            .lock()
+            .iter()
+            .map(|call| call.tag.as_str())
+            .collect::<Vec<_>>(),
+        ["server.getSettings", "subscribeVcsStatus"]
+    );
+    assert!(recording.uploads.lock().is_empty());
+    assert!(progress.lock().is_empty());
+
+    assert_eq!(backend.blocked_reason(Access::Read), None);
+    for access in [Access::Operate, Access::SourceControlWrite] {
+        assert_eq!(
+            backend.blocked_reason(access).as_deref(),
+            Some("MUSTR_DRY_RUN_WRITES is set")
+        );
+    }
+}
+
+// Actions between packages.
+
+#[gpui::test]
+fn cross_package_actions_build_by_name(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        for (name, fields) in [
+            (
+                "thread_chat::OpenThreadTerminal",
+                json!({ "thread_id": THREAD }),
+            ),
+            (
+                "thread_chat::ReviewThreadChanges",
+                json!({ "thread_id": THREAD }),
+            ),
+            ("thread_chat::OpenInEditor", json!({ "thread_id": THREAD })),
+            (
+                "thread_chat::RemoveThreadWorktree",
+                json!({ "thread_id": THREAD }),
+            ),
+            (
+                "thread_chat::NewThreadInWorktree",
+                json!({
+                    "project_id": "project-1",
+                    "worktree_path": "/tmp/worktrees/retry-backoff",
+                    "branch": "t3/retry-backoff"
+                }),
+            ),
+            (
+                "thread_chat::NewThreadInWorktree",
+                json!({ "project_id": "project-1" }),
+            ),
+        ] {
+            let action = cx
+                .build_action(name, Some(fields))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(action.name(), name);
+        }
+        let action = cx
+            .build_action(
+                "thread_chat::NewThreadInWorktree",
+                Some(json!({ "project_id": "project-1", "branch": "main" })),
+            )
+            .unwrap();
+        assert_eq!(
+            action.as_any().downcast_ref::<crate::NewThreadInWorktree>(),
+            Some(&crate::NewThreadInWorktree {
+                project_id: "project-1".into(),
+                worktree_path: None,
+                branch: Some("main".into()),
+            })
+        );
+    });
 }

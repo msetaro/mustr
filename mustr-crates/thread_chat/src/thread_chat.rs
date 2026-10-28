@@ -3,22 +3,48 @@
 //!
 //! Everything goes through T3's orchestration API behind [`ThreadBackend`], which the app sets
 //! with [`set_backend`]. Other parts of mustr drive threads through [`send_message`] (for
-//! example, the review's "Send to agent") and open them with [`open_thread`].
+//! example, the review's "Send to agent") and open them with [`open_thread`]. [`ThreadShells`]
+//! keeps T3's shell, every thread and project, for the whole app. The parts of mustr that drive
+//! threads trigger each other through the actions in [`actions`], such as [`OpenThreadTerminal`].
 
+pub mod actions;
 pub mod backend;
 pub mod commands;
+mod composer;
+mod family_bar;
+mod header;
 pub mod model;
 mod new_thread;
+mod settings_bar;
+pub mod shell;
 mod sidebar;
 mod thread_view;
+mod timeline;
+
+// Work packages add their `mod` and `pub use` lines here, each package under its own label, so
+// their branches merge without conflicts (`mustr-docs/PARITY.md` §3).
+// WP1, thread settings and new threads:
+// WP2, composer and timeline:
+// WP3, thread list and projects:
 
 #[cfg(test)]
 mod tests;
 
-pub use backend::{GlobalThreadBackend, ReadOnlyBackend, ThreadBackend, backend, set_backend};
+pub use actions::{
+    NewThreadInWorktree, OpenInEditor, OpenThreadTerminal, RemoveThreadWorktree,
+    ReviewThreadChanges,
+};
+pub use backend::{
+    Access, AttachmentUpload, GlobalThreadBackend, ReadOnlyBackend, ThreadBackend,
+    ThreadBackendExt, backend, set_backend,
+};
+pub use composer::{SendMessage, SteerMessage, StopThread};
+pub use family_bar::ThreadFamilyBar;
 pub use new_thread::{AgentChoice, NewThreadForm, agent_choices, runtime_mode_for};
+pub use settings_bar::ThreadSettingsBar;
+pub use shell::{Shell, ThreadShells};
 pub use sidebar::{ShellStatus, ThreadEntry, ThreadList, ThreadsSidebar};
-pub use thread_view::{NewThread, SendMessage, SteerMessage, StopThread, ThreadView, open_thread};
+pub use thread_view::{NewThread, ThreadView, open_thread};
 
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{App, AppContext as _, Task};
@@ -28,6 +54,12 @@ use workspace::Workspace;
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| thread_view::register(workspace))
         .detach();
+    // Work packages call their `init` here, each package under its own label
+    // (`mustr-docs/PARITY.md` §3).
+    // WP1, thread settings and new threads:
+    // WP2, composer and timeline:
+    // WP3, thread list and projects:
+    // WP5, subagents and workflows:
 }
 
 /// mustr's key bindings for threads. The app binds them after Zed's, so users can rebind them:
@@ -42,6 +74,11 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-enter", SendMessage, composer),
         KeyBinding::new("enter", SendMessage, composer),
         KeyBinding::new("secondary-shift-enter", SteerMessage, composer),
+        // Work packages add their bindings here, each package under its own label
+        // (`mustr-docs/PARITY.md` §3).
+        // WP1, thread settings and new threads:
+        // WP2, composer and timeline:
+        // WP3, thread list and projects:
     ]
 }
 
