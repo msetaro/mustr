@@ -35,7 +35,7 @@ use t3_api::{
     rpc,
     types::{
         OrchestrationProjectShell, ProjectsEnsureScratchPayload, ProviderInteractionMode,
-        ProviderOptionSelection, ProviderOptionSelectionValue, RuntimeMode,
+        ProviderOptionSelection, ProviderOptionSelectionValue, RuntimeMode, ServerGetConfigPayload,
         ServerGetSettingsPayload, ServerSettings, ThreadEnvMode, VcsListRefsInput,
         VcsListRefsInputRefKind,
     },
@@ -187,12 +187,7 @@ impl NewThreadForm {
             async move |this, cx| {
                 let mut attempt = 0;
                 loop {
-                    let settings = backend
-                        .call::<rpc::ServerGetSettings>(
-                            ServerGetSettingsPayload(Default::default()),
-                            Access::Read,
-                        )
-                        .await;
+                    let settings = load_server_settings(&backend).await;
                     let loaded = this.update(cx, |this, cx| this.settings_loaded(settings, cx));
                     if !matches!(loaded, Ok(false)) {
                         return;
@@ -1394,4 +1389,19 @@ pub(crate) fn form_of(
     cx: &App,
 ) -> Option<gpui::Entity<NewThreadForm>> {
     view.read(cx).new_thread.clone()
+}
+
+/// T3's server settings (`server.getSettings`). The 0.1.4 nightlies dropped that call; their
+/// server config carries the settings, as every T3's does, so read them there instead.
+async fn load_server_settings(backend: &Arc<dyn ThreadBackend>) -> anyhow::Result<ServerSettings> {
+    let settings = backend
+        .call::<rpc::ServerGetSettings>(ServerGetSettingsPayload(Default::default()), Access::Read)
+        .await;
+    match settings {
+        Err(error) if crate::backend::is_unsupported_rpc(&error) => backend
+            .call::<rpc::ServerGetConfig>(ServerGetConfigPayload(Default::default()), Access::Read)
+            .await
+            .map(|config| config.settings),
+        settings => settings,
+    }
 }
