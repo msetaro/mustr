@@ -231,7 +231,7 @@ pub(crate) fn render_agent_header(
         .child(
             h_flex()
                 .gap_2()
-                .child(pill(header.status.clone(), header.status_color(cx)))
+                .child(pill(header.status.clone(), header.status_color(cx), cx))
                 .child(
                     div().flex_1().min_w_0().child(
                         Label::new(header.title.clone())

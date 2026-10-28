@@ -85,7 +85,7 @@ use language::{
 };
 use multi_buffer::PathKey;
 use multi_buffer::{MultiBufferRow, RowInfo};
-use mustr_ui::tokens;
+use mustr_ui::{tokens, tokens::scaled};
 use project::{
     Project, ProjectPath, WorktreeId,
     trusted_worktrees::{TrustedWorktrees, TrustedWorktreesEvent},
@@ -1249,11 +1249,11 @@ impl ReviewView {
                     this.child(
                         v_flex()
                             .id("unshown-thread-list")
-                            .max_h(px(320.))
+                            .max_h(scaled(px(320.)))
                             .overflow_y_scroll()
                             .gap_2()
                             .p_2()
-                            .rounded(tokens::CORNER_RADIUS)
+                            .rounded(scaled(tokens::CORNER_RADIUS))
                             .border(tokens::BORDER_WIDTH)
                             .border_color(colors.border_variant)
                             .children(self.unshown_thread_cards.iter().cloned()),
@@ -2371,6 +2371,28 @@ pub(crate) mod tests {
                 ),
             ]
         );
+    }
+
+    #[gpui::test]
+    fn test_card_lengths_follow_the_ui_font_size(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            // Cards are drawn in the editor, whose rem size follows the buffer font size, so
+            // they take the UI's size from the settings.
+            for (ui_font_size, buffer_font_size, expected) in
+                [(13., 13., px(8.)), (26., 26., px(16.)), (26., 20., px(16.))]
+            {
+                cx.update_global::<SettingsStore, _>(|store, cx| {
+                    store.update_user_settings(cx, |settings| {
+                        settings.theme.ui_font_size = Some(ui_font_size.into());
+                        settings.theme.buffer_font_size = Some(buffer_font_size.into());
+                    });
+                });
+                assert_eq!(threads::ui_scaled(px(8.), cx), expected);
+            }
+        });
     }
 
     #[gpui::test]

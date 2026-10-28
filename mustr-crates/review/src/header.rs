@@ -4,7 +4,7 @@
 use gpui::{AnyElement, App, Hsla, IntoElement, ParentElement as _, SharedString, Styled as _};
 use mustr_ui::tokens;
 
-use crate::AgentThreadHeader;
+use crate::{AgentThreadHeader, threads::ui_scaled};
 use ui::{
     Color, DiffStat, Icon, IconName, IconSize, Label, LabelCommon as _, LabelSize, prelude::*,
 };
@@ -167,7 +167,7 @@ impl ReviewHeader {
 }
 
 /// A small rounded label in `color`, on a faint wash of the same color.
-pub(crate) fn pill(label: impl Into<SharedString>, color: Hsla) -> impl IntoElement {
+pub(crate) fn pill(label: impl Into<SharedString>, color: Hsla, cx: &App) -> impl IntoElement {
     div()
         .flex_none()
         .px_1p5()
@@ -176,7 +176,7 @@ pub(crate) fn pill(label: impl Into<SharedString>, color: Hsla) -> impl IntoElem
         .border_color(color.opacity(0.5))
         .bg(color.opacity(0.12))
         .text_color(color)
-        .text_size(tokens::TEXT_SIZE_SMALL)
+        .text_size(ui_scaled(tokens::TEXT_SIZE_SMALL, cx))
         .child(label.into())
 }
 
@@ -254,7 +254,7 @@ pub(crate) fn render_header(
         .child(
             h_flex()
                 .gap_2()
-                .child(pill(header.state_label(), header.state_color(cx)))
+                .child(pill(header.state_label(), header.state_color(cx), cx))
                 .child(
                     div().flex_1().min_w_0().child(
                         Label::new(header.title.clone())

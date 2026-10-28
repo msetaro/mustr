@@ -10,7 +10,7 @@ use gpui::{
     ParentElement as _, Pixels, Render, SharedString, Styled as _, Subscription,
     UniformListScrollHandle, WeakEntity, Window, actions, px, uniform_list,
 };
-use mustr_ui::tokens;
+use mustr_ui::{tokens, tokens::scaled};
 use std::ops::Range;
 use ui::{
     Checkbox, Color, DiffStat, Icon, IconName, IconSize, Label, LabelCommon as _, LabelSize,
@@ -197,12 +197,12 @@ impl FileTreePanel {
 
         h_flex()
             .id(("review-file", row))
-            .h(ROW_HEIGHT)
+            .h(scaled(ROW_HEIGHT))
             .w_full()
-            .pl(px(8.) + INDENT * depth as f32)
+            .pl(scaled(px(8.) + INDENT * depth as f32))
             .pr_2()
             .gap_1p5()
-            .rounded(tokens::CORNER_RADIUS / 2.)
+            .rounded(scaled(tokens::CORNER_RADIUS / 2.))
             .when(selected, |this| this.bg(colors.element_selected))
             .when(entry.unavailable.is_some(), |this| this.opacity(0.5))
             .when(entry.unavailable.is_none(), |this| {
@@ -263,7 +263,7 @@ impl FileTreePanel {
                 )
             })
             .child(
-                div().w(px(10.)).flex_none().child(
+                div().w(scaled(px(10.))).flex_none().child(
                     Label::new(entry.change.letter())
                         .size(LabelSize::XSmall)
                         .weight(FontWeight::SEMIBOLD)
@@ -276,9 +276,9 @@ impl FileTreePanel {
 fn render_directory(row: usize, name: SharedString, depth: usize) -> impl IntoElement {
     h_flex()
         .id(("review-directory", row))
-        .h(ROW_HEIGHT)
+        .h(scaled(ROW_HEIGHT))
         .w_full()
-        .pl(px(8.) + INDENT * depth as f32)
+        .pl(scaled(px(8.) + INDENT * depth as f32))
         .pr_2()
         .gap_1p5()
         .child(
@@ -326,8 +326,8 @@ impl Panel for FileTreePanel {
         cx.notify();
     }
 
-    fn default_size(&self, _: &Window, _: &App) -> Pixels {
-        DEFAULT_WIDTH
+    fn default_size(&self, window: &Window, _: &App) -> Pixels {
+        scaled(DEFAULT_WIDTH).to_pixels(window.rem_size())
     }
 
     fn icon(&self, _: &Window, _: &App) -> Option<IconName> {
@@ -372,7 +372,7 @@ impl Render for FileTreePanel {
             .child(
                 h_flex()
                     .flex_none()
-                    .h(px(32.))
+                    .h(scaled(px(32.)))
                     .px_3()
                     .gap_2()
                     .border_b(tokens::BORDER_WIDTH)

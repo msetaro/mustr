@@ -29,6 +29,7 @@ pulldown-cmark.workspace = true
 schemars.workspace = true
 serde.workspace = true
 settings.workspace = true
+theme_settings.workspace = true
 time.workspace = true
 time_format.workspace = true
 ui.workspace = true

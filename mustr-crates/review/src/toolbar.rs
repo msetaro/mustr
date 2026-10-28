@@ -10,7 +10,7 @@ use gpui::{
     App, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, Subscription,
     WeakEntity, Window, div, px,
 };
-use mustr_ui::{Chip, SegmentedControl, tokens};
+use mustr_ui::{Chip, SegmentedControl, tokens, tokens::scaled};
 use settings::DiffViewStyle;
 use ui::h_flex;
 use workspace::AppState;
@@ -48,9 +48,9 @@ impl Render for ReviewToolbar {
         h_flex()
             .flex_none()
             .w_full()
-            .gap(px(6.))
-            .px(px(10.))
-            .py(px(5.))
+            .gap(scaled(px(6.)))
+            .px(scaled(px(10.)))
+            .py(scaled(px(5.)))
             .bg(palette.background.hsla())
             .border_b(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
