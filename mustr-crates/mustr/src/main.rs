@@ -45,6 +45,8 @@ mod macos;
 mod notifications;
 // Zoom:
 mod zoom;
+// Releases and self-update:
+mod updates;
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
@@ -469,4 +471,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     thread_chat::set_local_folders(worktrees::worktrees_are_local, cx);
     // Zoom:
     zoom::init(cx);
+    // Releases and self-update:
+    updates::init(cx);
 }

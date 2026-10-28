@@ -241,6 +241,8 @@ pub fn app_menus() -> Vec<Menu> {
             #[cfg(target_os = "macos")]
             MenuItem::action("About mustr", crate::macos::About),
             #[cfg(target_os = "macos")]
+            MenuItem::action("Check for Updates…", crate::updates::CheckForUpdates),
+            #[cfg(target_os = "macos")]
             MenuItem::separator(),
             MenuItem::action("Settings…", OpenSettings),
             MenuItem::action("Key Bindings…", OpenKeymapFile),

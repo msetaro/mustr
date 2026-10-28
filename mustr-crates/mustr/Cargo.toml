@@ -51,12 +51,14 @@ log.workspace = true
 lsp_locations.workspace = true
 menu.workspace = true
 migrator.workspace = true
+mustr_release = { path = "../mustr_release" }
 mustr_ui = { path = "../mustr_ui" }
 node_runtime.workspace = true
 parking_lot.workspace = true
 paths.workspace = true
 picker.workspace = true
 platform_title_bar.workspace = true
+plist.workspace = true
 project.workspace = true
 rayon.workspace = true
 release_channel.workspace = true

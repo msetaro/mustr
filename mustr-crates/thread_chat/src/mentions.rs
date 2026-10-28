@@ -34,7 +34,7 @@ use gpui::{
     AnyElement, App, Context, FontWeight, Hsla, IntoElement, ParentElement as _, RenderOnce,
     ScrollHandle, SharedString, Styled as _, Task, Window, div, px,
 };
-use mustr_ui::{palette, tokens};
+use mustr_ui::{palette, tokens, tokens::scaled};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
@@ -1270,14 +1270,14 @@ impl RenderOnce for MentionChip {
             ChipKind::PullRequest(state) => (IconName::PullRequest, pull_request_tint(state, cx)),
             ChipKind::Other => (IconName::Paperclip, palette.text_muted.hsla()),
         };
-        let height = window.line_height() - px(2.);
+        let height = window.line_height() - scaled(px(2.)).to_pixels(window.rem_size());
         h_flex()
             .id(self.id)
             .h(height)
             .flex_none()
             .gap_1()
             .px_1p5()
-            .rounded(tokens::CONTROL_RADIUS)
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .border(tokens::BORDER_WIDTH)
             .border_color(tint.opacity(0.45))
             .bg(tint.opacity(0.12))
@@ -2124,7 +2124,7 @@ impl ThreadView {
                 .debug_selector(|| "thread-composer-menu".into())
                 .w_full()
                 .py_1()
-                .rounded(tokens::CORNER_RADIUS)
+                .rounded(scaled(tokens::CORNER_RADIUS))
                 .border(tokens::BORDER_WIDTH)
                 .border_color(palette.border.hsla())
                 .bg(palette.surface.hsla())
@@ -2160,7 +2160,7 @@ impl ThreadView {
                         v_flex()
                             .id("composer-menu-items")
                             .px_1()
-                            .max_h(px(MENU_MAX_HEIGHT))
+                            .max_h(scaled(px(MENU_MAX_HEIGHT)))
                             .overflow_y_scroll()
                             .track_scroll(&menu.scroll)
                             .children(rows),
@@ -2205,7 +2205,7 @@ impl ThreadView {
             .gap_2()
             .px_1p5()
             .py_1()
-            .rounded(tokens::CONTROL_RADIUS)
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .cursor_pointer()
             .when(highlighted, |this| this.bg(palette.accent_soft.hsla()))
             .when(!highlighted, |this| {

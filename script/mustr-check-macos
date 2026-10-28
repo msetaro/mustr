@@ -57,7 +57,8 @@ stub_shaders() {
 if [ $# -gt 0 ]; then
   CRATES=("$@")
 else
-  mapfile -t CRATES < <(sed -n 's/^name = "\(.*\)"$/\1/p' mustr-crates/*/Cargo.toml | sort -u)
+  # Each manifest's first `name =` is its package's; later ones name its targets.
+  mapfile -t CRATES < <(awk 'FNR == 1 { found = 0 } !found && /^name = "/ { gsub(/^name = "|"$/, ""); print; found = 1 }' mustr-crates/*/Cargo.toml | sort -u)
 fi
 
 failed=()

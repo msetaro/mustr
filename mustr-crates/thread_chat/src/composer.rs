@@ -15,7 +15,9 @@ use gpui::{
     Focusable as _, FontWeight, IntoElement, ObjectFit, ParentElement as _, SharedString,
     Styled as _, StyledImage as _, Subscription, Window, actions, div, img, px, relative,
 };
-use mustr_ui::{ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens};
+use mustr_ui::{
+    ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens, tokens::scaled,
+};
 use std::path::Path;
 use t3_api::types::ProviderApprovalDecision;
 use t3_api::types::ProviderInteractionMode;
@@ -1206,7 +1208,7 @@ impl ThreadView {
                         div()
                             .px_2()
                             .py_1()
-                            .rounded(tokens::CONTROL_RADIUS)
+                            .rounded(scaled(tokens::CONTROL_RADIUS))
                             .bg(palette.background.hsla())
                             .child(Label::new(prompt).size(LabelSize::Small).buffer_font(cx)),
                     )
@@ -1285,7 +1287,7 @@ impl ThreadView {
                     .gap_2()
                     .px_2()
                     .py_1()
-                    .rounded(tokens::CONTROL_RADIUS)
+                    .rounded(scaled(tokens::CONTROL_RADIUS))
                     .border_1()
                     .border_dashed()
                     .border_color(palette.border.hsla())
@@ -1372,8 +1374,8 @@ impl ThreadView {
                 let palette = mustr_ui::palette(cx);
                 this.child(
                     div()
-                        .size(px(IMAGE_TILE_SIZE))
-                        .rounded(tokens::CORNER_RADIUS)
+                        .size(scaled(px(IMAGE_TILE_SIZE)))
+                        .rounded(scaled(tokens::CORNER_RADIUS))
                         .border(tokens::BORDER_WIDTH)
                         .border_dashed()
                         .border_color(palette.border.hsla())
@@ -1401,7 +1403,7 @@ impl ThreadView {
         let small_button = |id: SharedString, icon: IconName| {
             div()
                 .id(id)
-                .size(px(18.))
+                .size(scaled(px(18.)))
                 .rounded_full()
                 .flex()
                 .items_center()
@@ -1420,8 +1422,8 @@ impl ThreadView {
             .debug_selector(move || format!("thread-image-{key}"))
             .relative()
             .flex_none()
-            .size(px(IMAGE_TILE_SIZE))
-            .rounded(tokens::CORNER_RADIUS)
+            .size(scaled(px(IMAGE_TILE_SIZE)))
+            .rounded(scaled(tokens::CORNER_RADIUS))
             .overflow_hidden()
             .border(tokens::BORDER_WIDTH)
             .border_color(if failed.is_some() {
@@ -1467,8 +1469,8 @@ impl ThreadView {
                                 .child(
                                     div()
                                         .mx_1()
-                                        .h(px(3.))
-                                        .w(px(IMAGE_TILE_SIZE - 12.))
+                                        .h(scaled(px(3.)))
+                                        .w(scaled(px(IMAGE_TILE_SIZE - 12.)))
                                         .rounded_full()
                                         .bg(gpui::white().opacity(0.3))
                                         .child(
@@ -1492,8 +1494,8 @@ impl ThreadView {
                 .child(
                     div()
                         .absolute()
-                        .bottom(px(3.))
-                        .left(px(3.))
+                        .bottom(scaled(px(3.)))
+                        .left(scaled(px(3.)))
                         .debug_selector(move || format!("thread-image-retry-{key}"))
                         .child(
                             small_button(
@@ -1512,8 +1514,8 @@ impl ThreadView {
             .child(
                 div()
                     .absolute()
-                    .top(px(3.))
-                    .right(px(3.))
+                    .top(scaled(px(3.)))
+                    .right(scaled(px(3.)))
                     .debug_selector(move || format!("thread-image-remove-{key}"))
                     .child(
                         small_button(
@@ -1719,7 +1721,7 @@ impl ThreadView {
             .child(
                 v_flex()
                     .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH))
+                    .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                     .gap_2()
                     .children(
                         pending
@@ -1800,7 +1802,7 @@ impl ThreadView {
                             .gap_1()
                             .px_2()
                             .py_1p5()
-                            .rounded(tokens::CORNER_RADIUS)
+                            .rounded(scaled(tokens::CORNER_RADIUS))
                             .border(tokens::BORDER_WIDTH)
                             .border_color(palette.border.hsla())
                             .bg(palette.surface.hsla())
@@ -1810,7 +1812,11 @@ impl ThreadView {
                             )
                             .child(self.composer.clone())
                             .child(
+                                // When the composer is narrow (a big ui_font_size in a small
+                                // window), the row wraps rather than overlapping, and the
+                                // buttons stay together at the end.
                                 h_flex()
+                                    .flex_wrap()
                                     .gap_1p5()
                                     .child(self.settings_bar.clone())
                                     .child(
@@ -1843,22 +1849,27 @@ impl ThreadView {
                                                 .tooltip(Tooltip::text(blocked)),
                                         )
                                     })
-                                    .child(div().flex_1())
-                                    .when(
-                                        self.sending || self.images.send_when_uploaded.is_some(),
-                                        |this| {
-                                            this.child(
-                                                Label::new(if self.sending {
-                                                    "Sending…"
-                                                } else {
-                                                    "Sending once the images are up…"
-                                                })
-                                                .size(LabelSize::XSmall)
-                                                .color(Color::Muted),
+                                    .child(
+                                        h_flex()
+                                            .ml_auto()
+                                            .gap_1p5()
+                                            .when(
+                                                self.sending
+                                                    || self.images.send_when_uploaded.is_some(),
+                                                |this| {
+                                                    this.child(
+                                                        Label::new(if self.sending {
+                                                            "Sending…"
+                                                        } else {
+                                                            "Sending once the images are up…"
+                                                        })
+                                                        .size(LabelSize::XSmall)
+                                                        .color(Color::Muted),
+                                                    )
+                                                },
                                             )
-                                        },
-                                    )
-                                    .children(buttons),
+                                            .children(buttons),
+                                    ),
                             ),
                     ),
             )

@@ -947,6 +947,43 @@ async fn drafts_launch_with_what_the_settings_bar_picks(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
+async fn the_composers_controls_wrap_rather_than_overlap(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (_view, cx) = open_view(backend, None, cx);
+    // Too narrow for the controls to fit on one line, as with a big ui_font_size in a small
+    // window.
+    cx.simulate_resize(gpui::size(gpui::px(360.), gpui::px(900.)));
+    cx.run_until_parked();
+
+    let composer = cx.debug_bounds("thread-composer").unwrap();
+    let controls = [
+        "thread-settings-model",
+        "thread-settings-access",
+        "thread-settings-plan",
+        "thread-attach",
+        "thread-send",
+    ]
+    .map(|selector| {
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} isn't shown"));
+        (selector, bounds)
+    });
+    for (index, (selector, bounds)) in controls.iter().enumerate() {
+        assert!(
+            bounds.left() >= composer.left() && bounds.right() <= composer.right(),
+            "{selector} sticks out of the composer"
+        );
+        for (other_selector, other) in &controls[index + 1..] {
+            assert!(
+                !bounds.intersects(other),
+                "{selector} overlaps {other_selector}"
+            );
+        }
+    }
+}
+
+#[gpui::test]
 async fn agents_without_a_mode_fall_back_to_one_they_have(cx: &mut TestAppContext) {
     let backend = Recorder::new();
     let (view, cx) = open_view(backend.clone(), None, cx);

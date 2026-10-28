@@ -1,7 +1,46 @@
 # mustr on macOS
 
-How to build and run mustr from a checkout on an Apple silicon Mac, what it does there on the
-first run, and what hasn't been checked on a real Mac yet.
+How to install a mustr release on an Apple silicon Mac, how to build and run mustr from a
+checkout, what it does on the first run, and what hasn't been checked on a real Mac yet.
+
+## Install a release
+
+In Terminal:
+
+```sh
+curl -fsSL https://github.com/msetaro/mustr/releases/latest/download/install.sh | sh
+```
+
+- It needs an Apple silicon Mac, and nothing else: no Rust, Xcode, or Homebrew.
+- It downloads the latest release's `manifest.json` and zip, checks the zip's size and SHA-256,
+  unzips it with `ditto`, checks that the app is mustr (bundle ID `dev.mustr.mustr`), and installs
+  `/Applications/mustr.app`. If `/Applications` isn't writable for your account, it uses
+  `~/Applications` and says so. It never uses `sudo`.
+- If mustr is running, it asks before quitting it.
+- **Why there's no Gatekeeper warning:** mustr isn't signed with an Apple Developer ID yet, only ad
+  hoc. macOS checks apps that carry the quarantine attribute, which browsers set on what they
+  download; curl doesn't set it. A zip downloaded in a browser is quarantined, and macOS refuses
+  to open the app in it, so install with the command above.
+- `MUSTR_VERSION=0.3.0-beta.1` (after `|`, before `sh`) installs that release instead, prereleases
+  too. `MUSTR_INSTALL_DIR=<dir>` installs `<dir>/mustr.app`.
+
+**Updates.** mustr checks for a newer release 20 seconds after it starts and every 4 hours. It
+downloads it into `~/Library/Application Support/mustr/updates/`, checks it (the manifest's
+Ed25519 signature against the key mustr is built with, the zip's size and SHA-256, the app's
+bundle ID, version, and code signature), and swaps it in for `mustr.app`; the app you're using
+keeps working. Then the status bar shows **Restart to update**. mustr never restarts by itself.
+
+- mustr › Check for Updates… (or "mustr: check for updates" in the command palette) checks now,
+  and says what it found.
+- `"updates": {"enabled": false}` in the settings file stops the automatic checks; Check for
+  Updates… still works.
+- The replaced app waits next to the new one as `.mustr.app.previous` (hidden) until mustr next
+  starts. To go back by hand before then: quit mustr, then in that folder
+  `rm -rf mustr.app && mv .mustr.app.previous mustr.app`.
+- Only the release builds `script/mustr-package-mac` makes, run from an app bundle, update
+  themselves. `cargo run` and `script/mustr-bundle-mac` builds (`--release` too) log
+  `Updates: off, because …` and don't, so a local build never turns into the published release.
+- Cutting releases is in `mustr-docs/RELEASING.md`.
 
 ## Prerequisites
 
@@ -54,8 +93,9 @@ cargo run -p mustr
 
 - **Dock and menu bar.** `cargo run` starts a bare executable, not an app bundle, so mustr sets its
   Dock icon itself. The menu bar has:
-  - **mustr:** About mustr, Settings… (⌘,), Key Bindings…, Select Theme…, Select Icon Theme…,
-    Services, Hide mustr (⌘H), Hide Others (⌥⌘H), Show All, and Quit mustr (⌘Q).
+  - **mustr:** About mustr, Check for Updates…, Settings… (⌘,), Key Bindings…, Select Theme…,
+    Select Icon Theme…, Services, Hide mustr (⌘H), Hide Others (⌥⌘H), Show All, and Quit mustr
+    (⌘Q).
   - **Edit:** Undo, Redo, Cut, Copy, Paste, Select All, and Find.
   - **View:** Zoom In (⌘+), Zoom Out (⌘-), and Actual Size (⌘0).
   - **Window:** Minimize (⌘M), Zoom, and the open windows.
@@ -82,6 +122,7 @@ cargo run -p mustr
   - `db/`, the database.
   - `logs/mustr.log`, and `logs/t3-engine.log` for mustr's own engine.
   - `t3-runtime/` and `t3-home/`, mustr's own engine, if you use it.
+  - `updates/`, the update being downloaded and checked; it's emptied once it's installed.
 
   mustr doesn't read or write Zed's settings or data.
 
@@ -137,15 +178,20 @@ Nothing has run on a Mac yet.
 - **Not checked on a Mac:** linking, the runtime-compiled Metal shaders, the Dock icon, the About
   panel, the menu bar, the title bar's layout around the traffic lights and their moving when you
   zoom, the zoom keys (only their bindings are tested, on Linux), keychain prompts, and mustr's
-  tests on macOS. The launch agent and `t3` command handling was reviewed against T3's
+  tests on macOS. Nor are releases: `script/mustr-package-mac`, the release workflow, the
+  installer (its logic ran on Linux with stand-ins for `ditto`, `plutil`, and `osascript`), and
+  the updater's `ditto`, `codesign`, and relaunch steps (its download, checks, and bundle swap ran
+  in tests with stand-in bundles). The launch agent and `t3` command handling was reviewed against T3's
   CLI (`mustr-docs/T3-RUNTIME.md`), not run.
 - **What the cross check can't see.** It runs without the macOS SDK: C code from build scripts
   goes to a stand-in compiler, and GPUI's shader outputs are stubbed. So C-level build failures
   (missing headers, SDK versions) and link errors can only show up on a Mac.
 - **`cargo run` has no app bundle.** It has no `Info.plist`, so there's no `mustr://` URL scheme and
   GPUI's system notifications are off (they need a bundle identifier); mustr shows in-app toasts
-  only. `script/mustr-bundle-mac` fixes that for this Mac. Packaging for other Macs (a Developer ID
-  signed, notarized `.app` and `.dmg`) is M3 work (`mustr-docs/PLAN.md`).
+  only. `script/mustr-bundle-mac` fixes that for this Mac, and releases install a bundle.
+- **Releases are signed ad hoc,** not with an Apple Developer ID, and aren't notarized. They
+  install with curl (above); device management that allows only identified developers would block
+  them. `mustr-docs/RELEASING.md`, "Adding a Developer ID", has the steps.
 - **System window tabs.** With Zed's `use_system_window_tabs` setting on, mustr shows Zed's own
   title bar, which draws those tabs, and it grows less than the rest of mustr when you zoom in.
 - **Intel Macs** have no T3 engine (see Prerequisites).

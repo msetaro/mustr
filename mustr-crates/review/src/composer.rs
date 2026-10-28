@@ -9,7 +9,7 @@ use gpui::{
 };
 use language::LanguageRegistry;
 use markdown::{Markdown, MarkdownElement};
-use mustr_ui::tokens;
+use mustr_ui::{tokens, tokens::scaled_pixels};
 use std::sync::Arc;
 use ui::{
     Button, ButtonSize, ButtonStyle, Color, Icon, IconName, IconSize, KeyBinding, Label,
@@ -97,7 +97,7 @@ impl Composer {
             .w_full()
             .px_2()
             .py_1()
-            .rounded(tokens::CORNER_RADIUS)
+            .rounded(scaled_pixels(tokens::CORNER_RADIUS, cx))
             .border(tokens::BORDER_WIDTH)
             .border_color(colors.border)
             .bg(colors.editor_background)
@@ -328,7 +328,9 @@ impl Render for DraftCard {
                     .color(Color::Muted),
             )
             .child(div().flex_1())
-            .when(self.draft.added, |this| this.child(pill("Pending", accent)))
+            .when(self.draft.added, |this| {
+                this.child(pill("Pending", accent, cx))
+            })
             .when(!editing, |this| {
                 this.child(
                     Button::new("edit-draft", "Edit")
@@ -394,7 +396,7 @@ impl Render for DraftCard {
         v_flex()
             .id("draft-card")
             .w_full()
-            .rounded(tokens::CORNER_RADIUS)
+            .rounded(scaled_pixels(tokens::CORNER_RADIUS, cx))
             .border(tokens::BORDER_WIDTH)
             .border_color(accent.opacity(0.6))
             .bg(colors.surface_background)

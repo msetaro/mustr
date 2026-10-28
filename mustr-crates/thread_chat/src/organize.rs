@@ -24,7 +24,7 @@ use gpui::{
     Focusable, IntoElement, ParentElement as _, PromptLevel, Render, SharedString, Styled as _,
     WeakEntity, Window, actions, px,
 };
-use mustr_ui::{palette, tokens};
+use mustr_ui::{palette, tokens, tokens::scaled};
 use t3_api::{
     tagged::OrchestrationV2Command,
     types::{
@@ -824,7 +824,7 @@ impl Render for RenameThreadModal {
             .key_context("RenameThread")
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::cancel))
-            .w(px(440.))
+            .w(scaled(px(440.)))
             .elevation_2(cx)
             .p_3()
             .gap_2()
@@ -837,7 +837,7 @@ impl Render for RenameThreadModal {
                 div()
                     .px_2()
                     .py_1()
-                    .rounded(tokens::CONTROL_RADIUS)
+                    .rounded(scaled(tokens::CONTROL_RADIUS))
                     .border(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
                     .bg(palette.surface.hsla())

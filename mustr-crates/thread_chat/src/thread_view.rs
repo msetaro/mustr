@@ -18,12 +18,12 @@ use editor::Editor;
 use futures::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    FollowMode, IntoElement, ListAlignment, ListState, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Task, WeakEntity, Window, actions, div, list, px,
+    FollowMode, IntoElement, ListAlignment, ListState, ParentElement as _, Pixels, Render,
+    SharedString, Styled as _, Subscription, Task, WeakEntity, Window, actions, div, list, px,
 };
 use language::LanguageRegistry;
 use markdown::Markdown;
-use mustr_ui::palette;
+use mustr_ui::{palette, tokens::scaled};
 use std::sync::Arc;
 use t3_api::types::OrchestrationV2SubscribeThreadInput;
 use ui::{Color, Label, LabelCommon as _, LabelSize, prelude::*};
@@ -68,6 +68,9 @@ pub struct ThreadView {
     pub(crate) rows: Vec<Row>,
     pub(crate) row_revisions: Vec<u64>,
     pub(crate) list_state: ListState,
+    /// The window's rem size when the list's rows were measured. Their heights follow
+    /// `ui_font_size`, so they're measured again when it changes.
+    rem_size: Pixels,
     pub(crate) markdown: HashMap<String, Entity<Markdown>>,
     /// Expanded runs of work (by `work:` and their first item's id) and expanded tool calls (by
     /// id).
@@ -185,6 +188,7 @@ impl ThreadView {
             rows: Vec::new(),
             row_revisions: Vec::new(),
             list_state,
+            rem_size: window.rem_size(),
             markdown: HashMap::default(),
             expanded: HashSet::default(),
             loading_outputs: HashSet::default(),
@@ -456,6 +460,10 @@ impl Item for ThreadView {
 
 impl Render for ThreadView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.rem_size != window.rem_size() {
+            self.rem_size = window.rem_size();
+            self.list_state.remeasure();
+        }
         let palette = palette(cx);
         let body: AnyElement = match (&self.state, &self.new_thread) {
             (_, Some(form)) => v_flex()
@@ -467,7 +475,7 @@ impl Render for ThreadView {
                 .child(
                     div()
                         .w_full()
-                        .max_w(px(CONTENT_MAX_WIDTH))
+                        .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                         .child(form.clone()),
                 )
                 .into_any_element(),

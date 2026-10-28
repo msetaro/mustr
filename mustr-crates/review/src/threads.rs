@@ -18,7 +18,7 @@ use gpui::{
 use language::{Buffer, LanguageRegistry, Point};
 use markdown::{Markdown, MarkdownElement, MarkdownStyle};
 use multi_buffer::Anchor;
-use mustr_ui::tokens;
+use mustr_ui::{tokens, tokens::scaled_pixels};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::{OffsetDateTime, UtcOffset};
@@ -199,6 +199,11 @@ pub(crate) fn thread_head_row(
 }
 
 /// A block holding `view`, aligned with the code after the gutter.
+///
+/// Zed's editor sets the rem size of what it draws, cards included, from the buffer font size
+/// (`EditorElement::rem_size` in `crates/editor/src/element.rs`), so [`tokens::scaled`] would be bigger
+/// in a card than in the rest of the UI, and different at 13 than before. The cards and what
+/// they hold use [`scaled_pixels`], which follows `ui_font_size` wherever they're drawn.
 pub(crate) fn card_block<V: Render>(
     placement: BlockPlacement<Anchor>,
     view: Entity<V>,
@@ -214,7 +219,7 @@ pub(crate) fn card_block<V: Render>(
             div()
                 .w_full()
                 .pl(block_cx.margins.gutter.full_width())
-                .pr(block_cx.margins.right + px(8.))
+                .pr(block_cx.margins.right + scaled_pixels(px(8.), block_cx.app))
                 .py_1()
                 .child(
                     div()
@@ -902,16 +907,20 @@ impl Render for ThreadCard {
                 )
             }))
             .when(thread.is_outdated, |this| {
-                this.child(pill("Outdated", status.warning))
+                this.child(pill("Outdated", status.warning, cx))
             })
             .when(thread.is_resolved, |this| {
-                this.child(pill("Resolved", status.success))
+                this.child(pill("Resolved", status.success, cx))
             })
             .when(thread.sent_to_agent, |this| {
-                this.child(pill("Sent to agent", mustr_ui::palette(cx).agent.hsla()))
+                this.child(pill(
+                    "Sent to agent",
+                    mustr_ui::palette(cx).agent.hsla(),
+                    cx,
+                ))
             })
             .when(!expanded && self.reply.is_some(), |this| {
-                this.child(pill("Reply in progress", colors.text_accent))
+                this.child(pill("Reply in progress", colors.text_accent, cx))
             })
             .child(
                 Label::new(count_label)
@@ -921,7 +930,7 @@ impl Render for ThreadCard {
 
         v_flex()
             .w_full()
-            .rounded(tokens::CORNER_RADIUS)
+            .rounded(scaled_pixels(tokens::CORNER_RADIUS, cx))
             .border(tokens::BORDER_WIDTH)
             .border_color(colors.border)
             .bg(colors.surface_background)
@@ -989,7 +998,7 @@ impl Render for OutdatedThreads {
         let count = self.cards.len();
         v_flex()
             .w_full()
-            .rounded(tokens::CORNER_RADIUS)
+            .rounded(scaled_pixels(tokens::CORNER_RADIUS, cx))
             .border(tokens::BORDER_WIDTH)
             .border_color(colors.border)
             .bg(colors.surface_background)
@@ -1077,7 +1086,7 @@ fn author_name(comment: &ThreadComment) -> String {
 pub(crate) fn comment_markdown_style(window: &Window, cx: &App) -> MarkdownStyle {
     let mut style = editor::hover_markdown_style(window, cx);
     style.base_text_style.refine(&TextStyleRefinement {
-        font_size: Some(tokens::TEXT_SIZE_LARGE.into()),
+        font_size: Some(scaled_pixels(tokens::TEXT_SIZE_LARGE, cx).into()),
         line_height: Some(relative(1.5)),
         ..Default::default()
     });

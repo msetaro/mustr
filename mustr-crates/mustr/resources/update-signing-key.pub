@@ -1,0 +1,5 @@
+# mustr's update-signing public key: Ed25519, in base64, on a line of its own. mustr is built
+# with it (src/updates.rs) and checks each release's manifest.json.sig against it.
+#
+# To replace it, see mustr-docs/RELEASING.md, "The signing key".
+T2iIXY56UDk3tmp0sBR4EOU8OLeGJrMa4JWAFhvNOSA=

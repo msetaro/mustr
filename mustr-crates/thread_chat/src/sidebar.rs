@@ -24,7 +24,7 @@ use gpui::{
     MouseDownEvent, ParentElement as _, Pixels, Point, Render, SharedString, Styled as _,
     Subscription, Task, WeakEntity, Window, actions, anchored, deferred, div, list, px,
 };
-use mustr_ui::{Chip, Pill, palette, tokens};
+use mustr_ui::{Chip, Pill, palette, tokens, tokens::scaled};
 use std::{cmp::Reverse, time::Duration};
 use t3_api::types::{
     OrchestrationV2AppThreadLineageRelationshipToParent, OrchestrationV2ThreadShell,
@@ -589,6 +589,9 @@ pub struct ThreadsSidebar {
     items: Vec<Item>,
     keys: Vec<ItemKey>,
     list_state: ListState,
+    /// The window's rem size when the list's rows were measured: they're measured again when
+    /// `ui_font_size` changes.
+    rem_size: Pixels,
     folded: HashSet<Section>,
     settled_shown: usize,
     active_thread_id: Option<String>,
@@ -650,6 +653,7 @@ impl ThreadsSidebar {
             items: Vec::new(),
             keys: Vec::new(),
             list_state: ListState::new(0, ListAlignment::Top, px(1000.)),
+            rem_size: window.rem_size(),
             folded: HashSet::from_iter([Section::Snoozed, Section::Settled]),
             settled_shown: SETTLED_FIRST_PAGE,
             active_thread_id: None,
@@ -944,7 +948,7 @@ impl ThreadsSidebar {
         h_flex()
             .id(SharedString::from(format!("section-{}", section.label())))
             .w_full()
-            .h(px(26.))
+            .h(scaled(px(26.)))
             .px_2()
             .pt_1()
             .gap_1()
@@ -1015,10 +1019,10 @@ impl ThreadsSidebar {
             .id(("thread", index))
             .group(group.clone())
             .w_full()
-            .h(ROW_HEIGHT)
+            .h(scaled(ROW_HEIGHT))
             .px_2()
             .py_1()
-            .rounded(tokens::CONTROL_RADIUS)
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .cursor_pointer()
             .when(active, |this| this.bg(palette.accent_soft.hsla()))
             .hover(|style| style.bg(palette.surface_2.hsla()))
@@ -1080,7 +1084,7 @@ impl ThreadsSidebar {
                     .child(
                         h_flex()
                             .gap_1p5()
-                            .pl(px(12.))
+                            .pl(scaled(px(12.)))
                             .child(
                                 div().flex_1().min_w_0().child(
                                     Label::new(details)
@@ -1188,7 +1192,11 @@ impl Focusable for ThreadsSidebar {
 }
 
 impl Render for ThreadsSidebar {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.rem_size != window.rem_size() {
+            self.rem_size = window.rem_size();
+            self.list_state.remeasure();
+        }
         let palette = palette(cx);
         let shells = self.shells.read(cx);
         let loaded = shells.shell().is_some();
@@ -1234,7 +1242,7 @@ impl Render for ThreadsSidebar {
                     .gap_1()
                     .pl_3()
                     .pr_2()
-                    .py(px(6.))
+                    .py(scaled(px(6.)))
                     .child(
                         Label::new("Agent threads")
                             .size(LabelSize::Small)
@@ -1274,7 +1282,7 @@ impl Render for ThreadsSidebar {
                     .px_2()
                     .py_1()
                     .gap_1p5()
-                    .rounded(tokens::CONTROL_RADIUS)
+                    .rounded(scaled(tokens::CONTROL_RADIUS))
                     .border(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
                     .bg(palette.background.hsla())

@@ -1,0 +1,222 @@
+# mustr's releases (mustr-docs/RELEASING.md). Runs only when a version tag is pushed, or by hand
+# for a dry run; it isn't CI. It uses none of Zed's workflows or actions.
+#
+#   git tag v0.2.0 && git push origin v0.2.0   # build, sign, and publish mustr 0.2.0
+#   git push -f origin HEAD:release-dry-run    # dry run: build and upload an artifact only
+#   Actions > mustr release > Run workflow     # the same dry run, once this file is on main
+#
+# The build job holds the update-signing key and can't write to the repository; the publish job
+# can write, and never sees the key.
+
+name: mustr release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+    # A dry run from any commit. Manual runs (below) need this file on the default branch.
+    branches:
+      - release-dry-run
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and upload a workflow artifact, without publishing a release"
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: mustr-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # Zed's release profile builds each crate as one codegen unit, which is slow and memory-hungry
+  # on a hosted runner (3 cores, 7 GB). 16 units keep thin LTO and cost a little speed.
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+
+jobs:
+  build:
+    name: Build and sign (macOS, Apple silicon)
+    if: github.repository == 'msetaro/mustr'
+    runs-on: macos-15
+    # A cold release build on a hosted runner is slow (codegen-units = 1, thin LTO); the cache
+    # makes later runs faster.
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' mustr-crates/mustr/Cargo.toml | head -n 1)
+          if [[ -z "$version" ]]; then
+            echo "::error::mustr-crates/mustr/Cargo.toml has no version"
+            exit 1
+          fi
+          if [[ "$REF_TYPE" == tag && "$REF_NAME" != "v$version" ]]; then
+            echo "::error::the tag is $REF_NAME, but mustr-crates/mustr/Cargo.toml says $version (tag v$version)"
+            exit 1
+          fi
+          case "$version" in
+            *-*) prerelease=true ;;
+            *) prerelease=false ;;
+          esac
+          echo "mustr $version (prerelease: $prerelease)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust (rust-toolchain.toml)
+        run: |
+          rustup toolchain install
+          cargo --version
+
+      - name: Check for CMake
+        # The build runs cmake (mustr-docs/MACOS.md, Prerequisites); GitHub's macOS images have it.
+        run: |
+          if ! command -v cmake >/dev/null; then
+            echo "::error::cmake isn't installed on this runner; the build needs it (mustr-docs/MACOS.md)"
+            exit 1
+          fi
+          cmake --version
+
+      - name: Cache cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0, as Zed pins it
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: mustr-release-macos-aarch64-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: |
+            mustr-release-macos-aarch64-
+
+      - name: Package mustr.app
+        run: script/mustr-package-mac --out-dir dist
+
+      - name: Write the update manifest
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cargo build --locked --release -p mustr_release
+          target/release/mustr-release manifest \
+            --version "$VERSION" \
+            --zip "dist/mustr-$VERSION-macos-aarch64.zip" \
+            --published-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --out dist/manifest.json
+          cat dist/manifest.json
+
+      - name: Sign the update manifest
+        env:
+          MUSTR_UPDATE_SIGNING_KEY: ${{ secrets.MUSTR_UPDATE_SIGNING_KEY }}
+          PUBLISHING: ${{ github.ref_type == 'tag' && (github.event_name == 'push' || !inputs.dry_run) }}
+        run: |
+          if [[ -z "$MUSTR_UPDATE_SIGNING_KEY" ]]; then
+            if [[ "$PUBLISHING" == true ]]; then
+              echo "::error::the MUSTR_UPDATE_SIGNING_KEY secret isn't set (mustr-docs/RELEASING.md, \"The signing key\")"
+              exit 1
+            fi
+            echo "::warning::MUSTR_UPDATE_SIGNING_KEY isn't set, so this dry run has no manifest.json.sig"
+            exit 0
+          fi
+          target/release/mustr-release sign dist/manifest.json
+          # mustr checks the signature with the public key it's built with; check it the same way,
+          # so a key that doesn't match the committed public key never ships.
+          if ! target/release/mustr-release verify dist/manifest.json \
+            --public-key-file mustr-crates/mustr/resources/update-signing-key.pub; then
+            if [[ "$PUBLISHING" == true ]]; then
+              echo "::error::the signature doesn't verify with mustr-crates/mustr/resources/update-signing-key.pub"
+              exit 1
+            fi
+            echo "::warning::the signature doesn't verify with mustr-crates/mustr/resources/update-signing-key.pub"
+          fi
+
+      - name: Add the installer and checksums
+        run: |
+          cp script/mustr-install dist/install.sh
+          cd dist
+          files=(mustr-*-macos-aarch64.zip manifest.json install.sh)
+          if [[ -f manifest.json.sig ]]; then
+            files+=(manifest.json.sig)
+          fi
+          shasum -a 256 "${files[@]}" > SHA256SUMS
+          cat SHA256SUMS
+          ls -l
+
+      - name: Upload the release files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mustr-${{ steps.version.outputs.version }}-release
+          path: |
+            dist/mustr-*-macos-aarch64.zip
+            dist/manifest.json
+            dist/manifest.json.sig
+            dist/install.sh
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish the GitHub release
+    needs: build
+    if: >-
+      github.repository == 'msetaro/mustr' && github.ref_type == 'tag' &&
+      (github.event_name == 'push' || !inputs.dry_run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download the release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mustr-${{ needs.build.outputs.version }}-release
+          path: dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          cd dist
+          test -s manifest.json.sig
+          sha256sum --check SHA256SUMS
+          install="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | sh"
+          flags=(--latest)
+          if [[ "$PRERELEASE" == true ]]; then
+            # Prereleases aren't "latest", so neither the installer nor the updater picks them up
+            # unless asked for by version.
+            install="curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | MUSTR_VERSION=$VERSION sh"
+            flags=(--prerelease --latest=false)
+          fi
+          cat > notes.md <<EOF
+          Install or update on an Apple silicon Mac:
+
+              $install
+
+          Once installed, mustr updates itself (mustr › Check for Updates…).
+          EOF
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "mustr $VERSION" \
+            --notes-file notes.md \
+            --generate-notes \
+            "${flags[@]}" \
+            "mustr-$VERSION-macos-aarch64.zip" manifest.json manifest.json.sig install.sh SHA256SUMS

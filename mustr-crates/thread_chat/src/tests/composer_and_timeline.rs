@@ -1075,6 +1075,42 @@ async fn arrow_up_recalls_sent_prompts(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn rows_are_measured_again_when_the_ui_font_size_changes(cx: &mut TestAppContext) {
+    let mut projection = finished_thread();
+    projection.items.extend((0..30).map(|index| {
+        assistant_message(
+            &format!("a{index}"),
+            6 + index,
+            "run-1",
+            "Another paragraph of the agent's reply.",
+            false,
+        )
+    }));
+    let backend = FakeBackend::with_thread(projection, 10);
+    let (view, cx) = open_view(backend, Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(600.)));
+    let list = view.read_with(cx, |view, _| view.list_state.clone());
+    list.pause_following_tail();
+    list.scroll_to(gpui::ListOffset::default());
+    cx.run_until_parked();
+
+    // A row below the window is measured for the scrollbar but not drawn, so its height is
+    // only right if the list measures it again at the new size.
+    let below = (0..list.item_count())
+        .find(|row| list.item_is_below_viewport(*row) == Some(true))
+        .unwrap();
+    let height = |list: &gpui::ListState| list.bounds_for_item(below).unwrap().size.height;
+    let before = height(&list);
+    cx.update(|window, _| {
+        window.set_rem_size(window.rem_size() * 2.);
+        window.refresh();
+    });
+    cx.run_until_parked();
+    let after = height(&list);
+    assert!(after > before * 1.5, "{before:?} became {after:?}");
+}
+
+#[gpui::test]
 async fn messages_copy_their_text(cx: &mut TestAppContext) {
     let backend = FakeBackend::with_thread(finished_thread(), 10);
     let (view, cx) = open_view(backend, Some(THREAD), cx);

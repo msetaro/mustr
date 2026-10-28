@@ -96,7 +96,7 @@ script/mustr-sync-zed               # merge into sync/zed-<tag>, build, test
 - `invariant: OK`.
 - `git diff refs/upstream-tags/<tag> HEAD --stat` lists only the touch points and mustr-owned paths.
 - `git diff refs/upstream-tags/<tag> HEAD -- Cargo.lock` only adds mustr's crates and their dependencies. mustr-only dependencies can move to newer semver-compatible versions; note that in the PR.
-- `new_upstream_workflows`. After the PR merges, run `gh workflow disable <file> -R msetaro/mustr` for each one; this needs the human's gh token with admin rights. Never delete them, because deleting causes merge conflicts.
+- `new_upstream_workflows`. GitHub enables each new workflow file it sees. After the PR merges, `script/mustr-disable-zed-workflows` lists every active workflow that isn't `.github/workflows/mustr-*` (a dry run), and `--apply` disables them; that needs the human's gh token with admin rights, so hand it to them. Never delete them, because deleting causes merge conflicts.
 
 ## 4. `mustr-sync-t3`
 
@@ -179,7 +179,7 @@ script/mustr-sync-t3 v0.1.3               # sync/t3-v0.1.3: codegen, pins, commi
 1. Push and open the PR using the `next:` line from the summary (`gh pr create … --body-file .git/mustr-sync/<…>.md`).
 2. Wait for mustr's CI (`.github/workflows/mustr-*.yml`).
 3. Merge only if the human has allowed agents to merge green sync PRs. Otherwise hand the PR to them.
-4. After a Zed sync merges, disable the new workflows listed in `new_upstream_workflows`.
+4. After a Zed sync merges, disable the new workflows listed in `new_upstream_workflows`: `script/mustr-disable-zed-workflows`, then `--apply` (the human, with admin rights).
 
 **Manual Zed merge,** if the script can't run. These are the same steps the script takes:
 ```sh

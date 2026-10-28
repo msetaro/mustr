@@ -11114,6 +11114,7 @@ dependencies = [
  "lsp_locations",
  "menu",
  "migrator",
+ "mustr_release",
  "mustr_ui",
  "node_runtime",
  "objc2 0.6.3",
@@ -11123,6 +11124,7 @@ dependencies = [
  "paths",
  "picker",
  "platform_title_bar",
+ "plist",
  "pretty_assertions",
  "project",
  "rayon",
@@ -11159,6 +11161,21 @@ dependencies = [
  "zed_actions",
  "zlog",
  "zlog_settings",
+]
+
+[[package]]
+name = "mustr_release"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "hex",
+ "pretty_assertions",
+ "ring",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
