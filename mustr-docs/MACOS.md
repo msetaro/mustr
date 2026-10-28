@@ -12,8 +12,11 @@ first run, and what hasn't been checked on a real Mac yet.
   GPUI's `runtime_shaders` feature (the `runtime_shaders` feature of `mustr-crates/mustr`, on by
   default), so the build never runs Xcode's `metal` compiler: macOS compiles the shaders when mustr
   starts. Full Xcode works too.
-- **Rust**, through [rustup](https://rustup.rs). `rust-toolchain.toml` pins the toolchain (1.98.1),
-  and the first `cargo` command installs it, with the extra targets the file lists.
+- **Rust**, through [rustup](https://rustup.rs):
+  `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y`, then
+  `. "$HOME/.cargo/env"` (new terminals pick it up on their own). `rust-toolchain.toml` pins the
+  toolchain (1.98.1), and the first `cargo` command installs it, with the extra targets the file
+  lists.
 - **Not needed:** CMake, Homebrew, or `protoc`. The C dependencies (SQLite, zstd, tree-sitter,
   aws-lc) build with the Command Line Tools' `clang`, and Zed's protobuf code is generated in Rust.
 - **Disk:** a debug build compiles about 1,000 crates, and `target/` grows to about 20 GB.

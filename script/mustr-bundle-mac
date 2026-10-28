@@ -37,6 +37,22 @@ if [[ "$(uname -s)" != Darwin ]]; then
     exit 1
 fi
 
+# rustup's installer adds ~/.cargo/bin to new shells only, so look there too.
+if ! command -v cargo >/dev/null && [[ -x "$HOME/.cargo/bin/cargo" ]]; then
+    PATH="$HOME/.cargo/bin:$PATH"
+fi
+if ! command -v cargo >/dev/null; then
+    cat >&2 <<'EOF'
+mustr-bundle-mac: cargo isn't installed. Install Rust with rustup, then run this script again:
+
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    . "$HOME/.cargo/env"
+
+The first build installs the Rust version that rust-toolchain.toml pins.
+EOF
+    exit 1
+fi
+
 cargo build -p mustr ${cargo_flags[@]+"${cargo_flags[@]}"}
 
 target_dir=${CARGO_TARGET_DIR:-$root/target}
