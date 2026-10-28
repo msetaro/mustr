@@ -1,0 +1,25 @@
+[
+  {
+    "isRepo": true,
+    "hasPrimaryRemote": false,
+    "isDefaultRef": true,
+    "refName": "main",
+    "hasWorkingTreeChanges": false,
+    "workingTree": {
+      "rootPath": "/tmp/claude-1000/t3sync/nightly/home/capture-project",
+      "files": [],
+      "insertions": 0,
+      "deletions": 0
+    },
+    "branchChanges": {
+      "baseRef": null,
+      "insertions": 0,
+      "deletions": 0
+    },
+    "hasUpstream": false,
+    "aheadCount": 0,
+    "behindCount": 0,
+    "aheadOfDefaultCount": 0,
+    "pr": null
+  }
+]

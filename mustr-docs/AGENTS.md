@@ -26,7 +26,7 @@ Ignore the rest of `.rules`, which is for Zed's own repository: the README banne
 
 ## T3 Code servers
 
-- `mustr-crates/t3_client` talks to T3 over HTTP and WebSocket. `mustr-crates/t3_client/T3_VERSION` pins the T3 version and orchestration protocol, which must match the server exactly.
+- `mustr-crates/t3_client` talks to T3 over HTTP and WebSocket. `mustr-crates/t3_client/T3_VERSION` pins the T3 version mustr is built and tested against (0.1.3), and the orchestration protocol, which must match the server's exactly. Older and newer T3 versions on the same protocol work: calls a server lacks fall back (`thread_chat::is_unsupported_rpc`), and decoding tolerates what newer ones add (`mustr-docs/T3-PROTOCOL.md`, "Compatibility").
 - `mustr-crates/t3_api` holds T3's wire types, generated from T3's contracts by `mustr-crates/t3_api/codegen/regen.sh` (see its README). Never hand-edit `src/generated/` or `schema/`. Call RPCs and endpoints through the typed tables: `connection.call::<t3_api::rpc::X>(…)`, `connection.stream::<…>`, and `t3_client::call_endpoint::<t3_api::http::Y>(…)`.
 - Live tests are ignored by default. Run them against a T3 server in a temporary home (below), not the user's. Grant only `--scope orchestration:read`, and never print tokens.
 - Never request `access:write` or `relay:*` scopes.
@@ -42,6 +42,7 @@ Ignore the rest of `.rules`, which is for Zed's own repository: the README banne
 - `mustr-crates/t3_runtime` gets and runs T3 releases: it picks the asset, checks `SHA256SUMS`, installs with T3's installer layout, and manages the engine process, the user's install, and its service.
   - Its `real_engine` test is ignored by default. It downloads the pinned release (about 100 MB) into a temp dir, starts it, and signs in: `cargo test -p t3_runtime --test real_engine -- --ignored --nocapture`.
   - `MUSTR_T3_TEST_VERSIONS_DIR=<dir>` keeps the download between runs. `MUSTR_T3_RELEASE_BASE_URL` points downloads at a mirror.
+  - Its `capture_server` test, also ignored, runs any release or nightly (`MUSTR_T3_CAPTURE_VERSION`) the same way, adds a project and a thread without a message, and records what mustr reads into `MUSTR_T3_CAPTURE_OUT`, for `t3_api`'s compatibility tests (`mustr-docs/SYNC.md`, "Newer servers").
 - **The user's T3 Code is off limits in tests.** It's usually installed with its service running. Against the real `~/.t3`, never run `t3 update`, `t3 service install|restart|uninstall|stop`, T3's installer, or pairing, and never bind port 3773. For test runs:
   - Pass `--user-data-dir <tmp>/data`, and set `MUSTR_CREDENTIALS_FILE=<tmp>/credentials.json` so tokens go to that file instead of the user's keychain.
   - Unset T3's variables (`T3CODE_HOME`, `T3_SERVICE_LAUNCHER_CONTEXT`, `T3_BOOT_SERVICE_UNIT`, `T3CODE_TAILSCALE_SERVE`, `T3CODE_TAILSCALE_SERVE_PORT`). A shell inside T3's service inherits them, and they point mustr at the real home.

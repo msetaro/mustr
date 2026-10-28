@@ -62,7 +62,7 @@ pub use actions::{
 };
 pub use backend::{
     Access, AttachmentUpload, GlobalThreadBackend, ReadOnlyBackend, ThreadBackend,
-    ThreadBackendExt, backend, set_backend,
+    ThreadBackendExt, UnsupportedRpc, backend, is_unsupported_rpc, set_backend,
 };
 pub use composer::{SendMessage, SteerMessage, StopThread};
 pub use family_bar::ThreadFamilyBar;

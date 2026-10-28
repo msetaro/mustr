@@ -4,9 +4,10 @@ What T3 Code's web and desktop app does for agent-driven development, what mustr
 what to build so a developer can stop opening T3's app.
 
 - **Compared:** mustr at `m3/next` (`3ed3b218a0`, after WP0–WP10 landed) against T3 Code `v0.1.3`
-  (`d2c44031`, 2026-10-26). The list was first written at `m2/threads` (`a96368ce93`). mustr's
-  `t3_api` is generated from T3 0.1.1 contracts (`t3_client/T3_VERSION`), and the local server is
-  0.1.1. Calls added after 0.1.1 are marked *(0.1.3)*.
+  (`d2c44031`, 2026-10-26). The list was first written at `m2/threads` (`a96368ce93`). Since
+  2026-10-28 mustr's `t3_api` is generated from T3 0.1.3 contracts (`t3_client/T3_VERSION`); the
+  local server is still 0.1.1. Calls added after 0.1.1 are marked *(0.1.3)*: a 0.1.1 server
+  doesn't have them, so mustr falls back there (`mustr-docs/T3-PROTOCOL.md`, "Compatibility").
 - **Paths:** T3 paths are relative to T3's `apps/web/src/` unless they start with `docs/`,
   `packages/` or `apps/`. `chat/`, `settings/`, `pullRequest/` and `preview/` are short for
   `components/chat/` and so on. mustr paths are relative to `mustr-crates/`.
@@ -37,7 +38,7 @@ The one open P0 is terminals for threads on another machine; local threads, the 
 them. 13 P1 rows are open: file attachments and big pastes, worktree setup progress, find in
 thread, the visit watermark, terminal and review-comment chips, a PR's threads, reordering pinned
 threads, searching message text, keys and palette entries for the thread toolbar, T3's settings,
-and installing and signing in to agents. Decline with feedback has to wait for the 0.1.3 pin. §3
+and installing and signing in to agents. Decline with feedback needed the 0.1.3 pin, which is in. §3
 groups what's left into four packages.
 
 ## 2. Features by area
@@ -48,7 +49,7 @@ groups what's left into four packages.
 |---|---|---|---|---|---|
 | Pair with a local T3 | Exchanges a pairing credential for a bearer token, then opens the WebSocket | `/.well-known/t3/environment`, `POST /oauth/token`, `POST /api/auth/websocket-ticket`, `/ws` | Done (`mustr/src/t3_connection.rs`) | — | P0 |
 | Run the engine in-app | The desktop app bundles and runs the server (`apps/desktop`) | `t3 serve`, `t3 auth pairing create` | Done (`mustr/src/t3_engine.rs`, `t3_runtime/`): the installed T3, mustr's own engine (also the fallback), or a server at a URL | — | P0 |
-| Version skew, server update | Warns on mismatch and updates the server (`versionSkew.ts`, `components/ServerUpdateAction.tsx`) | `server.updateServerWithProgress`, `subscribeServerLifecycle` | Done (`mustr/src/t3_engine.rs`, `mustr/src/home.rs`): the protocol is checked on connect, and Home offers Update T3 Code (`t3 update`) for an older installed T3; the embedded engine is pinned | — | P2 |
+| Version skew, server update | Warns on mismatch and updates the server (`versionSkew.ts`, `components/ServerUpdateAction.tsx`) | `server.updateServerWithProgress`, `subscribeServerLifecycle` | Done (`mustr/src/t3_engine.rs`, `mustr/src/home.rs`): the protocol is checked on connect, and Home offers Update T3 Code (`t3 update`) for an older installed T3: as a prompt for an older protocol, and as a quiet "T3 Code 0.1.3 is available." for an older version on the same protocol; the embedded engine is pinned | — | P2 |
 | Several environments at once | One client, many servers; picks a host for each new thread (`environments/`, `settings/AddEnvironmentDialog.tsx`) | One `/ws` per environment, `server.getHostResources` | Missing: one server | L | P2 |
 | Remote access (SSH, Tailscale, T3 Connect) | Reach a home machine's server from elsewhere (`packages/ssh`, `packages/tailscale`, `cloud/`) | `/api/connect/*`, `cloud.*` | Missing | L | P2: T3's own remote setup keeps working |
 | Paired clients, pairing links | List and revoke sessions (`settings/AuthorizedClientsSettings.tsx`) | `/api/auth/clients*`, `/api/auth/pairing-links*`, `subscribeAuthAccess` | Missing | S | Skip: needs `access:*` scopes, which mustr never asks for (PLAN §4); use `t3 auth` |
@@ -107,7 +108,7 @@ groups what's left into four packages.
 | Resume | Resume in an empty composer restarts a held queue or continues an interrupted or limited turn (`chat/useComposerResume.ts`) | `queue.resume`; `message.dispatch` with `manualContinuationOfRunId` | Done (`composer.rs`) | — | P0 |
 | Edit a queued message | Pencil opens it in the composer (`chat/queuedMessageEdit.ts`) | `queued-run.edit` | Done (`composer.rs`) | — | P1 |
 | Reorder the queue | Drag handle | `queued-run.reorder` | Missing | S | P2 |
-| Send a queued message now | "Send now" on a queued message | `queued-run.start` *(0.1.3)* | Missing: waits for the pin | S | P2 |
+| Send a queued message now | "Send now" on a queued message | `queued-run.start` *(0.1.3)* | Missing: unblocked by the 0.1.3 pin | S | P2 |
 | Usage-limit recovery | Resume at reset, or snooze until reset (`chat/UsageLimitRecoveryBanner.tsx`) | `thread.metadata.update` `{limitRecovery}`, `thread.snooze`; shell `usageLimitResetAt` | Done (`thread_chat/src/usage.rs`): Resume at reset, Snooze until reset, and Resume now | — | P1 |
 | Worktree setup progress, retry | Setup card with retry and cancel (`chat/WorktreeSetupCard.tsx`) | `subscribeWorktreeSetup`, `prepared-run.retry`, `worktreeSetup.cancel` | Missing: a thread being set up shows only its status pill | S | P1 |
 
@@ -117,7 +118,7 @@ groups what's left into four packages.
 |---|---|---|---|---|---|
 | Approve, approve for session, decline | Inline approval panel (`chat/ComposerPendingApprovalPanel.tsx`) | `runtime-request.respond` `{decision}` | Done (`composer.rs` `render_pending`) | — | P0 |
 | Answer questions | Options plus free text; dismiss (`chat/ComposerPendingUserInputPanel.tsx`) | `runtime-request.respond` `{answers}`, `thread.user-input.dismiss` | Done (`composer.rs`) | — | P0 |
-| Decline with feedback | Typing a reply declines a Claude approval and tells the agent why | `runtime-request.respond` `{feedback}` *(0.1.3)* | Missing: 0.1.1 has no `feedback` field (0.1.3 adds it, with `supportsFeedback` on the request) | S | P1 (after the pin moves) |
+| Decline with feedback | Typing a reply declines a Claude approval and tells the agent why | `runtime-request.respond` `{feedback}` *(0.1.3)* | Missing: unblocked by the 0.1.3 pin, which adds `feedback`, with `supportsFeedback` on the request (0.1.1 has neither) | S | P1 |
 | Secret requests | The agent asks for a token; a masked input answers it (`chat/SecretRequestCard.tsx`) | `secrets.answerRequest` | Done (`timeline.rs` card, `composer.rs`) | — | P1: the agent waits until it's answered |
 | Attachments in answers | `questionAttachments.ts` | `runtime-request.respond.attachmentsByQuestionId` | Missing | S | P2 |
 | MCP elicitation | Request kinds `mcp-elicitation` and `permission` | `runtime-request.respond` | Partial: the generic approval card | S | P2 |
@@ -132,7 +133,7 @@ groups what's left into four packages.
 | Live command output | Output streams while a command runs (`chat/CommandOutputPanel.tsx`) | `orchestration.subscribeCommandOutput` | Done (`timeline.rs`, while expanded) | — | P1 |
 | Copy a message or code block | `chat/MessageCopyButton.tsx` | — | Done (`timeline.rs`) | — | P1 |
 | Find in thread | `mod+F` (`chat/ThreadFindBar.tsx`) | `orchestration.searchThread` | Missing | S | P1 |
-| Subagents | The subagent bar in a child ("Open parent") and the parent's lineage list, to open or stop a child (`chat/ProviderSubagentBar.tsx`, `chat/ThreadRelationshipsControl.tsx`) | On 0.1.1: shell `lineage` (`parentThreadId`, `rootThreadId`, `relationshipToParent: subagent`), the subagent item's `childThreadId`, `subagent.stop` `{runId, subagentId}`. *(0.1.3)* adds `orchestration.getThreadFamily` | Done (`thread_chat/src/family_bar.rs`): Open parent in a child; a parent's children with Open and Stop, from 0.1.1's `lineage` | — | P0: user's must-have |
+| Subagents | The subagent bar in a child ("Open parent") and the parent's lineage list, to open or stop a child (`chat/ProviderSubagentBar.tsx`, `chat/ThreadRelationshipsControl.tsx`) | On 0.1.1: shell `lineage` (`parentThreadId`, `rootThreadId`, `relationshipToParent: subagent`), the subagent item's `childThreadId`, `subagent.stop` `{runId, subagentId}`. *(0.1.3)* adds `orchestration.getThreadFamily` | Done (`thread_chat/src/family_bar.rs`): Open parent in a child; a parent's children with Open and Stop, from `getThreadFamily` merged behind the shell's `lineage`, or the `lineage` alone on 0.1.1 | — | P0: user's must-have |
 | "New since last visit" | Visit watermark (`chat/ThreadVisitWatermark.tsx`) | `thread.visit` | Partial: visits are recorded (`sidebar.rs`); no watermark in the timeline | S | P1 |
 | Markdown extras | Mermaid, math, tables, file links that open the file (`chat/MarkdownMermaidCodeBlock.tsx`, `chat/MarkdownFileLink.tsx`) | — | Partial: Zed markdown; file links don't open in mustr | M | P2 |
 | Inline charts, HTML renders | `chat/HtmlRenderFrame.tsx` (agents' `html_render`, `html_preview`) | `assets.createUrl` | Missing | M | P2: mustr has no HTML engine; open in the system browser |
@@ -257,21 +258,27 @@ groups what's left into four packages.
 | Mobile app | `apps/mobile` | The same server | n/a | — | Skip: keeps working against the server when mustr pairs with the user's T3 |
 | Snap Shot, browser import | Screen capture tool; cookie import for preview (`docs/user/snap-shot.md`, `docs/user/browser-import.md`) | — | Missing | — | Skip: desktop extras; browser import only matters with the preview |
 
-**On the 0.1.1 pin.** Every P0 works on 0.1.1. Where 0.1.3 adds a call, mustr uses 0.1.1's data
-until the pin moves:
+**On the pin.** mustr pins 0.1.3 since 2026-10-28 and still works against 0.1.1 (the local
+server); `mustr-docs/T3-PROTOCOL.md`, "Compatibility", has the rules. Where 0.1.3 adds a call,
+mustr uses 0.1.1's data on servers without it:
 - **Subagents:** 0.1.1's shell holds every thread, subagent children included, and each has a
   `lineage`: `parentThreadId`, `rootThreadId`, and `relationshipToParent` (`fork` or `subagent`).
   A subagent turn item names its `childThreadId` and `subagentId`. So the family bar builds a
   thread's family from the shell it already follows, and stops a child with `subagent.stop` (or a
   delegated task with `thread.stop`).
-- **On 0.1.3, use `getThreadFamily`:** its snapshots leave out idle subagent children
-  (`omitIdleSubagents`, `packages/contracts/src/orchestrationV2.ts:3438`), which is why
-  `orchestration.getThreadFamily` exists. The family bar has to switch to it when the pin moves, or
-  idle subagents drop out of it.
+- **On 0.1.3, `getThreadFamily`:** snapshots leave out idle subagent children only for clients
+  that opt in (`omitIdleSubagents`, `packages/contracts/src/orchestrationV2.ts:3438`; T3's own
+  client does), and `orchestration.getThreadFamily` serves them. mustr doesn't opt in, so its
+  shell still has every child, but the family bar reads `getThreadFamily` once per thread and shell
+  generation and merges it behind the shell's rows, as T3's client does, so it stays right if mustr
+  opts in later. A 0.1.1 server answers "Unknown request tag", and the bar uses the shell alone.
 - **Other 0.1.3-only calls:** for shared worktrees, mustr matches `worktreePath` across the shell's
   threads instead of calling `getWorktreeThreadIds`. `getOlderSettledThreads` isn't needed, since
-  0.1.1's shell has every thread. Two rows wait for the pin: Decline with feedback (P1:
-  `runtime-request.respond` `{feedback}`) and Send now (P2: `queued-run.start`).
+  a shell without `omitOlderSettled` has every thread. Two rows waited for the pin and can be built
+  now: Decline with feedback (P1: `runtime-request.respond` `{feedback}`, when the request's
+  `responseCapability` says `supportsFeedback`) and Send now (P2: `queued-run.start`). Both need a
+  fallback on 0.1.1: hide Decline with feedback when `supportsFeedback` is absent, and Send now when
+  the server rejects the command.
 - **Already there for wave 3:** `terminal.*`, `subscribeWorktreeSetup`,
   `pullRequests.linkedThreads`, `orchestration.searchThread` and `searchThreads`,
   `provider.install.*`, `provider.auth.*`, `server.updateSettings`, and the `thread.snooze`,
@@ -369,7 +376,7 @@ from wave 1 still hold:
 - **Rows:** File attachments and big pastes (P1); the terminal and review-comment chips of the
   @-mentions row (P1), including the agent review's Send to agent sending its comments as
   `review-comment` context instead of text; Find in thread (P1); "New since last visit" (P1);
-  Decline with feedback (P1, once the pin moves); asking before Restart agent session while the
+  Decline with feedback (P1, unblocked by the 0.1.3 pin); asking before Restart agent session while the
   agent runs (polish on a done P1 row); Reorder the queue (P2); and the goal line (P2).
 - **Owns:** `thread_chat/src/composer.rs`, `attachments.rs`, `mentions.rs`, `timeline.rs`,
   `model.rs`, `commands.rs`, `history.rs` and `find_bar.rs`; `mustr/src/agent_review.rs` and
@@ -404,9 +411,8 @@ from wave 1 still hold:
   `server.refreshProviders`; `server.getSettings` and `server.updateSettings` (`settings:write`);
   `projects.mutate` `{project.update}`.
 
-**The pin.** Moving `t3_client/T3_VERSION` to 0.1.3 is a sync task (`mustr-docs/SYNC.md`,
-`script/mustr-sync-t3`), not a package. It unlocks Decline with feedback and Send now, and the
-family bar must move to `getThreadFamily` in the same change.
+**The pin.** `t3_client/T3_VERSION` moved to 0.1.3 on 2026-10-28 (`script/mustr-sync-t3`), with
+the family bar on `getThreadFamily`. It unlocks Decline with feedback and Send now.
 
 **Later (P2, not in wave 3):** several environments and remote access; start in background and
 one prompt for several models; cloning repos; prompt stash, quoting a response and rich Markdown;

@@ -60,6 +60,13 @@ impl RpcError {
         }
     }
 
+    /// Whether the server doesn't have the RPC: Effect's RPC server answers a tag it doesn't
+    /// know with the defect "Unknown request tag: …", as an older T3 does for an RPC added
+    /// after it.
+    pub fn is_unknown_method(&self) -> bool {
+        matches!(self, RpcError::Defect(defect) if defect.contains("Unknown request tag: "))
+    }
+
     /// The `_tag` of a typed error, e.g. `OrchestrationGetFullThreadDiffError`.
     pub fn error_tag(&self) -> Option<&str> {
         match self {
@@ -173,8 +180,9 @@ impl RpcConnection {
 
     /// Calls the streaming RPC `M`, e.g. `stream::<t3_api::rpc::OrchestrationSubscribeShell>(…)`.
     /// Yields each chunk value, and ends when the stream completes; an error is delivered
-    /// as the final item. A value this build can't decode is yielded as
-    /// [`RpcError::Decode`] and the stream continues.
+    /// as the final item. A value this build can't decode at all (one from a newer T3 that
+    /// even `t3_api`'s fallbacks can't read) is skipped and logged once, and the stream
+    /// continues, as T3's own clients skip stream items they don't know.
     pub fn stream<M: RpcMethod>(
         &self,
         payload: M::Payload,
@@ -186,7 +194,15 @@ impl RpcConnection {
             )));
         }
         let chunks = self.subscribe(M::TAG, encode_payload::<M>(&payload)?)?;
-        Ok(chunks.map(|chunk| chunk.and_then(decode::<M>)))
+        Ok(chunks.filter_map(|chunk| {
+            futures::future::ready(match chunk.and_then(decode::<M>) {
+                Err(RpcError::Decode { tag, message }) => {
+                    t3_api::forward_compat::note_skipped(&format!("{tag} item"), &message);
+                    None
+                }
+                item => Some(item),
+            })
+        }))
     }
 
     /// Calls a non-streaming RPC and waits for its result.
@@ -620,6 +636,59 @@ mod tests {
             );
             request?;
             assert!(matches!(result, Err(RpcError::Decode { .. })));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn rpcs_an_older_server_lacks_are_told_apart() -> Result<()> {
+        use t3_api::rpc::OrchestrationGetThreadFamily;
+        let (connection, mut outgoing_rx) = test_connection();
+        smol::block_on(async {
+            let payload = serde_json::from_value(json!({ "threadId": "thread-1" }))?;
+            let (result, request) = futures::join!(
+                connection.call::<OrchestrationGetThreadFamily>(payload),
+                // What T3 0.1.1's Effect RPC server answers for a tag it doesn't have.
+                answer(&connection, &mut outgoing_rx, |id| {
+                    json!({ "_tag": "Exit", "requestId": id, "exit": { "_tag": "Failure",
+                        "cause": [{ "_tag": "Die",
+                            "defect": "Unknown request tag: orchestration.getThreadFamily" }] } })
+                    .to_string()
+                }),
+            );
+            request?;
+            let error = result.err().context("expected an error")?;
+            assert!(error.is_unknown_method(), "{error:?}");
+            assert!(!RpcError::Defect("\"boom\"".into()).is_unknown_method());
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn typed_streams_skip_items_they_cant_decode() -> Result<()> {
+        use t3_api::rpc::OrchestrationSubscribeShell;
+        use t3_api::tagged::OrchestrationV2ShellStreamItem;
+        let (connection, mut outgoing_rx) = test_connection();
+        smol::block_on(async {
+            let mut shell = connection.stream::<OrchestrationSubscribeShell>(Default::default())?;
+            answer(&connection, &mut outgoing_rx, |id| {
+                json!([
+                    { "_tag": "Chunk", "requestId": id, "values": [
+                        // A known kind whose body this build can't read.
+                        { "kind": "project.removed", "sequence": "three" },
+                        { "kind": "project.removed", "sequence": 4, "projectId": "p1" }
+                    ] },
+                    { "_tag": "Exit", "requestId": id, "exit": { "_tag": "Success", "value": null } }
+                ])
+                .to_string()
+            })
+            .await?;
+            let item = shell.next().await.context("no item")??;
+            let OrchestrationV2ShellStreamItem::ProjectRemoved(removed) = item else {
+                panic!("expected the readable item, got {item:?}");
+            };
+            assert_eq!(removed.sequence, 4);
+            assert!(shell.next().await.is_none());
             Ok(())
         })
     }

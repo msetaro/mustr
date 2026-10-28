@@ -308,8 +308,8 @@ pub fn comment_payload(pull_request: &PullRequestRef, body: String) -> PullReque
     }
 }
 
-/// The review with its added comments. T3 0.1.1 takes one line per comment (its
-/// `PullRequestReviewCommentDraft` has no range start), so a comment written on several lines
+/// The review with its added comments. T3 0.1.1 takes one line per comment (0.1.3 adds the
+/// range's `startPosition`, which mustr doesn't send yet), so a comment written on several lines
 /// goes on the last of them, as T3's web app does for forges without range comments.
 pub fn submit_review_payload(
     pull_request: &PullRequestRef,
@@ -326,6 +326,7 @@ pub fn submit_review_payload(
                 old_path: draft.old_path,
                 path: draft.path,
                 position: wire_position(draft.position),
+                start_position: None,
             })
             .collect(),
         expected_account_id: pull_request.expected_account_id.clone(),
@@ -514,6 +515,7 @@ mod tests {
                                 new_line: 12,
                             }
                         ),
+                        start_position: None,
                     },
                     PullRequestReviewCommentDraft {
                         body: "Gone?".to_string(),
@@ -525,6 +527,7 @@ mod tests {
                                 old_line: 5,
                             }
                         ),
+                        start_position: None,
                     },
                     PullRequestReviewCommentDraft {
                         body: "Context.".to_string(),
@@ -536,6 +539,7 @@ mod tests {
                             old_line: 8,
                             side: PullRequestDiffSide::Left,
                         }),
+                        start_position: None,
                     },
                 ],
                 expected_account_id: None,

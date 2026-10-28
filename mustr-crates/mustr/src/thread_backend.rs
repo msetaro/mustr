@@ -33,7 +33,7 @@ use t3_client::{
         },
     },
 };
-use thread_chat::{Access, AttachmentUpload, ReadOnlyBackend, ThreadBackend};
+use thread_chat::{Access, AttachmentUpload, ReadOnlyBackend, ThreadBackend, UnsupportedRpc};
 
 /// Installs the threads' backend. Call once, after `t3_connection::init`.
 pub fn init(session: CurrentSession, cx: &mut App) {
@@ -117,6 +117,11 @@ impl T3ThreadBackend {
 }
 
 fn rpc_error(tag: &str, error: &RpcError) -> anyhow::Error {
+    if error.is_unknown_method() {
+        return anyhow::Error::new(UnsupportedRpc {
+            tag: tag.to_string(),
+        });
+    }
     match error.error_detail() {
         Some(detail) => anyhow!("{detail}"),
         None => anyhow!("{tag}: {error}"),
@@ -135,7 +140,7 @@ impl ThreadBackend for T3ThreadBackend {
         let session = self.session();
         async move {
             session?
-                .call_endpoint::<http::OrchestrationShellSnapshot>(&(), &(), &())
+                .call_endpoint::<http::OrchestrationShellSnapshot>(&(), &Default::default(), &())
                 .await
                 .context("loading the thread list")
         }

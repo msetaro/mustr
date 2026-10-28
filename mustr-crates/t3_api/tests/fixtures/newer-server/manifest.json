@@ -1,0 +1,1833 @@
+{
+  "rpc": [
+    {
+      "tag": "guestShare.create",
+      "stream": false,
+      "success": "GuestShareCreateResult",
+      "error": "GuestShareCreateRpcError"
+    },
+    {
+      "tag": "server.probe",
+      "stream": false,
+      "success": "ServerProbeSuccess",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.getConfig",
+      "stream": false,
+      "success": "ServerConfig",
+      "error": "ServerGetConfigRpcError"
+    },
+    {
+      "tag": "server.refreshProviders",
+      "stream": false,
+      "success": "ServerProviderUpdatedPayload",
+      "error": "ServerRefreshProvidersRpcError"
+    },
+    {
+      "tag": "server.updateProvider",
+      "stream": false,
+      "success": "ServerProviderUpdatedPayload",
+      "error": "ServerUpdateProviderRpcError"
+    },
+    {
+      "tag": "provider.consumeResetCredit",
+      "stream": false,
+      "success": "ProviderConsumeResetCreditResult",
+      "error": "ProviderConsumeResetCreditRpcError"
+    },
+    {
+      "tag": "provider.auth.start",
+      "stream": false,
+      "success": "ProviderAuthState",
+      "error": "ProviderAuthStartRpcError"
+    },
+    {
+      "tag": "provider.auth.complete",
+      "stream": false,
+      "success": "ProviderAuthState",
+      "error": "ProviderAuthCompleteRpcError"
+    },
+    {
+      "tag": "provider.chatgpt.reconnect-profile",
+      "stream": false,
+      "success": "ProviderChatgptReconnectProfileSuccess",
+      "error": "ProviderChatgptReconnectProfileRpcError"
+    },
+    {
+      "tag": "provider.chatgpt.import-profile",
+      "stream": false,
+      "success": "ProviderAuthState",
+      "error": "ProviderChatgptImportProfileRpcError"
+    },
+    {
+      "tag": "provider.chatgpt.handoff.subscribe",
+      "stream": true,
+      "success": "ChatGptHandoffState",
+      "error": "ProviderChatgptHandoffSubscribeRpcError"
+    },
+    {
+      "tag": "provider.auth.respond",
+      "stream": false,
+      "success": "ProviderAuthState",
+      "error": "ProviderAuthRespondRpcError"
+    },
+    {
+      "tag": "provider.auth.cancel",
+      "stream": false,
+      "success": "ProviderAuthState",
+      "error": "ProviderAuthCancelRpcError"
+    },
+    {
+      "tag": "provider.auth.logout",
+      "stream": false,
+      "success": "ProviderAuthState",
+      "error": "ProviderAuthLogoutRpcError"
+    },
+    {
+      "tag": "provider.auth.subscribe",
+      "stream": true,
+      "success": "ProviderAuthState",
+      "error": "ProviderAuthSubscribeRpcError"
+    },
+    {
+      "tag": "provider.install.start",
+      "stream": false,
+      "success": "ProviderInstallState",
+      "error": "ProviderInstallStartRpcError"
+    },
+    {
+      "tag": "provider.install.cancel",
+      "stream": false,
+      "success": "ProviderInstallState",
+      "error": "ProviderInstallCancelRpcError"
+    },
+    {
+      "tag": "provider.install.subscribe",
+      "stream": true,
+      "success": "ProviderInstallState",
+      "error": "ProviderInstallSubscribeRpcError"
+    },
+    {
+      "tag": "provider.install.remove",
+      "stream": false,
+      "success": "ProviderInstallState",
+      "error": "ProviderInstallRemoveRpcError"
+    },
+    {
+      "tag": "server.updateServer",
+      "stream": false,
+      "success": "ServerSelfUpdateResult",
+      "error": "ServerUpdateServerRpcError"
+    },
+    {
+      "tag": "server.updateServerWithProgress",
+      "stream": true,
+      "success": "ServerSelfUpdateProgressEvent",
+      "error": "ServerUpdateServerWithProgressRpcError"
+    },
+    {
+      "tag": "server.commitDesktopUpdate",
+      "stream": false,
+      "success": "ServerSelfUpdateResult",
+      "error": "ServerCommitDesktopUpdateRpcError"
+    },
+    {
+      "tag": "server.upsertKeybinding",
+      "stream": false,
+      "success": "ServerUpsertKeybindingResult",
+      "error": "ServerUpsertKeybindingRpcError"
+    },
+    {
+      "tag": "server.removeKeybinding",
+      "stream": false,
+      "success": "ServerUpsertKeybindingResult",
+      "error": "ServerRemoveKeybindingRpcError"
+    },
+    {
+      "tag": "server.runStorageCleanup",
+      "stream": false,
+      "success": "StorageCleanupReport",
+      "error": "ServerRunStorageCleanupRpcError"
+    },
+    {
+      "tag": "server.getStorageCleanupReport",
+      "stream": true,
+      "success": "ServerGetStorageCleanupReportChunk",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.getDatabaseStorage",
+      "stream": true,
+      "success": "ServerGetDatabaseStorageChunk",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.updateSettings",
+      "stream": false,
+      "success": "ServerSettings",
+      "error": "ServerUpdateSettingsRpcError"
+    },
+    {
+      "tag": "peerLinks.list",
+      "stream": false,
+      "success": "PeerLinksListSuccess",
+      "error": "PeerLinksListRpcError"
+    },
+    {
+      "tag": "peerLinks.link",
+      "stream": false,
+      "success": "PeerLink",
+      "error": "PeerLinksLinkRpcError"
+    },
+    {
+      "tag": "peerLinks.unlink",
+      "stream": false,
+      "success": "PeerLinkRemoveResult",
+      "error": "PeerLinksUnlinkRpcError"
+    },
+    {
+      "tag": "peerLinks.answerRequest",
+      "stream": false,
+      "success": null,
+      "error": "PeerLinksAnswerRequestRpcError"
+    },
+    {
+      "tag": "server.discoverSourceControl",
+      "stream": false,
+      "success": "SourceControlDiscoveryResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.searchAcpRegistry",
+      "stream": false,
+      "success": "AcpRegistrySearchResult",
+      "error": "ServerSearchAcpRegistryRpcError"
+    },
+    {
+      "tag": "server.prepareAcpRegistryAgent",
+      "stream": false,
+      "success": "AcpRegistryPrepareResult",
+      "error": "ServerPrepareAcpRegistryAgentRpcError"
+    },
+    {
+      "tag": "server.uninstallAcpRegistryManagedBinary",
+      "stream": false,
+      "success": "AcpRegistryManagedBinaryUninstallResult",
+      "error": "ServerUninstallAcpRegistryManagedBinaryRpcError"
+    },
+    {
+      "tag": "server.acceptAcpRegistryUrlAuth",
+      "stream": false,
+      "success": "AcpRegistryAcceptUrlAuthResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.listAcpRegistrySessions",
+      "stream": false,
+      "success": "AcpRegistryListSessionsResult",
+      "error": "ServerListAcpRegistrySessionsRpcError"
+    },
+    {
+      "tag": "server.importAcpRegistrySession",
+      "stream": false,
+      "success": "AcpRegistryImportSessionResult",
+      "error": "ServerImportAcpRegistrySessionRpcError"
+    },
+    {
+      "tag": "server.deleteAcpRegistrySession",
+      "stream": false,
+      "success": "AcpRegistryDeleteSessionResult",
+      "error": "ServerDeleteAcpRegistrySessionRpcError"
+    },
+    {
+      "tag": "server.listAcpRegistryProviders",
+      "stream": false,
+      "success": "AcpRegistryListProvidersResult",
+      "error": "ServerListAcpRegistryProvidersRpcError"
+    },
+    {
+      "tag": "server.setAcpRegistryProvider",
+      "stream": false,
+      "success": "AcpRegistrySetProviderResult",
+      "error": "ServerSetAcpRegistryProviderRpcError"
+    },
+    {
+      "tag": "server.disableAcpRegistryProvider",
+      "stream": false,
+      "success": "AcpRegistryDisableProviderResult",
+      "error": "ServerDisableAcpRegistryProviderRpcError"
+    },
+    {
+      "tag": "server.logoutAcpRegistry",
+      "stream": false,
+      "success": "AcpRegistryLogoutResult",
+      "error": "ServerLogoutAcpRegistryRpcError"
+    },
+    {
+      "tag": "server.getTraceDiagnostics",
+      "stream": false,
+      "success": "ServerTraceDiagnosticsResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.getProcessDiagnostics",
+      "stream": false,
+      "success": "ServerProcessDiagnosticsResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.getHostResources",
+      "stream": false,
+      "success": "HostResourcesSnapshot",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.getProcessResourceHistory",
+      "stream": false,
+      "success": "ServerProcessResourceHistoryResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.getResourceTelemetryHistory",
+      "stream": false,
+      "success": "ResourceTelemetryHistory",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.retryResourceTelemetry",
+      "stream": false,
+      "success": "ResourceTelemetryRetryResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.checkOtlpEndpoint",
+      "stream": false,
+      "success": "OtlpEndpointCheckResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.prepareTriage",
+      "stream": false,
+      "success": "ServerPrepareTriageResult",
+      "error": "ServerPrepareTriageRpcError"
+    },
+    {
+      "tag": "server.getUsageSummary",
+      "stream": false,
+      "success": "UsageSummary",
+      "error": "ServerGetUsageSummaryRpcError"
+    },
+    {
+      "tag": "server.refreshUsageRates",
+      "stream": false,
+      "success": "UsagePricing",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "server.signalProcess",
+      "stream": false,
+      "success": "ServerSignalProcessResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "scheduledTasks.subscribe",
+      "stream": true,
+      "success": "ScheduledTaskListResult",
+      "error": "ScheduledTasksSubscribeRpcError"
+    },
+    {
+      "tag": "scheduledTasks.upsert",
+      "stream": false,
+      "success": "ScheduledTaskMutationResult",
+      "error": "ScheduledTasksUpsertRpcError"
+    },
+    {
+      "tag": "scheduledTasks.setEnabled",
+      "stream": false,
+      "success": "ScheduledTaskMutationResult",
+      "error": "ScheduledTasksSetEnabledRpcError"
+    },
+    {
+      "tag": "scheduledTasks.delete",
+      "stream": false,
+      "success": "ScheduledTaskDeleteResult",
+      "error": "ScheduledTasksDeleteRpcError"
+    },
+    {
+      "tag": "scheduledTasks.runNow",
+      "stream": false,
+      "success": "ScheduledTaskRunNowResult",
+      "error": "ScheduledTasksRunNowRpcError"
+    },
+    {
+      "tag": "scheduledTasks.rotateWebhookToken",
+      "stream": false,
+      "success": "ScheduledTaskMutationResult",
+      "error": "ScheduledTasksRotateWebhookTokenRpcError"
+    },
+    {
+      "tag": "secrets.answerRequest",
+      "stream": false,
+      "success": null,
+      "error": "SecretsAnswerRequestRpcError"
+    },
+    {
+      "tag": "scheduledTasks.listWebhookDeliveries",
+      "stream": false,
+      "success": "ScheduledTaskListWebhookDeliveriesResult",
+      "error": "ScheduledTasksListWebhookDeliveriesRpcError"
+    },
+    {
+      "tag": "scheduledTasks.getWebhookDelivery",
+      "stream": false,
+      "success": "ScheduledTaskGetWebhookDeliveryResult",
+      "error": "ScheduledTasksGetWebhookDeliveryRpcError"
+    },
+    {
+      "tag": "server.reportClientActivity",
+      "stream": false,
+      "success": null,
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "cloud.getRelayClientStatus",
+      "stream": false,
+      "success": "RelayClientStatusSchema",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "cloud.installRelayClient",
+      "stream": true,
+      "success": "RelayClientInstallProgressEventSchema",
+      "error": "CloudInstallRelayClientRpcError"
+    },
+    {
+      "tag": "pullRequests.list",
+      "stream": false,
+      "success": "PullRequestListResult",
+      "error": "PullRequestsListRpcError"
+    },
+    {
+      "tag": "pullRequests.listStats",
+      "stream": false,
+      "success": "PullRequestListStatsResult",
+      "error": "PullRequestsListStatsRpcError"
+    },
+    {
+      "tag": "pullRequests.filterOptions",
+      "stream": false,
+      "success": "PullRequestFilterOptions",
+      "error": "PullRequestsFilterOptionsRpcError"
+    },
+    {
+      "tag": "pullRequests.summary",
+      "stream": false,
+      "success": "PullRequestSummary",
+      "error": "PullRequestsSummaryRpcError"
+    },
+    {
+      "tag": "pullRequests.routing",
+      "stream": false,
+      "success": "PullRequestRoutingResult",
+      "error": "PullRequestsRoutingRpcError"
+    },
+    {
+      "tag": "pullRequests.routingIdentity",
+      "stream": false,
+      "success": "PullRequestRoutingIdentityResult",
+      "error": "PullRequestsRoutingIdentityRpcError"
+    },
+    {
+      "tag": "pullRequests.stack",
+      "stream": false,
+      "success": "PullRequestsStackSuccess",
+      "error": "PullRequestsStackRpcError"
+    },
+    {
+      "tag": "pullRequests.linkedThreads",
+      "stream": false,
+      "success": "PullRequestLinkedThreadsResult",
+      "error": "PullRequestsLinkedThreadsRpcError"
+    },
+    {
+      "tag": "pullRequests.detail",
+      "stream": false,
+      "success": "PullRequestDetail",
+      "error": "PullRequestsDetailRpcError"
+    },
+    {
+      "tag": "pullRequests.preview",
+      "stream": false,
+      "success": "PullRequestPreview",
+      "error": "PullRequestsPreviewRpcError"
+    },
+    {
+      "tag": "pullRequests.checks",
+      "stream": false,
+      "success": "PullRequestsChecksSuccess",
+      "error": "PullRequestsChecksRpcError"
+    },
+    {
+      "tag": "pullRequests.activity",
+      "stream": false,
+      "success": "PullRequestActivity",
+      "error": "PullRequestsActivityRpcError"
+    },
+    {
+      "tag": "pullRequests.reviewGuide",
+      "stream": false,
+      "success": "PullRequestReviewGuideResult",
+      "error": "PullRequestsReviewGuideRpcError"
+    },
+    {
+      "tag": "pullRequests.generateReviewGuide",
+      "stream": false,
+      "success": "PullRequestReviewGuideResult",
+      "error": "PullRequestsGenerateReviewGuideRpcError"
+    },
+    {
+      "tag": "pullRequests.threadComments",
+      "stream": false,
+      "success": "PullRequestThreadCommentsResult",
+      "error": "PullRequestsThreadCommentsRpcError"
+    },
+    {
+      "tag": "pullRequests.diffFileContents",
+      "stream": false,
+      "success": "PullRequestDiffFileContentsResult",
+      "error": "PullRequestsDiffFileContentsRpcError"
+    },
+    {
+      "tag": "pullRequests.filesViewed",
+      "stream": false,
+      "success": "PullRequestFilesViewedResult",
+      "error": "PullRequestsFilesViewedRpcError"
+    },
+    {
+      "tag": "pullRequests.changeBreakdown",
+      "stream": false,
+      "success": "PullRequestsChangeBreakdownSuccess",
+      "error": "PullRequestsChangeBreakdownRpcError"
+    },
+    {
+      "tag": "pullRequests.setFilesViewed",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsSetFilesViewedRpcError"
+    },
+    {
+      "tag": "pullRequests.runAction",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsRunActionRpcError"
+    },
+    {
+      "tag": "pullRequests.update",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsUpdateRpcError"
+    },
+    {
+      "tag": "pullRequests.comment",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsCommentRpcError"
+    },
+    {
+      "tag": "pullRequests.updateComment",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsUpdateCommentRpcError"
+    },
+    {
+      "tag": "pullRequests.submitReview",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsSubmitReviewRpcError"
+    },
+    {
+      "tag": "pullRequests.replyToThread",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsReplyToThreadRpcError"
+    },
+    {
+      "tag": "pullRequests.setThreadResolution",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsSetThreadResolutionRpcError"
+    },
+    {
+      "tag": "pullRequests.setReaction",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsSetReactionRpcError"
+    },
+    {
+      "tag": "pullRequests.invalidate",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsInvalidateRpcError"
+    },
+    {
+      "tag": "pullRequests.reportState",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsReportStateRpcError"
+    },
+    {
+      "tag": "pullRequests.subscribeRefreshes",
+      "stream": true,
+      "success": "PullRequestsSubscribeRefreshesChunk",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "pullRequests.reviewerCandidates",
+      "stream": false,
+      "success": "PullRequestReviewerCandidateList",
+      "error": "PullRequestsReviewerCandidatesRpcError"
+    },
+    {
+      "tag": "pullRequests.requestReviewers",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsRequestReviewersRpcError"
+    },
+    {
+      "tag": "pullRequests.labelCandidates",
+      "stream": false,
+      "success": "PullRequestLabelCandidateList",
+      "error": "PullRequestsLabelCandidatesRpcError"
+    },
+    {
+      "tag": "pullRequests.setLabels",
+      "stream": false,
+      "success": null,
+      "error": "PullRequestsSetLabelsRpcError"
+    },
+    {
+      "tag": "sourceControl.lookupRepository",
+      "stream": false,
+      "success": "SourceControlRepositoryInfo",
+      "error": "SourceControlLookupRepositoryRpcError"
+    },
+    {
+      "tag": "sourceControl.cloneRepository",
+      "stream": false,
+      "success": "SourceControlCloneRepositoryResult",
+      "error": "SourceControlCloneRepositoryRpcError"
+    },
+    {
+      "tag": "sourceControl.publishRepository",
+      "stream": false,
+      "success": "SourceControlPublishRepositoryResult",
+      "error": "SourceControlPublishRepositoryRpcError"
+    },
+    {
+      "tag": "sourceControl.signInStart",
+      "stream": false,
+      "success": "SourceControlSignInPrompt",
+      "error": "SourceControlSignInStartRpcError"
+    },
+    {
+      "tag": "sourceControl.signInWait",
+      "stream": false,
+      "success": "SourceControlSignInResult",
+      "error": "SourceControlSignInWaitRpcError"
+    },
+    {
+      "tag": "sourceControl.signInCancel",
+      "stream": false,
+      "success": null,
+      "error": "SourceControlSignInCancelRpcError"
+    },
+    {
+      "tag": "sourceControl.appAccess",
+      "stream": false,
+      "success": "SourceControlAppAccess",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "projectClone.start",
+      "stream": false,
+      "success": "ProjectCloneStartResult",
+      "error": "ProjectCloneStartRpcError"
+    },
+    {
+      "tag": "projectClone.cancel",
+      "stream": false,
+      "success": "ProjectCloneActionResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "projectClone.retry",
+      "stream": false,
+      "success": "ProjectCloneActionResult",
+      "error": "ProjectCloneRetryRpcError"
+    },
+    {
+      "tag": "subscribeProjectClones",
+      "stream": true,
+      "success": "SubscribeProjectClonesChunk",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "projects.listEntries",
+      "stream": false,
+      "success": "ProjectListEntriesResult",
+      "error": "ProjectsListEntriesRpcError"
+    },
+    {
+      "tag": "projects.listIgnoredFiles",
+      "stream": false,
+      "success": "ProjectListIgnoredFilesResult",
+      "error": "ProjectsListIgnoredFilesRpcError"
+    },
+    {
+      "tag": "projects.readFile",
+      "stream": false,
+      "success": "ProjectReadFileResult",
+      "error": "ProjectsReadFileRpcError"
+    },
+    {
+      "tag": "projects.searchContents",
+      "stream": false,
+      "success": "ProjectSearchContentsResult",
+      "error": "ProjectsSearchContentsRpcError"
+    },
+    {
+      "tag": "projects.searchEntries",
+      "stream": false,
+      "success": "ProjectSearchEntriesResult",
+      "error": "ProjectsSearchEntriesRpcError"
+    },
+    {
+      "tag": "projects.ensureScratch",
+      "stream": false,
+      "success": "ProjectEnsureScratchResult",
+      "error": "ProjectsEnsureScratchRpcError"
+    },
+    {
+      "tag": "projects.createNew",
+      "stream": false,
+      "success": "ProjectCreateNewResult",
+      "error": "ProjectsCreateNewRpcError"
+    },
+    {
+      "tag": "projects.writeFile",
+      "stream": false,
+      "success": "ProjectWriteFileResult",
+      "error": "ProjectsWriteFileRpcError"
+    },
+    {
+      "tag": "projects.mutate",
+      "stream": false,
+      "success": "Project",
+      "error": "ProjectsMutateRpcError"
+    },
+    {
+      "tag": "shell.openInEditor",
+      "stream": false,
+      "success": null,
+      "error": "ShellOpenInEditorRpcError"
+    },
+    {
+      "tag": "filesystem.browse",
+      "stream": false,
+      "success": "FilesystemBrowseResult",
+      "error": "FilesystemBrowseRpcError"
+    },
+    {
+      "tag": "filesystem.getMetadata",
+      "stream": false,
+      "success": "FilesystemGetMetadataResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "agentSessions.scan",
+      "stream": false,
+      "success": "AgentSessionScanResult",
+      "error": "AgentSessionsScanRpcError"
+    },
+    {
+      "tag": "agentSessions.import",
+      "stream": false,
+      "success": "AgentSessionImportResult",
+      "error": "AgentSessionsImportRpcError"
+    },
+    {
+      "tag": "assets.createUrl",
+      "stream": false,
+      "success": "AssetCreateUrlResult",
+      "error": "AssetsCreateUrlRpcError"
+    },
+    {
+      "tag": "assets.persistChatAttachments",
+      "stream": false,
+      "success": "PersistChatAttachmentsResult",
+      "error": "AssetsPersistChatAttachmentsRpcError"
+    },
+    {
+      "tag": "attachments.createUploadUrl",
+      "stream": false,
+      "success": "AttachmentCreateUploadUrlResult",
+      "error": "AttachmentsCreateUploadUrlRpcError"
+    },
+    {
+      "tag": "attachments.delete",
+      "stream": false,
+      "success": null,
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "mcpApps.callTool",
+      "stream": false,
+      "success": "McpAppCallToolResult",
+      "error": "McpAppsCallToolRpcError"
+    },
+    {
+      "tag": "mcpApps.toolInfo",
+      "stream": false,
+      "success": "McpAppToolInfo",
+      "error": "McpAppsToolInfoRpcError"
+    },
+    {
+      "tag": "mcpApps.readResource",
+      "stream": false,
+      "success": "McpAppReadResourceResult",
+      "error": "McpAppsReadResourceRpcError"
+    },
+    {
+      "tag": "mcpApps.updateModelContext",
+      "stream": false,
+      "success": null,
+      "error": "McpAppsUpdateModelContextRpcError"
+    },
+    {
+      "tag": "provider.uploadFeedback",
+      "stream": false,
+      "success": "ProviderUploadFeedbackResult",
+      "error": "ProviderUploadFeedbackRpcError"
+    },
+    {
+      "tag": "subscribeVcsStatus",
+      "stream": true,
+      "success": "VcsStatusStreamEvent",
+      "error": "SubscribeVcsStatusRpcError"
+    },
+    {
+      "tag": "subscribeWorktreeSetup",
+      "stream": true,
+      "success": "SubscribeWorktreeSetupChunk",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "worktreeSetup.cancel",
+      "stream": false,
+      "success": "WorktreeSetupCancelResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "vcs.pull",
+      "stream": false,
+      "success": "VcsPullResult",
+      "error": "VcsPullRpcError"
+    },
+    {
+      "tag": "vcs.refreshStatus",
+      "stream": false,
+      "success": "VcsStatusResult",
+      "error": "VcsRefreshStatusRpcError"
+    },
+    {
+      "tag": "git.runStackedAction",
+      "stream": true,
+      "success": "GitActionProgressEvent",
+      "error": "GitRunStackedActionRpcError"
+    },
+    {
+      "tag": "git.resolvePullRequest",
+      "stream": false,
+      "success": "GitResolvePullRequestResult",
+      "error": "GitResolvePullRequestRpcError"
+    },
+    {
+      "tag": "git.preparePullRequestThread",
+      "stream": false,
+      "success": "GitPreparePullRequestThreadResult",
+      "error": "GitPreparePullRequestThreadRpcError"
+    },
+    {
+      "tag": "vcs.listRefs",
+      "stream": false,
+      "success": "VcsListRefsResult",
+      "error": "VcsListRefsRpcError"
+    },
+    {
+      "tag": "vcs.createWorktree",
+      "stream": false,
+      "success": "VcsCreateWorktreeResult",
+      "error": "VcsCreateWorktreeRpcError"
+    },
+    {
+      "tag": "vcs.removeWorktree",
+      "stream": false,
+      "success": null,
+      "error": "VcsRemoveWorktreeRpcError"
+    },
+    {
+      "tag": "vcs.createRef",
+      "stream": false,
+      "success": "VcsCreateRefResult",
+      "error": "VcsCreateRefRpcError"
+    },
+    {
+      "tag": "vcs.switchRef",
+      "stream": false,
+      "success": "VcsSwitchRefResult",
+      "error": "VcsSwitchRefRpcError"
+    },
+    {
+      "tag": "vcs.init",
+      "stream": false,
+      "success": null,
+      "error": "VcsInitRpcError"
+    },
+    {
+      "tag": "review.getDiffPreview",
+      "stream": false,
+      "success": "ReviewDiffPreviewResult",
+      "error": "ReviewGetDiffPreviewRpcError"
+    },
+    {
+      "tag": "review.getDiffFileContents",
+      "stream": false,
+      "success": "ReviewDiffFileContentsResult",
+      "error": "ReviewGetDiffFileContentsRpcError"
+    },
+    {
+      "tag": "terminal.open",
+      "stream": false,
+      "success": "TerminalSessionSnapshot",
+      "error": "TerminalOpenRpcError"
+    },
+    {
+      "tag": "terminal.attach",
+      "stream": true,
+      "success": "TerminalAttachStreamEvent",
+      "error": "TerminalAttachRpcError"
+    },
+    {
+      "tag": "terminal.observe",
+      "stream": true,
+      "success": "TerminalAttachStreamEvent",
+      "error": "TerminalObserveRpcError"
+    },
+    {
+      "tag": "terminal.write",
+      "stream": false,
+      "success": null,
+      "error": "TerminalWriteRpcError"
+    },
+    {
+      "tag": "terminal.resize",
+      "stream": false,
+      "success": null,
+      "error": "TerminalResizeRpcError"
+    },
+    {
+      "tag": "terminal.clear",
+      "stream": false,
+      "success": null,
+      "error": "TerminalClearRpcError"
+    },
+    {
+      "tag": "terminal.close",
+      "stream": false,
+      "success": null,
+      "error": "TerminalCloseRpcError"
+    },
+    {
+      "tag": "subscribeTerminalMetadata",
+      "stream": true,
+      "success": "TerminalMetadataStreamEvent",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "preview.open",
+      "stream": false,
+      "success": "PreviewSessionSnapshot",
+      "error": "PreviewOpenRpcError"
+    },
+    {
+      "tag": "preview.resize",
+      "stream": false,
+      "success": "PreviewSessionSnapshot",
+      "error": "PreviewResizeRpcError"
+    },
+    {
+      "tag": "preview.adjust",
+      "stream": false,
+      "success": "PreviewSessionSnapshot",
+      "error": "PreviewAdjustRpcError"
+    },
+    {
+      "tag": "preview.close",
+      "stream": false,
+      "success": null,
+      "error": "PreviewCloseRpcError"
+    },
+    {
+      "tag": "preview.list",
+      "stream": false,
+      "success": "PreviewListResult",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "preview.clearProfile",
+      "stream": false,
+      "success": null,
+      "error": "PreviewClearProfileRpcError"
+    },
+    {
+      "tag": "preview.reportProfiles",
+      "stream": false,
+      "success": null,
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "preview.reportStatus",
+      "stream": false,
+      "success": null,
+      "error": "PreviewReportStatusRpcError"
+    },
+    {
+      "tag": "subscribePreviewEvents",
+      "stream": true,
+      "success": "PreviewEvent",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "preview.stopLocalServer",
+      "stream": false,
+      "success": null,
+      "error": "PreviewStopLocalServerRpcError"
+    },
+    {
+      "tag": "subscribeDiscoveredLocalServers",
+      "stream": true,
+      "success": "DiscoveredLocalServerList",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "device.configure",
+      "stream": false,
+      "success": "DeviceServiceState",
+      "error": "DeviceConfigureRpcError"
+    },
+    {
+      "tag": "device.list",
+      "stream": false,
+      "success": "DeviceServiceState",
+      "error": "DeviceListRpcError"
+    },
+    {
+      "tag": "device.testHost",
+      "stream": false,
+      "success": "DeviceHostSummary",
+      "error": "DeviceTestHostRpcError"
+    },
+    {
+      "tag": "device.easAccount",
+      "stream": false,
+      "success": "DeviceEasAccount",
+      "error": "DeviceEasAccountRpcError"
+    },
+    {
+      "tag": "device.open",
+      "stream": false,
+      "success": "DeviceSession",
+      "error": "DeviceOpenRpcError"
+    },
+    {
+      "tag": "device.close",
+      "stream": false,
+      "success": null,
+      "error": "DeviceCloseRpcError"
+    },
+    {
+      "tag": "device.shutdown",
+      "stream": false,
+      "success": null,
+      "error": "DeviceShutdownRpcError"
+    },
+    {
+      "tag": "device.detail",
+      "stream": false,
+      "success": "DeviceDetail",
+      "error": "DeviceDetailRpcError"
+    },
+    {
+      "tag": "device.action",
+      "stream": false,
+      "success": "DeviceDetail",
+      "error": "DeviceActionRpcError"
+    },
+    {
+      "tag": "subscribeDeviceState",
+      "stream": true,
+      "success": "DeviceServiceState",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "subscribeServerConfig",
+      "stream": true,
+      "success": "ServerConfigStreamEvent",
+      "error": "SubscribeServerConfigRpcError"
+    },
+    {
+      "tag": "subscribeServerLifecycle",
+      "stream": true,
+      "success": "ServerLifecycleStreamEvent",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "subscribeAuthAccess",
+      "stream": true,
+      "success": "AuthAccessStreamEvent",
+      "error": "SubscribeAuthAccessRpcError"
+    },
+    {
+      "tag": "subscribeResourceTelemetry",
+      "stream": true,
+      "success": "ResourceTelemetrySnapshot",
+      "error": "EnvironmentAuthorizationError"
+    },
+    {
+      "tag": "orchestration.dispatchCommand",
+      "stream": false,
+      "success": "OrchestrationV2DispatchCommandResult",
+      "error": "OrchestrationDispatchCommandRpcError"
+    },
+    {
+      "tag": "orchestration.getWorkflowScript",
+      "stream": false,
+      "success": "OrchestrationV2GetWorkflowScriptResult",
+      "error": "OrchestrationGetWorkflowScriptRpcError"
+    },
+    {
+      "tag": "orchestration.stopWorkflow",
+      "stream": false,
+      "success": null,
+      "error": "OrchestrationStopWorkflowRpcError"
+    },
+    {
+      "tag": "orchestration.getTurnItem",
+      "stream": false,
+      "success": "OrchestrationV2GetTurnItemResult",
+      "error": "OrchestrationGetTurnItemRpcError"
+    },
+    {
+      "tag": "orchestration.getTurnDiff",
+      "stream": false,
+      "success": "ThreadTurnDiff",
+      "error": "OrchestrationGetTurnDiffRpcError"
+    },
+    {
+      "tag": "orchestration.getFullThreadDiff",
+      "stream": false,
+      "success": "ThreadTurnDiff",
+      "error": "OrchestrationGetFullThreadDiffRpcError"
+    },
+    {
+      "tag": "orchestration.searchThreads",
+      "stream": false,
+      "success": "OrchestrationV2SearchThreadsResult",
+      "error": "OrchestrationSearchThreadsRpcError"
+    },
+    {
+      "tag": "orchestration.searchThread",
+      "stream": false,
+      "success": "OrchestrationV2SearchThreadResult",
+      "error": "OrchestrationSearchThreadRpcError"
+    },
+    {
+      "tag": "orchestration.searchThreadStream",
+      "stream": true,
+      "success": "OrchestrationV2SearchThreadResult",
+      "error": "OrchestrationSearchThreadStreamRpcError"
+    },
+    {
+      "tag": "orchestration.getArchivedShellSnapshot",
+      "stream": false,
+      "success": "OrchestrationV2ArchivedShellSnapshot",
+      "error": "OrchestrationGetArchivedShellSnapshotRpcError"
+    },
+    {
+      "tag": "orchestration.getThreadFamily",
+      "stream": false,
+      "success": "OrchestrationV2ThreadFamily",
+      "error": "OrchestrationGetThreadFamilyRpcError"
+    },
+    {
+      "tag": "orchestration.getWorktreeThreadIds",
+      "stream": false,
+      "success": "OrchestrationV2WorktreeThreadIds",
+      "error": "OrchestrationGetWorktreeThreadIdsRpcError"
+    },
+    {
+      "tag": "orchestration.getOlderSettledThreads",
+      "stream": false,
+      "success": "OrchestrationV2OlderSettledThreadsPage",
+      "error": "OrchestrationGetOlderSettledThreadsRpcError"
+    },
+    {
+      "tag": "orchestration.getThreadProjection",
+      "stream": false,
+      "success": "OrchestrationV2ThreadProjection",
+      "error": "OrchestrationGetThreadProjectionRpcError"
+    },
+    {
+      "tag": "orchestration.launchThread",
+      "stream": false,
+      "success": "OrchestrationV2ThreadLaunchResult",
+      "error": "OrchestrationLaunchThreadRpcError"
+    },
+    {
+      "tag": "orchestration.subscribeShell",
+      "stream": true,
+      "success": "OrchestrationV2ShellStreamItem",
+      "error": "OrchestrationSubscribeShellRpcError"
+    },
+    {
+      "tag": "orchestration.subscribeThread",
+      "stream": true,
+      "success": "OrchestrationV2ThreadStreamItem",
+      "error": "OrchestrationSubscribeThreadRpcError"
+    },
+    {
+      "tag": "orchestration.subscribeCommandOutput",
+      "stream": true,
+      "success": "OrchestrationV2CommandOutputFrame",
+      "error": "OrchestrationSubscribeCommandOutputRpcError"
+    }
+  ],
+  "http": [
+    {
+      "method": "GET",
+      "path": "/.well-known/t3/environment",
+      "success": "ExecutionEnvironmentDescriptor",
+      "errors": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/session",
+      "success": "AuthSessionState",
+      "errors": [
+        "EnvironmentInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/browser-session",
+      "success": "AuthBrowserSessionResult",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/token",
+      "success": "AuthAccessTokenResult",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentRequestInvalidError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/websocket-ticket",
+      "success": "AuthWebSocketTicketResult",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/websocket-ticket/:use",
+      "success": "AuthWebSocketTicketResult",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/pairing-token",
+      "success": "AuthPairingCredentialResult",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentRequestInvalidError",
+        "EnvironmentScopeRequiredError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/pairing-links/revoke",
+      "success": "AuthPairingLinkRevokeResult",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentScopeRequiredError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/clients/revoke",
+      "success": "AuthClientSessionRevokeResult",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "HttpAuthRevokeClientError403"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/clients/revoke-others",
+      "success": "AuthOtherClientSessionsRevokeResult",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentScopeRequiredError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-protected-resource",
+      "success": "AuthMcpProtectedResourceMetadata",
+      "errors": []
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-protected-resource/mcp",
+      "success": "AuthMcpProtectedResourceMetadata",
+      "errors": []
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-authorization-server",
+      "success": "AuthMcpAuthorizationServerMetadata",
+      "errors": []
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/mcp/register",
+      "success": "AuthMcpRegisteredClient",
+      "errors": [
+        "AuthMcpRegistrationError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/oauth/mcp/authorize",
+      "success": null,
+      "errors": []
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/mcp/approval",
+      "success": "HttpMcpOAuthApprovalResponse",
+      "errors": [
+        "AuthMcpApprovalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/mcp/decision",
+      "success": "AuthMcpApprovalRedirect",
+      "errors": [
+        "AuthMcpApprovalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/oauth/mcp/token",
+      "success": "AuthMcpTokenResult",
+      "errors": [
+        "AuthMcpTokenError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/orchestration/shell",
+      "success": "OrchestrationV2ShellSnapshot",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentScopeRequiredError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/orchestration/threads/:threadId",
+      "success": "OrchestrationV2ThreadDetailSnapshot",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentResourceNotFoundError",
+        "EnvironmentScopeRequiredError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/orchestration/threads/:threadId/transcript",
+      "success": "OrchestrationV2ThreadTranscript",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentRequestInvalidError",
+        "EnvironmentResourceNotFoundError",
+        "EnvironmentScopeRequiredError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/orchestration/threads/:threadId/bounded",
+      "success": "OrchestrationV2ThreadBoundedSnapshot",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentResourceNotFoundError",
+        "EnvironmentScopeRequiredError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/orchestration/threads/:threadId/history",
+      "success": "OrchestrationV2ThreadHistoryPage",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentRequestInvalidError",
+        "EnvironmentResourceNotFoundError",
+        "EnvironmentScopeRequiredError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/pull-requests/diff",
+      "success": "PullRequestDiffResult",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentScopeRequiredError",
+        "PullRequestOperationError",
+        "PullRequestUnavailableError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/projects",
+      "success": "ProjectSnapshot",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentScopeRequiredError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/mutate",
+      "success": "Project",
+      "errors": [
+        "EnvironmentAuthInvalidError",
+        "EnvironmentInternalError",
+        "EnvironmentRequestInvalidError",
+        "EnvironmentScopeRequiredError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/connect/link-proof",
+      "success": "HttpConnectLinkProofResponse",
+      "errors": [
+        "EnvironmentHttpBadRequestError",
+        "EnvironmentHttpConflictError",
+        "HttpConnectLinkProofError401",
+        "HttpConnectLinkProofError403",
+        "HttpConnectLinkProofError500"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/connect/relay-config",
+      "success": "EnvironmentCloudRelayConfigResult",
+      "errors": [
+        "EnvironmentCloudEndpointUnavailableError",
+        "EnvironmentHttpBadRequestError",
+        "EnvironmentHttpConflictError",
+        "HttpConnectRelayConfigError401",
+        "HttpConnectRelayConfigError403",
+        "HttpConnectRelayConfigError500"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/connect/link-state",
+      "success": "EnvironmentCloudLinkStateResult",
+      "errors": [
+        "EnvironmentHttpBadRequestError",
+        "EnvironmentHttpConflictError",
+        "HttpConnectLinkStateError401",
+        "HttpConnectLinkStateError403",
+        "HttpConnectLinkStateError500"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/connect/reachability",
+      "success": "EnvironmentConnectReachability",
+      "errors": [
+        "EnvironmentHttpBadRequestError",
+        "EnvironmentHttpConflictError",
+        "HttpConnectCheckReachabilityError401",
+        "HttpConnectCheckReachabilityError403",
+        "HttpConnectCheckReachabilityError500"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/connect/unlink",
+      "success": "EnvironmentCloudRelayConfigResult",
+      "errors": [
+        "EnvironmentHttpBadRequestError",
+        "EnvironmentHttpConflictError",
+        "HttpConnectUnlinkError401",
+        "HttpConnectUnlinkError403",
+        "HttpConnectUnlinkError500"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/connect/preferences",
+      "success": "EnvironmentCloudLinkStateResult",
+      "errors": [
+        "EnvironmentHttpBadRequestError",
+        "EnvironmentHttpConflictError",
+        "HttpConnectPreferencesError401",
+        "HttpConnectPreferencesError403",
+        "HttpConnectPreferencesError500"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/t3-connect/health",
+      "success": "RelayEnvironmentHealthResponse",
+      "errors": [
+        "EnvironmentHttpBadRequestError",
+        "EnvironmentHttpConflictError",
+        "EnvironmentHttpInternalServerError",
+        "EnvironmentHttpUnauthorizedError",
+        "HttpConnectHealthError403"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/t3-connect/mint-credential",
+      "success": "RelayEnvironmentMintResponse",
+      "errors": [
+        "EnvironmentHttpBadRequestError",
+        "EnvironmentHttpConflictError",
+        "EnvironmentHttpInternalServerError",
+        "EnvironmentHttpUnauthorizedError",
+        "HttpConnectT3MintCredentialError403"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/hooks/:hookId/:token",
+      "success": "HttpWebhooksWebhookPostResponse",
+      "errors": []
+    },
+    {
+      "method": "PUT",
+      "path": "/api/hooks/:hookId/:token",
+      "success": "HttpWebhooksWebhookPutResponse",
+      "errors": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/hooks/:hookId/:token",
+      "success": "HttpWebhooksWebhookPatchResponse",
+      "errors": []
+    },
+    {
+      "method": "GET",
+      "path": "/api/hooks/:hookId/:token",
+      "success": "HttpWebhooksWebhookGetResponse",
+      "errors": []
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "success": "RelayHealthResponse",
+      "errors": [
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-authorization-server",
+      "success": "RelayAuthorizationServerMetadata",
+      "errors": []
+    },
+    {
+      "method": "GET",
+      "path": "/.well-known/oauth-protected-resource",
+      "success": "RelayProtectedResourceMetadata",
+      "errors": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/mobile/devices",
+      "success": "RelayOkResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/mobile/live-activities",
+      "success": "RelayOkResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/mobile/agent-activity",
+      "success": "RelayAgentActivitySnapshotResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/mobile/devices/:deviceId",
+      "success": "RelayOkResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/environments",
+      "success": "RelayListEnvironmentsResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/client/devices",
+      "success": "RelayListDevicesResponseV1",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v2/client/devices",
+      "success": "RelayListDevicesResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/client/environment-links",
+      "success": "RelayEnvironmentLinkResponse",
+      "errors": [
+        "HttpClientLinkEnvironmentError401",
+        "HttpClientLinkEnvironmentError500",
+        "RelayEnvironmentLinkLimitExceededError",
+        "RelayEnvironmentLinkProofInvalidError",
+        "RelayEnvironmentLinkUnavailableError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/client/environment-link-challenges",
+      "success": "RelayEnvironmentLinkChallengeResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/client/environment-links/:environmentId",
+      "success": "RelayOkResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/client/environment-links/:environmentId/tunnel",
+      "success": "RelayOkResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/client/t3chat-link",
+      "success": "RelayT3ChatLinkResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/client/t3chat-link-requests",
+      "success": "RelayT3ChatLinkRequestResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/client/t3chat-link",
+      "success": "RelayOkResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/client/dpop-token",
+      "success": "RelayDpopAccessTokenResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/environments/:environmentId/connect",
+      "success": "RelayEnvironmentConnectResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayEnvironmentConnectNotAuthorizedError",
+        "RelayEnvironmentEndpointTimedOutError",
+        "RelayEnvironmentEndpointUnavailableError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/environments/:environmentId/status",
+      "success": "RelayEnvironmentStatusResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayEnvironmentConnectNotAuthorizedError",
+        "RelayEnvironmentEndpointTimedOutError",
+        "RelayEnvironmentEndpointUnavailableError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/environments/:environmentId/tunnel/recovery",
+      "success": "RelayManagedEndpointRecoveryRegistrationResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/environments/:environmentId/tunnel",
+      "success": "RelayManagedEndpointRecoveryResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/environments/:environmentId/threads/:threadId/agent-activity",
+      "success": "RelayPublishResponse",
+      "errors": [
+        "HttpServerPublishAgentActivityError401",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/environments/:environmentId/link-preferences",
+      "success": "RelayEnvironmentLinkPreferencesRequest",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/environments/:environmentId/hooks/wake",
+      "success": "RelayWakeHeldHooksResponse",
+      "errors": [
+        "RelayAuthInvalidError",
+        "RelayInternalError"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/hooks/:endpointKey/:hookId/:token",
+      "success": null,
+      "errors": []
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/hooks/:endpointKey/:hookId/:token",
+      "success": null,
+      "errors": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/hooks/:endpointKey/:hookId/:token",
+      "success": null,
+      "errors": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/hooks/:endpointKey/:hookId/:token",
+      "success": null,
+      "errors": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/mobile/observe/:projectId/v1/:signal",
+      "success": null,
+      "errors": []
+    }
+  ]
+}

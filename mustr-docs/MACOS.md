@@ -141,9 +141,10 @@ threads as T3 Code's own app.
    - If T3 Code isn't installed, Home offers to install it the way T3's `install.sh` does: the
      runtime in `~/.t3/runtime/versions/`, the `t3` command in `~/.local/bin`, and the launch
      agent.
-2. **Version check.** mustr speaks T3's orchestration protocol 2 (T3 Code 0.1.1,
-   `mustr-crates/t3_client/T3_VERSION`). If your T3 Code speaks an older protocol, Home offers
-   `t3 update`. If it speaks a newer one, mustr needs updating.
+2. **Version check.** mustr speaks T3's orchestration protocol 2 and is built for T3 Code 0.1.3
+   (`mustr-crates/t3_client/T3_VERSION`). Other T3 Code versions on protocol 2 work; for an older
+   one, Home says quietly that 0.1.3 is available. If your T3 Code speaks an older protocol, Home
+   offers `t3 update`. If it speaks a newer one, mustr needs updating.
 3. **Pairing.** mustr finds T3's `t3` command and asks it for a one-time credential:
    `t3 auth pairing create --scope orchestration:read --scope orchestration:operate --scope
    source-control:write --scope filesystem:read --ttl 5m --label mustr --json`.
@@ -165,7 +166,7 @@ threads as T3 Code's own app.
      tokens in that JSON file, protected only by its file permissions (0600).
 
 To try mustr without touching your T3 Code, use its own engine:
-`cargo run -p mustr -- --t3-mode embedded`. It downloads T3 Code 0.1.1 (about 100 MB) into mustr's
+`cargo run -p mustr -- --t3-mode embedded`. It downloads T3 Code 0.1.3 (about 100 MB) into mustr's
 data directory and runs it on a free loopback port, never on 3773.
 
 ## Known gaps

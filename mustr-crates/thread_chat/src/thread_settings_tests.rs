@@ -555,6 +555,8 @@ struct Recorder {
     projection: Mutex<Option<Value>>,
     /// What `call_raw` answers, by tag; anything else fails.
     responses: Mutex<HashMap<String, Value>>,
+    /// RPCs the server doesn't have, as a newer or older T3 than mustr's lacks some.
+    unsupported: Mutex<Vec<String>>,
     raw_calls: Mutex<Vec<RawCall>>,
     commands: Mutex<Vec<OrchestrationV2Command>>,
     launches: Mutex<Vec<OrchestrationV2ThreadLaunchInput>>,
@@ -719,6 +721,15 @@ impl ThreadBackend for Recorder {
             payload,
             access,
         });
+        if self
+            .unsupported
+            .lock()
+            .iter()
+            .any(|unsupported| unsupported == tag)
+        {
+            let error = crate::backend::UnsupportedRpc { tag: tag.into() };
+            return ready(Err(error.into()));
+        }
         ready(
             self.responses
                 .lock()
@@ -842,6 +853,48 @@ async fn drafts_start_with_t3s_defaults(cx: &mut TestAppContext) {
             "initialMessage": { "text": "Add retries to the webhook dispatcher", "attachments": [] }
         })]
     );
+}
+
+#[gpui::test]
+async fn without_get_settings_drafts_read_the_settings_from_the_config(cx: &mut TestAppContext) {
+    // T3's 0.1.4 nightlies dropped `server.getSettings`; their config carries the settings.
+    let backend = Recorder::new();
+    backend.unsupported.lock().push("server.getSettings".into());
+    backend.respond(
+        "server.getConfig",
+        json!({
+            "environment": {
+                "environmentId": "env-1", "label": "workstation", "serverVersion": "0.1.4",
+                "platform": { "os": "linux", "arch": "x64" }, "orchestrationProtocolVersion": 2,
+                "capabilities": {}
+            },
+            "auth": {
+                "policy": "desktop-managed-local", "bootstrapMethods": ["desktop-bootstrap"],
+                "sessionMethods": ["bearer-access-token"], "sessionCookieName": "t3_session"
+            },
+            "cwd": "/srv/t3", "keybindingsConfigPath": "/srv/t3/keybindings.json",
+            "keybindings": [], "issues": [], "providers": [], "availableEditors": [],
+            "observability": {
+                "logsDirectoryPath": "/srv/t3/logs", "localTracingEnabled": false,
+                "otlpTracesEnabled": false, "otlpMetricsEnabled": false
+            },
+            "settings": settings_json()
+        }),
+    );
+    let (view, cx) = open_view(backend.clone(), None, cx);
+    assert_eq!(
+        backend.raw_calls("server.getConfig"),
+        [RawCall {
+            tag: "server.getConfig".into(),
+            payload: json!({}),
+            access: Access::Read,
+        }]
+    );
+    launch(&view, "Add retries to the webhook dispatcher", cx);
+    let launches = backend.launches();
+    // T3's default permission mode and worktree, from the config's settings.
+    assert_eq!(launches[0]["runtimeMode"], "auto-accept-edits");
+    assert_eq!(launches[0]["workspaceStrategy"]["type"], "worktree");
 }
 
 #[gpui::test]

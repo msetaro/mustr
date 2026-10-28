@@ -127,6 +127,8 @@ pub fn unpin(thread_id: &str, command_id: String) -> OrchestrationV2Command {
 pub fn visit(thread_id: &str, visited_at: &str, command_id: String) -> OrchestrationV2Command {
     OrchestrationV2Command::ThreadVisit(OrchestrationV2CommandThreadVisit {
         command_id,
+        opened: None,
+        search_query: None,
         thread_id: thread_id.to_string(),
         type_: OrchestrationV2CommandThreadVisitType::ThreadVisit,
         visited_at: visited_at.to_string(),

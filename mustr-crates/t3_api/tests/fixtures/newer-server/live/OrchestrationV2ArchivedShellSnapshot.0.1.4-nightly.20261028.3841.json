@@ -1,0 +1,23 @@
+[
+  {
+    "schemaVersion": 2,
+    "snapshotSequence": 2,
+    "projects": [
+      {
+        "id": "project-1793228841584",
+        "title": "Capture",
+        "workspaceRoot": "/tmp/claude-1000/t3sync/nightly/home/capture-project",
+        "repositoryIdentity": null,
+        "defaultModelSelection": null,
+        "defaultThreadEnvMode": null,
+        "autoPull": false,
+        "faviconPath": null,
+        "projectIcon": null,
+        "scripts": [],
+        "createdAt": "2026-10-28T23:07:21.586Z",
+        "updatedAt": "2026-10-28T23:07:21.586Z"
+      }
+    ],
+    "threads": []
+  }
+]

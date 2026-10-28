@@ -1,0 +1,72 @@
+[
+  {
+    "snapshotSequence": 2,
+    "threads": [
+      {
+        "createdBy": "user",
+        "creationSource": "web",
+        "id": "thread-1793228841589",
+        "projectId": "project-1793228841584",
+        "title": "Capture what T3 sends",
+        "providerInstanceId": "codex",
+        "modelSelection": {
+          "instanceId": "codex",
+          "model": "gpt-5"
+        },
+        "runtimeMode": "approval-required",
+        "interactionMode": "default",
+        "branch": null,
+        "worktreePath": null,
+        "pullRequests": [],
+        "lineage": {
+          "parentThreadId": null,
+          "relationshipToParent": null,
+          "rootThreadId": "thread-1793228841589"
+        },
+        "forkedFrom": null,
+        "activeProviderThreadId": null,
+        "latestRunId": null,
+        "latestRunRequestedAt": null,
+        "latestRunStartedAt": null,
+        "latestRunCompletedAt": null,
+        "latestRunStopRequested": false,
+        "activeRunId": null,
+        "activityRunStartedAt": null,
+        "activityRunStatus": null,
+        "blockedOnThreadWait": false,
+        "status": "idle",
+        "lastError": null,
+        "lastErrorClass": null,
+        "lastErrorCode": null,
+        "usageLimitResetAt": null,
+        "pendingRuntimeRequest": null,
+        "pendingGuestMessageCount": 0,
+        "latestVisibleMessage": null,
+        "latestUserMessageAt": null,
+        "latestUserAuthoredMessageAt": null,
+        "hasActionableProposedPlan": false,
+        "pendingBackgroundTasks": [],
+        "providerInstanceHistory": [],
+        "goal": null,
+        "itemCount": 0,
+        "visibleItemCount": 0,
+        "createdAt": "2026-10-28T23:07:21.599Z",
+        "updatedAt": "2026-10-28T23:07:21.599Z",
+        "archivedAt": null,
+        "settledOverride": null,
+        "settledAt": null,
+        "unsettledAt": null,
+        "snoozedUntil": null,
+        "snoozedAt": null,
+        "limitRecovery": null,
+        "pinnedAt": null,
+        "autoSettleDisabledAt": null,
+        "pinOrderKey": null,
+        "lastVisitedAt": null,
+        "opens": null,
+        "titleRegeneration": null,
+        "deletedAt": null
+      }
+    ]
+  }
+]

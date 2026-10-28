@@ -41,7 +41,7 @@ use t3_client::t3_api::{
         GitRunStackedActionResultBranchStatus, GitRunStackedActionResultPrStatus, GitStackedAction,
         LaunchEditorInput, OrchestrationV2CommandThreadMetadataUpdate,
         OrchestrationV2CommandThreadMetadataUpdateType, VcsCreateRefInput, VcsListRefsInput,
-        VcsPullInput, VcsRef, VcsStatusInput, VcsStatusLocalResult, VcsStatusRemoteResult,
+        VcsPullInput, VcsRef, VcsRefreshStatusPayload, VcsStatusLocalResult, VcsStatusRemoteResult,
         VcsStatusRemoteResultPrState, VcsStatusSubscriptionInput, VcsSwitchRefInput,
     },
 };
@@ -1126,8 +1126,13 @@ impl ThreadGit {
         let (Some(backend), Some(checkout)) = (self.backend.clone(), self.checkout.clone()) else {
             return;
         };
-        let refresh = backend
-            .call::<rpc::VcsRefreshStatus>(VcsStatusInput { cwd: checkout.cwd }, Access::Read);
+        let refresh = backend.call::<rpc::VcsRefreshStatus>(
+            VcsRefreshStatusPayload {
+                cwd: checkout.cwd,
+                local_only: None,
+            },
+            Access::Read,
+        );
         self._tasks.push(cx.spawn(async move |_, _| {
             if let Err(error) = refresh.await {
                 log::warn!("couldn't refresh git status: {error:#}");

@@ -2,12 +2,12 @@
 
 use serde_json::{Value, json};
 use t3_api::tagged::{OrchestrationV2ThreadShellForkedFrom, ProjectProjectIcon, ServerConfigIssue};
-use t3_api::types::ServerConfigKeybindingsUpdatedPayload;
 use t3_api::types::{
     ExecutionEnvironmentCapabilities, ExecutionEnvironmentPlatform, KeybindingCommand,
     OrchestrationV2PendingRuntimeRequestSummaryKind, PullRequestAction, PullRequestCapabilities,
     ScheduledTaskWebhookFilter, ServerInstallation,
 };
+use t3_api::types::{ServerConfigKeybindingsUpdatedPayload, VcsListRefsResult, VcsStatusResult};
 use t3_api::{ForwardCompatible as _, forward_compat};
 
 fn decode<T: serde::de::DeserializeOwned>(value: Value) -> T {
@@ -153,4 +153,39 @@ fn nullable_unions_have_a_fallback() {
         forward_compat::strictly(|| serde_json::from_value(json!({ "kind": "sticker", "id": 7 })))
             .expect("open unions accept unknown tags");
     assert!(icon.is_unrecognized());
+}
+
+#[test]
+fn one_unreadable_element_never_fails_a_list() {
+    // `vcs.listRefs`: T3 decodes `refs` strictly, so one ref of a newer shape would fail the
+    // whole branch list; this build leaves it out instead.
+    let refs = json!({
+        "hasPrimaryRemote": true, "isRepo": true, "nextCursor": null, "totalCount": 3,
+        "refs": [
+            { "name": "main", "current": true, "isDefault": true, "worktreePath": null },
+            { "name": { "kind": "a-newer-shape" }, "current": false, "isDefault": false },
+            { "name": "feature", "current": false, "isDefault": false, "worktreePath": null }
+        ]
+    });
+    let result: VcsListRefsResult = decode(refs.clone());
+    let names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(names, ["main", "feature"]);
+
+    // Inside a strict pass (a value inside one of T3's own lenient fields, or an untagged
+    // union's first pass), lists stay strict, so the value around them fails as it does in T3.
+    assert!(
+        forward_compat::strictly(|| serde_json::from_value::<VcsListRefsResult>(refs)).is_err()
+    );
+}
+
+#[test]
+fn an_unreadable_optional_value_becomes_none() {
+    // `vcs.refreshStatus`'s `pr`, the pull request of a thread's branch: a value of a shape this
+    // build can't read becomes `None` rather than failing the whole git status.
+    let samples: Vec<Value> =
+        serde_json::from_str(include_str!("fixtures/samples/VcsStatusResult.json")).unwrap();
+    let mut status = samples[0].clone();
+    status["pr"] = json!({ "number": "forty-two", "state": { "a-newer": "shape" } });
+    let status: VcsStatusResult = decode(status);
+    assert_eq!(status.pr, None);
 }

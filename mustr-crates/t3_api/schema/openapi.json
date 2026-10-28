@@ -2260,6 +2260,9 @@
                                 "usageLimitSources": {
                                   "type": "boolean"
                                 },
+                                "providerWorkspaceSnapshotsOnDemand": {
+                                  "type": "boolean"
+                                },
                                 "usagePriceOverrides": {
                                   "type": "boolean"
                                 },

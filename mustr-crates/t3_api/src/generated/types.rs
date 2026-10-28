@@ -17,7 +17,7 @@ pub struct AcpRegistryAcceptUrlAuthResult {
 ///`AcpRegistryConfigurableProvider`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct AcpRegistryConfigurableProvider {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub current: ::std::option::Option<AcpRegistryConfigurableProviderCurrent>,
     #[serde(rename = "providerId")]
     pub provider_id: ::std::string::String,
@@ -97,6 +97,7 @@ pub struct AcpRegistryListProvidersInput {
 ///`AcpRegistryListProvidersResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct AcpRegistryListProvidersResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub providers: ::std::vec::Vec<AcpRegistryConfigurableProvider>,
 }
 ///`AcpRegistryListSessionsInput`
@@ -123,6 +124,7 @@ pub struct AcpRegistryListSessionsResult {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub next_cursor: ::std::option::Option<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub sessions: ::std::vec::Vec<AcpRegistrySession>,
 }
 ///`AcpRegistryLogoutInput`
@@ -157,11 +159,13 @@ pub struct AcpRegistryOperationError {
         rename = "authAction",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub auth_action: ::std::option::Option<AcpRegistryUrlAuthAction>,
     #[serde(
         rename = "authMethods",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub auth_methods: ::std::option::Option<::std::vec::Vec<AcpRegistryProbeAuthMethod>>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub cause: ::std::option::Option<::serde_json::Value>,
@@ -283,6 +287,7 @@ pub struct AcpRegistrySearchInput {
 ///`AcpRegistrySearchResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct AcpRegistrySearchResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub agents: ::std::vec::Vec<AcpRegistrySearchAgent>,
 }
 ///`AcpRegistrySession`
@@ -314,6 +319,7 @@ pub struct AcpRegistrySetProviderInput {
     #[serde(rename = "baseUrl")]
     pub base_url: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub headers: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
     >,
@@ -498,6 +504,7 @@ pub struct AgentSessionProjectCandidate {
     #[serde(rename = "alreadyImported")]
     pub already_imported: bool,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub git: ::std::option::Option<AgentSessionProjectGit>,
     #[serde(
         rename = "lastActiveAt",
@@ -613,6 +620,7 @@ for AgentSessionScanInput {
 ///`AgentSessionScanResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct AgentSessionScanResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub candidates: ::std::vec::Vec<AgentSessionProjectCandidate>,
     #[serde(rename = "scannedAt")]
     pub scanned_at: ::std::string::String,
@@ -689,9 +697,15 @@ pub struct AssetCreateUrlResult {
     #[serde(rename = "expiresAt")]
     pub expires_at: crate::JsNumber,
     #[serde(
+        rename = "fileRevision",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub file_revision: ::std::option::Option<::std::string::String>,
+    #[serde(
         rename = "imageDimensions",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub image_dimensions: ::std::option::Option<AssetImageDimensions>,
     #[serde(rename = "relativeUrl")]
     pub relative_url: ::std::string::String,
@@ -700,67 +714,6 @@ pub struct AssetCreateUrlResult {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub source_path: ::std::option::Option<::std::string::String>,
-}
-///`AssetGitHubMediaUrlValidationError`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-pub struct AssetGitHubMediaUrlValidationError {
-    #[serde(rename = "_tag")]
-    pub tag: AssetGitHubMediaUrlValidationErrorTag,
-}
-///`AssetGitHubMediaUrlValidationErrorTag`
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd
-)]
-pub enum AssetGitHubMediaUrlValidationErrorTag {
-    AssetGitHubMediaUrlValidationError,
-}
-impl ::std::fmt::Display for AssetGitHubMediaUrlValidationErrorTag {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::AssetGitHubMediaUrlValidationError => {
-                f.write_str("AssetGitHubMediaUrlValidationError")
-            }
-        }
-    }
-}
-impl ::std::str::FromStr for AssetGitHubMediaUrlValidationErrorTag {
-    type Err = self::error::ConversionError;
-    fn from_str(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "AssetGitHubMediaUrlValidationError" => {
-                Ok(Self::AssetGitHubMediaUrlValidationError)
-            }
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for AssetGitHubMediaUrlValidationErrorTag {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String>
-for AssetGitHubMediaUrlValidationErrorTag {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 ///`AssetImageDimensions`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -1033,6 +986,7 @@ pub struct AssetResourceAttachment {
         rename = "renderIntent",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub render_intent: ::std::option::Option<AssetResourceAttachmentRenderIntent>,
     #[serde(rename = "_tag")]
     pub tag: AssetResourceAttachmentTag,
@@ -1262,11 +1216,66 @@ impl ::std::convert::TryFrom<::std::string::String> for AssetResourceGithubMedia
 ///`AssetResourceMediaFile`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct AssetResourceMediaFile {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub disposition: ::std::option::Option<AssetResourceMediaFileDisposition>,
     pub path: ::std::string::String,
     #[serde(rename = "_tag")]
     pub tag: AssetResourceMediaFileTag,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
+}
+///`AssetResourceMediaFileDisposition`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum AssetResourceMediaFileDisposition {
+    #[serde(rename = "attachment")]
+    Attachment,
+}
+impl ::std::fmt::Display for AssetResourceMediaFileDisposition {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Attachment => f.write_str("attachment"),
+        }
+    }
+}
+impl ::std::str::FromStr for AssetResourceMediaFileDisposition {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "attachment" => Ok(Self::Attachment),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AssetResourceMediaFileDisposition {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for AssetResourceMediaFileDisposition {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 ///`AssetResourceMediaFileTag`
 #[derive(
@@ -1610,6 +1619,67 @@ impl ::std::convert::TryFrom<&str> for AssetSigningKeyLoadErrorTag {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for AssetSigningKeyLoadErrorTag {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`AssetSourceControlMediaUrlValidationError`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct AssetSourceControlMediaUrlValidationError {
+    #[serde(rename = "_tag")]
+    pub tag: AssetSourceControlMediaUrlValidationErrorTag,
+}
+///`AssetSourceControlMediaUrlValidationErrorTag`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum AssetSourceControlMediaUrlValidationErrorTag {
+    AssetGitHubMediaUrlValidationError,
+}
+impl ::std::fmt::Display for AssetSourceControlMediaUrlValidationErrorTag {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::AssetGitHubMediaUrlValidationError => {
+                f.write_str("AssetGitHubMediaUrlValidationError")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for AssetSourceControlMediaUrlValidationErrorTag {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "AssetGitHubMediaUrlValidationError" => {
+                Ok(Self::AssetGitHubMediaUrlValidationError)
+            }
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AssetSourceControlMediaUrlValidationErrorTag {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for AssetSourceControlMediaUrlValidationErrorTag {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -2071,6 +2141,7 @@ pub enum AttachmentCreateUploadUrlInput {
         #[serde(rename = "sizeBytes")]
         size_bytes: i64,
         #[serde(rename = "type", skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
         type_: ::std::option::Option<AttachmentCreateUploadUrlInputVariant0Type>,
     },
     Variant1 {
@@ -2287,8 +2358,10 @@ for AttachmentUploadSigningKeyErrorTag {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct AuthAccessSnapshot {
     #[serde(rename = "clientSessions")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub client_sessions: ::std::vec::Vec<AuthClientSession>,
     #[serde(rename = "pairingLinks")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub pairing_links: ::std::vec::Vec<AuthPairingLink>,
 }
 ///`AuthAccessStreamClientRemovedEvent`
@@ -3276,19 +3349,23 @@ pub struct AuthMcpAuthorizationRequest {
 pub struct AuthMcpAuthorizationServerMetadata {
     pub authorization_endpoint: ::std::string::String,
     pub authorization_response_iss_parameter_supported: bool,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub code_challenge_methods_supported: ::std::vec::Vec<
         AuthMcpAuthorizationServerMetadataCodeChallengeMethodsSupportedItem,
     >,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub grant_types_supported: ::std::vec::Vec<
         AuthMcpAuthorizationServerMetadataGrantTypesSupportedItem,
     >,
     pub issuer: ::std::string::String,
     pub registration_endpoint: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub response_types_supported: ::std::vec::Vec<
         AuthMcpAuthorizationServerMetadataResponseTypesSupportedItem,
     >,
     pub scopes_supported: ::std::vec::Vec<AuthEnvironmentScope>,
     pub token_endpoint: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub token_endpoint_auth_methods_supported: ::std::vec::Vec<
         AuthMcpAuthorizationServerMetadataTokenEndpointAuthMethodsSupportedItem,
     >,
@@ -3524,6 +3601,7 @@ pub struct AuthMcpClientRegistration {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct AuthMcpProtectedResourceMetadata {
     pub authorization_servers: ::std::vec::Vec<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub bearer_methods_supported: ::std::vec::Vec<
         AuthMcpProtectedResourceMetadataBearerMethodsSupportedItem,
     >,
@@ -3589,8 +3667,10 @@ for AuthMcpProtectedResourceMetadataBearerMethodsSupportedItem {
 pub struct AuthMcpRegisteredClient {
     pub client_id: ::std::string::String,
     pub client_name: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub grant_types: ::std::vec::Vec<AuthMcpRegisteredClientGrantTypesItem>,
     pub redirect_uris: ::std::vec::Vec<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub response_types: ::std::vec::Vec<AuthMcpRegisteredClientResponseTypesItem>,
     pub token_endpoint_auth_method: AuthMcpRegisteredClientTokenEndpointAuthMethod,
 }
@@ -4089,6 +4169,12 @@ for AuthTokenExchangeRequestSubjectTokenType {
         value.parse()
     }
 }
+///`AuthWebSocketTicketParams`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct AuthWebSocketTicketParams {
+    #[serde(rename = "use")]
+    pub use_: AuthWebSocketTicketUse,
+}
 ///`AuthWebSocketTicketResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct AuthWebSocketTicketResult {
@@ -4154,6 +4240,7 @@ pub struct BackgroundActivitySettings {
     )]
     pub base_profile: ::std::option::Option<BackgroundActivityProfile>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub overrides: ::std::option::Option<BackgroundActivityOverrides>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub profile: ::std::option::Option<BackgroundActivityProfileSelection>,
@@ -4161,6 +4248,7 @@ pub struct BackgroundActivitySettings {
         rename = "schemaVersion",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub schema_version: ::std::option::Option<BackgroundActivitySettingsSchemaVersion>,
 }
 ///`BackgroundActivitySettingsSchemaVersion`
@@ -4208,6 +4296,7 @@ pub struct BackgroundPolicySnapshot {
     pub active_scope_keys: ::std::vec::Vec<::std::string::String>,
     #[serde(rename = "hostPower")]
     pub host_power: HostPowerSnapshot,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub leases: ::std::vec::Vec<ClientActivityLease>,
     #[serde(rename = "shouldRunOpportunisticWork")]
     pub should_run_opportunistic_work: bool,
@@ -4640,6 +4729,42 @@ pub struct BrowserProfile {
     pub kind: BrowserProfileKind,
     pub name: ::std::string::String,
 }
+///`BrowserRecordingFrameRate`
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(transparent)]
+pub struct BrowserRecordingFrameRate(f64);
+impl ::std::ops::Deref for BrowserRecordingFrameRate {
+    type Target = f64;
+    fn deref(&self) -> &f64 {
+        &self.0
+    }
+}
+impl ::std::convert::From<BrowserRecordingFrameRate> for f64 {
+    fn from(value: BrowserRecordingFrameRate) -> Self {
+        value.0
+    }
+}
+impl ::std::convert::TryFrom<f64> for BrowserRecordingFrameRate {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: f64,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        if ![30_f64, 60_f64].contains(&value) {
+            Err("invalid value".into())
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for BrowserRecordingFrameRate {
+    fn deserialize<D>(deserializer: D) -> ::std::result::Result<Self, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        Self::try_from(<f64>::deserialize(deserializer)?)
+            .map_err(|e| { <D::Error as ::serde::de::Error>::custom(e.to_string()) })
+    }
+}
 ///`ChatFileAttachment`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ChatFileAttachment {
@@ -4650,6 +4775,7 @@ pub struct ChatFileAttachment {
     #[serde(rename = "sizeBytes")]
     pub size_bytes: i64,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source: ::std::option::Option<PastedTextAttachmentSource>,
     #[serde(rename = "type")]
     pub type_: ChatFileAttachmentType,
@@ -4714,7 +4840,7 @@ pub struct ChatGptHandoffInput {
     pub environment_id: ::std::string::String,
     #[serde(rename = "instanceId")]
     pub instance_id: ::std::string::String,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub profile: ::std::option::Option<ChatGptReconnectProfile>,
     #[serde(rename = "returnUrl")]
     pub return_url: ::std::string::String,
@@ -4922,6 +5048,7 @@ pub struct ChatImageAttachment {
     #[serde(rename = "sizeBytes")]
     pub size_bytes: i64,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source: ::std::option::Option<SnapShotSource>,
     #[serde(rename = "type")]
     pub type_: ChatImageAttachmentType,
@@ -5020,6 +5147,7 @@ pub struct ClientActivityLease {
     pub recently_interacted: bool,
     #[serde(rename = "rpcClientId")]
     pub rpc_client_id: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub scopes: ::std::vec::Vec<crate::tagged::BackgroundScope>,
     #[serde(rename = "sessionId")]
     pub session_id: ::std::string::String,
@@ -5061,6 +5189,7 @@ pub struct ClientActivityReportInput {
     pub observed_at: ::std::string::String,
     #[serde(rename = "recentlyInteracted")]
     pub recently_interacted: bool,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub scopes: ::std::vec::Vec<crate::tagged::BackgroundScope>,
     #[serde(rename = "ttlMs", skip_serializing_if = "::std::option::Option::is_none")]
     pub ttl_ms: ::std::option::Option<crate::JsNumber>,
@@ -6344,7 +6473,7 @@ pub struct DeviceDetail {
     pub device_id: ::std::string::String,
     #[serde(
         rename = "foregroundApp",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub foreground_app: ::std::option::Option<DeviceForegroundApp>,
     #[serde(rename = "hostId")]
@@ -6364,6 +6493,7 @@ pub struct DeviceDetailInput {
 ///`DeviceEasAccount`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct DeviceEasAccount {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub apps: ::std::vec::Vec<DeviceEasAccountAppsItem>,
     #[serde(rename = "credentialSource")]
     pub credential_source: DeviceEasAccountCredentialSource,
@@ -6514,6 +6644,7 @@ pub enum DeviceHostSummary {
         id: ::std::string::String,
         kind: DeviceHostSummaryVariant0Kind,
         label: ::std::string::String,
+        #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
         platforms: ::std::vec::Vec<DevicePlatformAvailability>,
         #[serde(
             rename = "toolInspectionError",
@@ -6521,6 +6652,7 @@ pub enum DeviceHostSummary {
         )]
         tool_inspection_error: ::std::option::Option<::std::string::String>,
         #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
         tools: ::std::option::Option<DeviceToolVersions>,
     },
     Variant1 {
@@ -6531,6 +6663,7 @@ pub enum DeviceHostSummary {
         id: ::std::string::String,
         kind: DeviceHostSummaryVariant1Kind,
         label: ::std::string::String,
+        #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
         platforms: ::std::vec::Vec<DevicePlatformAvailability>,
         #[serde(
             rename = "toolInspectionError",
@@ -6538,6 +6671,7 @@ pub enum DeviceHostSummary {
         )]
         tool_inspection_error: ::std::option::Option<::std::string::String>,
         #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
         tools: ::std::option::Option<DeviceToolVersions>,
     },
 }
@@ -6773,6 +6907,7 @@ pub struct DeviceOpenInput {
 pub struct DeviceOperationError {
     pub cause: ::serde_json::Value,
     #[serde(rename = "exitCode", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub exit_code: ::std::option::Option<DeviceOperationErrorExitCode>,
     pub operation: ::std::string::String,
     pub reason: DeviceOperationErrorReason,
@@ -6947,11 +7082,14 @@ pub struct DeviceServiceState {
         rename = "bootingDevices",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub booting_devices: ::std::option::Option<
         ::std::vec::Vec<DeviceServiceStateBootingDevicesItem>,
     >,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub devices: ::std::vec::Vec<DeviceSummary>,
     #[serde(rename = "easHosts", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub eas_hosts: ::std::option::Option<
         ::std::vec::Vec<DeviceServiceStateEasHostsItem>,
     >,
@@ -6964,12 +7102,14 @@ pub struct DeviceServiceState {
     pub host_status_detail: ::std::option::Option<::std::string::String>,
     #[serde(rename = "hostStatuses")]
     pub host_statuses: DeviceHostStatuses,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub hosts: ::std::vec::Vec<DeviceServiceStateHostsItem>,
     #[serde(rename = "hubBasePath")]
     pub hub_base_path: ::std::string::String,
     #[serde(rename = "onboardingCompleted")]
     pub onboarding_completed: bool,
     pub revision: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub sessions: ::std::vec::Vec<DeviceSession>,
     #[serde(
         rename = "supportsEasHosts",
@@ -7016,6 +7156,7 @@ pub struct DeviceServiceStateEasHostsItem {
     pub id: ::std::string::String,
     pub kind: DeviceServiceStateEasHostsItemKind,
     pub label: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub platforms: ::std::vec::Vec<DevicePlatformAvailability>,
     #[serde(
         rename = "toolInspectionError",
@@ -7023,6 +7164,7 @@ pub struct DeviceServiceStateEasHostsItem {
     )]
     pub tool_inspection_error: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tools: ::std::option::Option<DeviceToolVersions>,
 }
 ///`DeviceServiceStateEasHostsItemKind`
@@ -7087,6 +7229,7 @@ pub struct DeviceServiceStateHostsItem {
     pub id: ::std::string::String,
     pub kind: DeviceServiceStateHostsItemKind,
     pub label: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub platforms: ::std::vec::Vec<DevicePlatformAvailability>,
     #[serde(
         rename = "toolInspectionError",
@@ -7094,6 +7237,7 @@ pub struct DeviceServiceStateHostsItem {
     )]
     pub tool_inspection_error: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tools: ::std::option::Option<DeviceToolVersions>,
 }
 ///`DeviceSession`
@@ -7130,6 +7274,7 @@ pub struct DeviceSettings {
     )]
     pub liquid_glass: ::std::option::Option<DeviceSettingsLiquidGlass>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub location: ::std::option::Option<DeviceSettingsLocation>,
     #[serde(
         rename = "networkEnabled",
@@ -7217,7 +7362,7 @@ pub struct DiscoveredLocalServer {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub process_name: ::std::option::Option<::std::string::String>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub terminal: ::std::option::Option<DiscoveredLocalServerTerminal>,
     pub url: ::std::string::String,
 }
@@ -7231,6 +7376,7 @@ pub struct DiscoveredLocalServerList {
     pub configured_url_probing: ::std::option::Option<bool>,
     #[serde(rename = "scannedAt")]
     pub scanned_at: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub servers: ::std::vec::Vec<DiscoveredLocalServer>,
 }
 ///`DiscoveredLocalServerTerminal`
@@ -7597,6 +7743,7 @@ pub struct EnvironmentCloudLinkStateResult {
     #[serde(rename = "publishAgentActivity")]
     pub publish_agent_activity: bool,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub reachability: ::std::option::Option<
         crate::tagged::EnvironmentCloudLinkStateResultReachability,
     >,
@@ -8894,24 +9041,29 @@ pub struct EnvironmentTheme {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub canvas: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub colors: ::std::option::Option<
         ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     >,
     pub id: ::std::string::String,
     pub name: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub variants: ::std::option::Option<EnvironmentThemeVariants>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub version: ::std::option::Option<EnvironmentThemeVersion>,
 }
 ///`EnvironmentThemeVariants`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct EnvironmentThemeVariants {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub dark: ::std::option::Option<
         ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     >,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub light: ::std::option::Option<
         ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     >,
@@ -8999,6 +9151,7 @@ pub struct ExecutionEnvironmentCapabilities {
         rename = "fileAttachments",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub file_attachments: ::std::option::Option<
         ExecutionEnvironmentCapabilitiesFileAttachments,
     >,
@@ -9037,6 +9190,11 @@ pub struct ExecutionEnvironmentCapabilities {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub project_worktree_cleanup: ::std::option::Option<bool>,
+    #[serde(
+        rename = "providerWorkspaceSnapshotsOnDemand",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub provider_workspace_snapshots_on_demand: ::std::option::Option<bool>,
     #[serde(
         rename = "pullRequestChecks",
         skip_serializing_if = "::std::option::Option::is_none"
@@ -9713,6 +9871,7 @@ pub struct FilesystemBrowseInput {
 ///`FilesystemBrowseResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct FilesystemBrowseResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub entries: ::std::vec::Vec<FilesystemBrowseEntry>,
     #[serde(rename = "parentPath")]
     pub parent_path: ::std::string::String,
@@ -9737,6 +9896,7 @@ pub struct FilesystemGetMetadataInput {
 ///`FilesystemGetMetadataResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct FilesystemGetMetadataResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub entries: ::std::vec::Vec<::std::option::Option<FilesystemEntryMetadata>>,
 }
 ///`GitActionProgressEventActionFailed`
@@ -10201,6 +10361,7 @@ pub struct GitCommandError {
         rename = "argumentCount",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub argument_count: ::std::option::Option<GitCommandErrorArgumentCount>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub cause: ::std::option::Option<::serde_json::Value>,
@@ -10208,12 +10369,14 @@ pub struct GitCommandError {
     pub cwd: ::std::string::String,
     pub detail: ::std::string::String,
     #[serde(rename = "exitCode", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub exit_code: ::std::option::Option<GitCommandErrorExitCode>,
     pub operation: ::std::string::String,
     #[serde(
         rename = "outputLength",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub output_length: ::std::option::Option<GitCommandErrorOutputLength>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     #[serde(default, deserialize_with = "crate::forward_compat::option")]
@@ -10222,11 +10385,13 @@ pub struct GitCommandError {
         rename = "stderrLength",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub stderr_length: ::std::option::Option<GitCommandErrorStderrLength>,
     #[serde(
         rename = "stdoutLength",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub stdout_length: ::std::option::Option<GitCommandErrorStdoutLength>,
     #[serde(rename = "_tag")]
     pub tag: GitCommandErrorTag,
@@ -10952,6 +11117,85 @@ for GitRunStackedActionResultToastCtaRunActionKind {
 pub struct GitRunStackedActionToastRunAction {
     pub kind: GitStackedAction,
 }
+///`GuestMessageAttribution`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct GuestMessageAttribution {
+    #[serde(rename = "guestMessageId")]
+    pub guest_message_id: ::std::string::String,
+    pub name: ::std::string::String,
+    #[serde(rename = "shareId", skip_serializing_if = "::std::option::Option::is_none")]
+    pub share_id: ::std::option::Option<::std::string::String>,
+    pub text: ::std::string::String,
+}
+///`GuestShareCreateError`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct GuestShareCreateError {
+    pub reason: GuestShareCreateErrorReason,
+    #[serde(rename = "_tag")]
+    pub tag: GuestShareCreateErrorTag,
+}
+///`GuestShareCreateErrorTag`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum GuestShareCreateErrorTag {
+    GuestShareCreateError,
+}
+impl ::std::fmt::Display for GuestShareCreateErrorTag {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::GuestShareCreateError => f.write_str("GuestShareCreateError"),
+        }
+    }
+}
+impl ::std::str::FromStr for GuestShareCreateErrorTag {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "GuestShareCreateError" => Ok(Self::GuestShareCreateError),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for GuestShareCreateErrorTag {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for GuestShareCreateErrorTag {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`GuestShareCreateInput`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct GuestShareCreateInput {
+    #[serde(rename = "threadId")]
+    pub thread_id: ::std::string::String,
+}
+///`GuestShareCreateResult`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct GuestShareCreateResult {
+    pub share: ThreadGuestShare,
+    pub url: ::std::string::String,
+}
 ///`HostPowerSnapshot`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct HostPowerSnapshot {
@@ -11072,7 +11316,10 @@ pub struct HttpAuthClientsHeaders {
 ///`HttpAuthClientsResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(transparent)]
-pub struct HttpAuthClientsResponse(pub ::std::vec::Vec<AuthClientSession>);
+pub struct HttpAuthClientsResponse(
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub ::std::vec::Vec<AuthClientSession>,
+);
 impl ::std::ops::Deref for HttpAuthClientsResponse {
     type Target = ::std::vec::Vec<AuthClientSession>;
     fn deref(&self) -> &::std::vec::Vec<AuthClientSession> {
@@ -11110,7 +11357,10 @@ pub struct HttpAuthPairingLinksHeaders {
 ///`HttpAuthPairingLinksResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(transparent)]
-pub struct HttpAuthPairingLinksResponse(pub ::std::vec::Vec<AuthPairingLink>);
+pub struct HttpAuthPairingLinksResponse(
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub ::std::vec::Vec<AuthPairingLink>,
+);
 impl ::std::ops::Deref for HttpAuthPairingLinksResponse {
     type Target = ::std::vec::Vec<AuthPairingLink>;
     fn deref(&self) -> &::std::vec::Vec<AuthPairingLink> {
@@ -11164,6 +11414,14 @@ pub struct HttpAuthSessionHeaders {
 ///`HttpAuthTokenHeaders`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct HttpAuthTokenHeaders {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub dpop: ::std::option::Option<::std::string::String>,
+}
+///`HttpAuthWebSocketTicketForHeaders`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+pub struct HttpAuthWebSocketTicketForHeaders {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub authorization: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub dpop: ::std::option::Option<::std::string::String>,
 }
@@ -11413,6 +11671,44 @@ for HttpOrchestrationShellSnapshotHeadersXT3OrchestrationProtocol {
         value.parse()
     }
 }
+///`HttpOrchestrationShellSnapshotQuery`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
+pub struct HttpOrchestrationShellSnapshotQuery {
+    #[serde(
+        rename = "omitIdleSubagents",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub omit_idle_subagents: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "omitOlderSettled",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub omit_older_settled: ::std::option::Option<::std::string::String>,
+}
+///`HttpOrchestrationShellSnapshotResponseThreadsItemOpensValue`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(transparent)]
+pub struct HttpOrchestrationShellSnapshotResponseThreadsItemOpensValue(
+    pub OrchestrationV2ThreadOpens,
+);
+impl ::std::ops::Deref for HttpOrchestrationShellSnapshotResponseThreadsItemOpensValue {
+    type Target = OrchestrationV2ThreadOpens;
+    fn deref(&self) -> &OrchestrationV2ThreadOpens {
+        &self.0
+    }
+}
+impl ::std::convert::From<HttpOrchestrationShellSnapshotResponseThreadsItemOpensValue>
+for OrchestrationV2ThreadOpens {
+    fn from(value: HttpOrchestrationShellSnapshotResponseThreadsItemOpensValue) -> Self {
+        value.0
+    }
+}
+impl ::std::convert::From<OrchestrationV2ThreadOpens>
+for HttpOrchestrationShellSnapshotResponseThreadsItemOpensValue {
+    fn from(value: OrchestrationV2ThreadOpens) -> Self {
+        Self(value)
+    }
+}
 ///`HttpOrchestrationThreadBoundedSnapshotHeaders`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct HttpOrchestrationThreadBoundedSnapshotHeaders {
@@ -11488,10 +11784,20 @@ pub struct HttpOrchestrationThreadBoundedSnapshotParams {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct HttpOrchestrationThreadBoundedSnapshotQuery {
     #[serde(
+        rename = "compactIds",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub compact_ids: ::std::option::Option<::std::string::String>,
+    #[serde(
         rename = "compactTurnItems",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub compact_turn_items: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "dedupeBodies",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub dedupe_bodies: ::std::option::Option<::std::string::String>,
 }
 ///`HttpOrchestrationThreadHistoryPageHeaders`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -11567,6 +11873,11 @@ pub struct HttpOrchestrationThreadHistoryPageParams {
 ///`HttpOrchestrationThreadHistoryPageQuery`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct HttpOrchestrationThreadHistoryPageQuery {
+    #[serde(
+        rename = "compactIds",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub compact_ids: ::std::option::Option<::std::string::String>,
     pub cursor: ::std::string::String,
     #[serde(
         rename = "throughEntryId",
@@ -12310,6 +12621,7 @@ pub struct McpAppUpdateModelContextInput {
         rename = "structuredContent",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub structured_content: ::std::option::Option<
         ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     >,
@@ -12323,6 +12635,7 @@ pub struct ModelCapabilities {
         rename = "optionDescriptors",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub option_descriptors: ::std::option::Option<
         ::std::vec::Vec<crate::tagged::ProviderOptionDescriptor>,
     >,
@@ -12540,6 +12853,30 @@ pub struct OrchestrationGetFullThreadDiffInput {
     #[serde(rename = "toTurnCount")]
     pub to_turn_count: i64,
 }
+///`OrchestrationGetThreadProjectionSuccessThreadOpensValue`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(transparent)]
+pub struct OrchestrationGetThreadProjectionSuccessThreadOpensValue(
+    pub OrchestrationV2ThreadOpens,
+);
+impl ::std::ops::Deref for OrchestrationGetThreadProjectionSuccessThreadOpensValue {
+    type Target = OrchestrationV2ThreadOpens;
+    fn deref(&self) -> &OrchestrationV2ThreadOpens {
+        &self.0
+    }
+}
+impl ::std::convert::From<OrchestrationGetThreadProjectionSuccessThreadOpensValue>
+for OrchestrationV2ThreadOpens {
+    fn from(value: OrchestrationGetThreadProjectionSuccessThreadOpensValue) -> Self {
+        value.0
+    }
+}
+impl ::std::convert::From<OrchestrationV2ThreadOpens>
+for OrchestrationGetThreadProjectionSuccessThreadOpensValue {
+    fn from(value: OrchestrationV2ThreadOpens) -> Self {
+        Self(value)
+    }
+}
 ///`OrchestrationGetTurnDiffError`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationGetTurnDiffError {
@@ -12686,6 +13023,9 @@ for OrchestrationGetWorkflowScriptErrorTag {
 ///`OrchestrationMessageContext`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationMessageContext {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub guest: ::std::option::Option<GuestMessageAttribution>,
     #[serde(default, deserialize_with = "crate::forward_compat::vec")]
     pub records: ::std::vec::Vec<::serde_json::Value>,
     pub version: OrchestrationMessageContextVersion,
@@ -12735,7 +13075,7 @@ pub struct OrchestrationProjectShell {
     pub created_at: ::std::string::String,
     #[serde(
         rename = "defaultModelSelection",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub default_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
@@ -12753,6 +13093,7 @@ pub struct OrchestrationProjectShell {
         rename = "projectIcon",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_icon: ::std::option::Option<
         crate::tagged::OrchestrationProjectShellProjectIcon,
     >,
@@ -12760,7 +13101,9 @@ pub struct OrchestrationProjectShell {
         rename = "repositoryIdentity",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub repository_identity: ::std::option::Option<RepositoryIdentity>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub scripts: ::std::vec::Vec<ProjectScript>,
     pub title: ::std::string::String,
     #[serde(rename = "updatedAt")]
@@ -13015,17 +13358,29 @@ for OrchestrationSearchThreadsErrorTag {
         value.parse()
     }
 }
-///`OrchestrationSearchThreadsInput`
+///`OrchestrationSearchThreadsSuccessThreadsItemOpensValue`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-pub struct OrchestrationSearchThreadsInput {
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub limit: ::std::option::Option<i64>,
-    pub query: ::std::string::String,
+#[serde(transparent)]
+pub struct OrchestrationSearchThreadsSuccessThreadsItemOpensValue(
+    pub OrchestrationV2ThreadOpens,
+);
+impl ::std::ops::Deref for OrchestrationSearchThreadsSuccessThreadsItemOpensValue {
+    type Target = OrchestrationV2ThreadOpens;
+    fn deref(&self) -> &OrchestrationV2ThreadOpens {
+        &self.0
+    }
 }
-///`OrchestrationSearchThreadsResult`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-pub struct OrchestrationSearchThreadsResult {
-    pub matches: ::std::vec::Vec<OrchestrationThreadSearchMatch>,
+impl ::std::convert::From<OrchestrationSearchThreadsSuccessThreadsItemOpensValue>
+for OrchestrationV2ThreadOpens {
+    fn from(value: OrchestrationSearchThreadsSuccessThreadsItemOpensValue) -> Self {
+        value.0
+    }
+}
+impl ::std::convert::From<OrchestrationV2ThreadOpens>
+for OrchestrationSearchThreadsSuccessThreadsItemOpensValue {
+    fn from(value: OrchestrationV2ThreadOpens) -> Self {
+        Self(value)
+    }
 }
 ///`OrchestrationSubscribeArchivedShellPayload`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -13053,16 +13408,49 @@ for OrchestrationSubscribeArchivedShellPayload {
         Self(value)
     }
 }
+///`OrchestrationSubscribeThreadChunkProjectionThreadOpensValue`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(transparent)]
+pub struct OrchestrationSubscribeThreadChunkProjectionThreadOpensValue(
+    pub OrchestrationV2ThreadOpens,
+);
+impl ::std::ops::Deref for OrchestrationSubscribeThreadChunkProjectionThreadOpensValue {
+    type Target = OrchestrationV2ThreadOpens;
+    fn deref(&self) -> &OrchestrationV2ThreadOpens {
+        &self.0
+    }
+}
+impl ::std::convert::From<OrchestrationSubscribeThreadChunkProjectionThreadOpensValue>
+for OrchestrationV2ThreadOpens {
+    fn from(value: OrchestrationSubscribeThreadChunkProjectionThreadOpensValue) -> Self {
+        value.0
+    }
+}
+impl ::std::convert::From<OrchestrationV2ThreadOpens>
+for OrchestrationSubscribeThreadChunkProjectionThreadOpensValue {
+    fn from(value: OrchestrationV2ThreadOpens) -> Self {
+        Self(value)
+    }
+}
 ///`OrchestrationThreadSearchMatch`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationThreadSearchMatch {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub hits: ::std::option::Option<i64>,
     #[serde(
         rename = "messageCreatedAt",
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub message_created_at: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "messageId",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub message_id: ::std::option::Option<::std::string::String>,
     #[serde(rename = "projectId")]
     pub project_id: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub quality: ::std::option::Option<f64>,
     pub snippet: ::std::string::String,
     pub source: OrchestrationThreadSearchSource,
     #[serde(rename = "threadId")]
@@ -13097,6 +13485,7 @@ pub struct OrchestrationV2AppThread {
         rename = "branchPullRequest",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub branch_pull_request: ::std::option::Option<ThreadLinkedPullRequest>,
     #[serde(rename = "createdAt")]
     pub created_at: ::std::string::String,
@@ -13111,11 +13500,17 @@ pub struct OrchestrationV2AppThread {
     pub deleted_at: ::std::option::Option<::std::string::String>,
     #[serde(
         rename = "forkedFrom",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub forked_from: ::std::option::Option<
         crate::tagged::OrchestrationV2AppThreadForkedFrom,
     >,
+    #[serde(
+        rename = "guestShare",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub guest_share: ::std::option::Option<ThreadGuestShare>,
     #[serde(
         rename = "historyOrigin",
         skip_serializing_if = "::std::option::Option::is_none"
@@ -13138,15 +13533,20 @@ pub struct OrchestrationV2AppThread {
         rename = "limitRecovery",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub limit_recovery: ::std::option::Option<OrchestrationV2LimitRecovery>,
     pub lineage: OrchestrationV2AppThreadLineage,
     #[serde(
         rename = "linkedPullRequest",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub linked_pull_request: ::std::option::Option<ThreadLinkedPullRequest>,
     #[serde(rename = "modelSelection")]
     pub model_selection: ModelSelection,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::option")]
+    pub opens: ::std::option::Option<OrchestrationV2ThreadOpens>,
     #[serde(
         rename = "pinOrderKey",
         skip_serializing_if = "::std::option::Option::is_none"
@@ -13162,11 +13562,13 @@ pub struct OrchestrationV2AppThread {
         rename = "pullRequests",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub pull_requests: ::std::option::Option<::std::vec::Vec<ThreadPullRequestLink>>,
     #[serde(
         rename = "rollbackFailure",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub rollback_failure: ::std::option::Option<OrchestrationV2AppThreadRollbackFailure>,
     #[serde(
         rename = "rollbackRequestId",
@@ -13200,6 +13602,7 @@ pub struct OrchestrationV2AppThread {
         rename = "titleRegeneration",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub title_regeneration: ::std::option::Option<
         OrchestrationV2AppThreadTitleRegeneration,
     >,
@@ -13458,11 +13861,13 @@ pub struct OrchestrationV2ApprovalCapabilities {
 ///`OrchestrationV2ArchivedShellSnapshot`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ArchivedShellSnapshot {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub projects: ::std::vec::Vec<OrchestrationProjectShell>,
     #[serde(rename = "schemaVersion")]
     pub schema_version: i64,
     #[serde(rename = "snapshotSequence")]
     pub snapshot_sequence: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub threads: ::std::vec::Vec<OrchestrationV2ThreadShell>,
 }
 ///`OrchestrationV2ArchivedShellStreamItemSnapshot`
@@ -13655,6 +14060,7 @@ pub struct OrchestrationV2Checkpoint {
     pub app_run_ordinal: ::std::option::Option<i64>,
     #[serde(rename = "capturedAt")]
     pub captured_at: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<OrchestrationV2CheckpointFileSummary>,
     pub id: ::std::string::String,
     #[serde(rename = "nodeId")]
@@ -13997,6 +14403,7 @@ pub struct OrchestrationV2CommandDelegatedTaskRequest {
         rename = "workspaceStrategy",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub workspace_strategy: ::std::option::Option<
         crate::tagged::OrchestrationV2CommandWorkspaceStrategy,
     >,
@@ -14129,6 +14536,7 @@ pub struct OrchestrationV2CommandDispatchModeDeferStart {
         rename = "workspaceStrategy",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub workspace_strategy: ::std::option::Option<
         crate::tagged::OrchestrationV2CommandDispatchModeWorkspaceStrategy,
     >,
@@ -14626,10 +15034,12 @@ for OrchestrationV2CommandDispatchModeWorkspaceStrategyWorktreeType {
 ///`OrchestrationV2CommandMessageDispatch`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2CommandMessageDispatch {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attachments: ::std::vec::Vec<crate::tagged::ChatAttachment>,
     #[serde(rename = "commandId")]
     pub command_id: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub context: ::std::option::Option<OrchestrationMessageContext>,
     #[serde(rename = "createdBy")]
     pub created_by: OrchestrationV2Actor,
@@ -14639,6 +15049,7 @@ pub struct OrchestrationV2CommandMessageDispatch {
         rename = "delegatedCompletion",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub delegated_completion: ::std::option::Option<
         OrchestrationV2CommandMessageDispatchDelegatedCompletion,
     >,
@@ -14652,6 +15063,16 @@ pub struct OrchestrationV2CommandMessageDispatch {
     #[serde(rename = "dispatchMode")]
     pub dispatch_mode: crate::tagged::OrchestrationV2CommandDispatchMode,
     #[serde(
+        rename = "guestMessageId",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub guest_message_id: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "idleCompaction",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub idle_compaction: ::std::option::Option<OrchestrationV2IdleCompaction>,
+    #[serde(
         rename = "manualContinuationOfRunId",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
@@ -14662,8 +15083,10 @@ pub struct OrchestrationV2CommandMessageDispatch {
         rename = "modelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub model_selection: ::std::option::Option<ModelSelection>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub notification: ::std::option::Option<OrchestrationV2Notification>,
     #[serde(
         rename = "restartContinuationOfRunId",
@@ -14684,6 +15107,7 @@ pub struct OrchestrationV2CommandMessageDispatch {
         rename = "sourcePlanRef",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_plan_ref: ::std::option::Option<
         OrchestrationV2CommandMessageDispatchSourcePlanRef,
     >,
@@ -15505,12 +15929,14 @@ for OrchestrationV2CommandQueuedRunCancelType {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2CommandQueuedRunEdit {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub attachments: ::std::option::Option<
         ::std::vec::Vec<crate::tagged::ChatAttachment>,
     >,
     #[serde(rename = "commandId")]
     pub command_id: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub context: ::std::option::Option<OrchestrationMessageContext>,
     #[serde(rename = "runId")]
     pub run_id: ::std::string::String,
@@ -15641,6 +16067,70 @@ for OrchestrationV2CommandQueuedRunReorderType {
         value.parse()
     }
 }
+///`OrchestrationV2CommandQueuedRunStart`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2CommandQueuedRunStart {
+    #[serde(rename = "commandId")]
+    pub command_id: ::std::string::String,
+    #[serde(rename = "runId")]
+    pub run_id: ::std::string::String,
+    #[serde(rename = "threadId")]
+    pub thread_id: ::std::string::String,
+    #[serde(rename = "type")]
+    pub type_: OrchestrationV2CommandQueuedRunStartType,
+}
+///`OrchestrationV2CommandQueuedRunStartType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum OrchestrationV2CommandQueuedRunStartType {
+    #[serde(rename = "queued-run.start")]
+    QueuedRunStart,
+}
+impl ::std::fmt::Display for OrchestrationV2CommandQueuedRunStartType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::QueuedRunStart => f.write_str("queued-run.start"),
+        }
+    }
+}
+impl ::std::str::FromStr for OrchestrationV2CommandQueuedRunStartType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "queued-run.start" => Ok(Self::QueuedRunStart),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OrchestrationV2CommandQueuedRunStartType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for OrchestrationV2CommandQueuedRunStartType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 ///`OrchestrationV2CommandRunInterrupt`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2CommandRunInterrupt {
@@ -15716,16 +16206,20 @@ for OrchestrationV2CommandRunInterruptType {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2CommandRuntimeRequestRespond {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub answers: ::std::option::Option<ProviderUserInputAnswers>,
     #[serde(
         rename = "attachmentsByQuestionId",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub attachments_by_question_id: ::std::option::Option<UserInputAttachments>,
     #[serde(rename = "commandId")]
     pub command_id: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub decision: ::std::option::Option<ProviderApprovalDecision>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub feedback: ::std::option::Option<::std::string::String>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
     #[serde(rename = "threadId")]
@@ -16124,6 +16618,7 @@ pub struct OrchestrationV2CommandThreadCreate {
         rename = "importedNativeThread",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub imported_native_thread: ::std::option::Option<
         OrchestrationV2CommandThreadCreateImportedNativeThread,
     >,
@@ -16150,6 +16645,7 @@ pub struct OrchestrationV2CommandThreadCreate {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2CommandThreadCreateImportedNativeThread {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub metadata: ::std::option::Option<OrchestrationV2ProviderThreadNativeMetadata>,
     #[serde(rename = "ref")]
     pub ref_: OrchestrationV2CommandThreadCreateImportedNativeThreadRef,
@@ -16481,6 +16977,135 @@ for OrchestrationV2CommandThreadForkType {
         value.parse()
     }
 }
+///`OrchestrationV2CommandThreadGuestMessageDismiss`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2CommandThreadGuestMessageDismiss {
+    #[serde(rename = "commandId")]
+    pub command_id: ::std::string::String,
+    #[serde(rename = "guestMessageId")]
+    pub guest_message_id: ::std::string::String,
+    #[serde(rename = "threadId")]
+    pub thread_id: ::std::string::String,
+    #[serde(rename = "type")]
+    pub type_: OrchestrationV2CommandThreadGuestMessageDismissType,
+}
+///`OrchestrationV2CommandThreadGuestMessageDismissType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum OrchestrationV2CommandThreadGuestMessageDismissType {
+    #[serde(rename = "thread.guest-message.dismiss")]
+    ThreadGuestMessageDismiss,
+}
+impl ::std::fmt::Display for OrchestrationV2CommandThreadGuestMessageDismissType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ThreadGuestMessageDismiss => {
+                f.write_str("thread.guest-message.dismiss")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for OrchestrationV2CommandThreadGuestMessageDismissType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "thread.guest-message.dismiss" => Ok(Self::ThreadGuestMessageDismiss),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str>
+for OrchestrationV2CommandThreadGuestMessageDismissType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for OrchestrationV2CommandThreadGuestMessageDismissType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`OrchestrationV2CommandThreadGuestShareClose`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2CommandThreadGuestShareClose {
+    #[serde(rename = "commandId")]
+    pub command_id: ::std::string::String,
+    #[serde(rename = "threadId")]
+    pub thread_id: ::std::string::String,
+    #[serde(rename = "type")]
+    pub type_: OrchestrationV2CommandThreadGuestShareCloseType,
+}
+///`OrchestrationV2CommandThreadGuestShareCloseType`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum OrchestrationV2CommandThreadGuestShareCloseType {
+    #[serde(rename = "thread.guest-share.close")]
+    ThreadGuestShareClose,
+}
+impl ::std::fmt::Display for OrchestrationV2CommandThreadGuestShareCloseType {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ThreadGuestShareClose => f.write_str("thread.guest-share.close"),
+        }
+    }
+}
+impl ::std::str::FromStr for OrchestrationV2CommandThreadGuestShareCloseType {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "thread.guest-share.close" => Ok(Self::ThreadGuestShareClose),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OrchestrationV2CommandThreadGuestShareCloseType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for OrchestrationV2CommandThreadGuestShareCloseType {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 ///`OrchestrationV2CommandThreadInteractionModeSet`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2CommandThreadInteractionModeSet {
@@ -16709,11 +17334,13 @@ pub struct OrchestrationV2CommandThreadMetadataUpdate {
         rename = "limitRecovery",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub limit_recovery: ::std::option::Option<OrchestrationV2LimitRecoveryUpdate>,
     #[serde(
         rename = "linkedPullRequest",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub linked_pull_request: ::std::option::Option<ThreadLinkedPullRequest>,
     #[serde(
         rename = "regenerateTitle",
@@ -17006,7 +17633,7 @@ pub struct OrchestrationV2CommandThreadPullRequestLinkSync {
     pub number: i64,
     pub repository: ::std::string::String,
     pub snapshot: ThreadPullRequestSnapshot,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub stack: ::std::option::Option<ThreadPullRequestStack>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
@@ -17125,7 +17752,7 @@ for OrchestrationV2CommandThreadPullRequestLinkType {
 pub struct OrchestrationV2CommandThreadPullRequestSync {
     #[serde(
         rename = "branchPullRequest",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub branch_pull_request: ::std::option::Option<ThreadLinkedPullRequest>,
     #[serde(rename = "commandId")]
@@ -17135,6 +17762,7 @@ pub struct OrchestrationV2CommandThreadPullRequestSync {
         rename = "linkedPullRequest",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub linked_pull_request: ::std::option::Option<ThreadLinkedPullRequest>,
     #[serde(rename = "projectId")]
     pub project_id: ::std::string::String,
@@ -17152,12 +17780,12 @@ pub struct OrchestrationV2CommandThreadPullRequestSyncExpected {
     pub branch: ::std::option::Option<::std::string::String>,
     #[serde(
         rename = "branchPullRequest",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub branch_pull_request: ::std::option::Option<ThreadLinkedPullRequest>,
     #[serde(
         rename = "linkedPullRequest",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub linked_pull_request: ::std::option::Option<ThreadLinkedPullRequest>,
     #[serde(rename = "workspaceRoot")]
@@ -17293,6 +17921,7 @@ pub struct OrchestrationV2CommandThreadPullRequestWatch {
     pub command_id: ::std::string::String,
     pub host: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub link: ::std::option::Option<OrchestrationV2CommandThreadPullRequestWatchLink>,
     pub number: i64,
     pub repository: ::std::string::String,
@@ -17567,6 +18196,11 @@ pub struct OrchestrationV2CommandThreadStop {
     pub command_id: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub reason: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "stopDelegatedTasks",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub stop_delegated_tasks: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(rename = "type")]
@@ -18118,6 +18752,13 @@ for OrchestrationV2CommandThreadUserInputDismissType {
 pub struct OrchestrationV2CommandThreadVisit {
     #[serde(rename = "commandId")]
     pub command_id: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub opened: ::std::option::Option<bool>,
+    #[serde(
+        rename = "searchQuery",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub search_query: ::std::option::Option<::std::string::String>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(rename = "type")]
@@ -18406,6 +19047,7 @@ pub struct OrchestrationV2ContextHandoff {
     )]
     pub created_by_provider_instance_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub delivery: ::std::option::Option<OrchestrationV2ContextHandoffDelivery>,
     #[serde(
         rename = "detailInTurnItem",
@@ -18415,6 +19057,7 @@ pub struct OrchestrationV2ContextHandoff {
     #[serde(rename = "fromProviderThreadIds")]
     pub from_provider_thread_ids: ::std::vec::Vec<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub history: ::std::option::Option<OrchestrationV2ContextHandoffHistory>,
     pub id: ::std::string::String,
     pub status: OrchestrationV2ContextHandoffStatus,
@@ -18464,6 +19107,7 @@ pub struct OrchestrationV2ContextHandoffDelivery {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ContextHandoffHistory {
     pub coverage: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub messages: ::std::vec::Vec<OrchestrationV2HistoricalMessage>,
     #[serde(
         rename = "omittedItemIds",
@@ -18485,11 +19129,13 @@ pub struct OrchestrationV2ContextSourcePoint {
         rename = "providerThreadRef",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_thread_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(
         rename = "providerTurnRef",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_turn_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "runId", skip_serializing_if = "::std::option::Option::is_none")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -18506,7 +19152,7 @@ pub struct OrchestrationV2ContextSourcePoint {
 pub struct OrchestrationV2ContextTransfer {
     #[serde(
         rename = "basePoint",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub base_point: ::std::option::Option<OrchestrationV2ContextSourcePoint>,
     #[serde(
@@ -18521,7 +19167,7 @@ pub struct OrchestrationV2ContextTransfer {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub error: ::std::option::Option<::std::string::String>,
     pub id: ::std::string::String,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub resolution: ::std::option::Option<
         crate::tagged::OrchestrationV2ContextTransferResolution2,
     >,
@@ -18538,6 +19184,7 @@ pub struct OrchestrationV2ContextTransfer {
         rename = "sourceTokenUsage",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_token_usage: ::std::option::Option<OrchestrationV2ProviderTurnTokenUsage>,
     pub status: OrchestrationV2ContextTransferStatus,
     #[serde(
@@ -19178,8 +19825,10 @@ for OrchestrationV2ContextTransferResolutionPortableContextStrategy {
 ///`OrchestrationV2ConversationMessage`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ConversationMessage {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attachments: ::std::vec::Vec<crate::tagged::ChatAttachment>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub context: ::std::option::Option<OrchestrationMessageContext>,
     #[serde(rename = "createdAt")]
     pub created_at: ::std::string::String,
@@ -19191,13 +19840,20 @@ pub struct OrchestrationV2ConversationMessage {
         rename = "delegatedCompletion",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub delegated_completion: ::std::option::Option<
         OrchestrationV2ConversationMessageDelegatedCompletion,
     >,
     pub id: ::std::string::String,
+    #[serde(
+        rename = "idleCompaction",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub idle_compaction: ::std::option::Option<OrchestrationV2IdleCompaction>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
     pub node_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub notification: ::std::option::Option<OrchestrationV2Notification>,
     pub role: OrchestrationV2ConversationMessageRole,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
@@ -19236,7 +19892,7 @@ pub struct OrchestrationV2ConversationMessageDelegatedCompletion {
 ///`OrchestrationV2DelegatedCompletionCohort`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2DelegatedCompletionCohort {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub delivery: ::std::option::Option<OrchestrationV2DelegatedCompletionDelivery>,
     pub disposition: OrchestrationV2DelegatedCompletionCohortDisposition,
     #[serde(rename = "nextGeneration")]
@@ -21297,7 +21953,7 @@ pub struct OrchestrationV2ExecutionNode {
     pub kind: OrchestrationV2ExecutionNodeKind,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(
@@ -21356,6 +22012,17 @@ pub struct OrchestrationV2FileSearchResult {
     pub line: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub preview: ::std::option::Option<::std::string::String>,
+}
+///`OrchestrationV2GetOlderSettledThreadsInput`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2GetOlderSettledThreadsInput {
+    pub before: OrchestrationV2OlderSettledCursor,
+    pub limit: i64,
+    #[serde(
+        rename = "projectIds",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub project_ids: ::std::option::Option<::std::vec::Vec<::std::string::String>>,
 }
 ///`OrchestrationV2GetShellSnapshotError`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21420,6 +22087,12 @@ for OrchestrationV2GetShellSnapshotErrorTag {
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
+}
+///`OrchestrationV2GetThreadFamilyInput`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2GetThreadFamilyInput {
+    #[serde(rename = "threadId")]
+    pub thread_id: ::std::string::String,
 }
 ///`OrchestrationV2GetThreadProjectionError`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21506,7 +22179,7 @@ pub struct OrchestrationV2GetTurnItemInput {
 ///`OrchestrationV2GetTurnItemResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2GetTurnItemResult {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub item: ::std::option::Option<crate::tagged::OrchestrationV2GetTurnItemResultItem>,
 }
 ///`OrchestrationV2GetTurnItemResultItemApprovalRequest`
@@ -21519,15 +22192,21 @@ pub struct OrchestrationV2GetTurnItemResultItemApprovalRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "fullAccessOverride",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub full_access_override: ::std::option::Option<ProviderApprovalFullAccessOverride>,
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
     pub node_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub options: ::std::option::Option<::std::vec::Vec<ProviderApprovalOption>>,
     pub ordinal: i64,
     #[serde(
@@ -21547,6 +22226,8 @@ pub struct OrchestrationV2GetTurnItemResultItemApprovalRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub reason: ::std::option::Option<::std::string::String>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
     #[serde(rename = "requestKind")]
@@ -21564,6 +22245,7 @@ pub struct OrchestrationV2GetTurnItemResultItemApprovalRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon12,
     >,
@@ -21576,6 +22258,7 @@ pub struct OrchestrationV2GetTurnItemResultItemApprovalRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -21644,6 +22327,7 @@ for OrchestrationV2GetTurnItemResultItemApprovalRequestType {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2GetTurnItemResultItemAssistantMessage {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub attachments: ::std::option::Option<
         ::std::vec::Vec<crate::tagged::ChatAttachment>,
     >,
@@ -21657,7 +22341,7 @@ pub struct OrchestrationV2GetTurnItemResultItemAssistantMessage {
     pub message_id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -21688,11 +22372,17 @@ pub struct OrchestrationV2GetTurnItemResultItemAssistantMessage {
     pub status: OrchestrationV2TurnItemStatus,
     pub streaming: bool,
     pub text: ::std::string::String,
+    #[serde(
+        rename = "textOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub text_omitted: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon3,
     >,
@@ -21705,6 +22395,7 @@ pub struct OrchestrationV2GetTurnItemResultItemAssistantMessage {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -21779,11 +22470,17 @@ pub struct OrchestrationV2GetTurnItemResultItemCheckpoint {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<OrchestrationV2CheckpointFileSummary>,
+    #[serde(
+        rename = "filesOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub files_omitted: ::std::option::Option<bool>,
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -21819,6 +22516,7 @@ pub struct OrchestrationV2GetTurnItemResultItemCheckpoint {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon13,
     >,
@@ -21831,6 +22529,7 @@ pub struct OrchestrationV2GetTurnItemResultItemCheckpoint {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -21907,9 +22606,11 @@ pub struct OrchestrationV2GetTurnItemResultItemCommandExecution {
     pub exit_code: ::std::option::Option<i64>,
     pub id: ::std::string::String,
     pub input: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub monitor: ::std::option::Option<bool>,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -21955,6 +22656,7 @@ pub struct OrchestrationV2GetTurnItemResultItemCommandExecution {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon9,
     >,
@@ -21967,6 +22669,7 @@ pub struct OrchestrationV2GetTurnItemResultItemCommandExecution {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -22054,7 +22757,7 @@ pub struct OrchestrationV2GetTurnItemResultItemCompaction {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -22090,6 +22793,7 @@ pub struct OrchestrationV2GetTurnItemResultItemCompaction {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon18,
     >,
@@ -22102,6 +22806,7 @@ pub struct OrchestrationV2GetTurnItemResultItemCompaction {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -22178,7 +22883,7 @@ pub struct OrchestrationV2GetTurnItemResultItemDynamicTool {
     pub input: ::serde_json::Value,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -22219,6 +22924,7 @@ pub struct OrchestrationV2GetTurnItemResultItemDynamicTool {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon24,
     >,
@@ -22236,6 +22942,7 @@ pub struct OrchestrationV2GetTurnItemResultItemDynamicTool {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -22317,7 +23024,7 @@ pub struct OrchestrationV2GetTurnItemResultItemError {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -22339,6 +23046,7 @@ pub struct OrchestrationV2GetTurnItemResultItemError {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub retry: ::std::option::Option<OrchestrationV2ProviderRetry>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -22353,6 +23061,7 @@ pub struct OrchestrationV2GetTurnItemResultItemError {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon17,
     >,
@@ -22365,6 +23074,7 @@ pub struct OrchestrationV2GetTurnItemResultItemError {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -22434,6 +23144,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFileChange {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub additions: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub changes: ::std::option::Option<::std::vec::Vec<OrchestrationV2FileChangeDetail>>,
     #[serde(
         rename = "completedAt",
@@ -22449,7 +23160,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFileChange {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "newStr", skip_serializing_if = "::std::option::Option::is_none")]
@@ -22487,6 +23198,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFileChange {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon8,
     >,
@@ -22499,6 +23211,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFileChange {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -22574,7 +23287,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFileSearch {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -22596,6 +23309,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFileSearch {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub results: ::std::option::Option<::std::vec::Vec<OrchestrationV2FileSearchResult>>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -22610,6 +23324,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFileSearch {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon10,
     >,
@@ -22622,6 +23337,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFileSearch {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -22697,7 +23413,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFork {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -22734,6 +23450,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFork {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon20,
     >,
@@ -22746,6 +23463,7 @@ pub struct OrchestrationV2GetTurnItemResultItemFork {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -22823,6 +23541,7 @@ pub struct OrchestrationV2GetTurnItemResultItemHandoff {
         rename = "fromModelSelections",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub from_model_selections: ::std::option::Option<::std::vec::Vec<ModelSelection>>,
     #[serde(rename = "fromProviderInstanceIds")]
     pub from_provider_instance_ids: ::std::vec::Vec<::std::string::String>,
@@ -22831,7 +23550,7 @@ pub struct OrchestrationV2GetTurnItemResultItemHandoff {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -22874,6 +23593,7 @@ pub struct OrchestrationV2GetTurnItemResultItemHandoff {
     #[serde(rename = "toProviderThreadId")]
     pub to_provider_thread_id: ::std::string::String,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon19,
     >,
@@ -22886,6 +23606,7 @@ pub struct OrchestrationV2GetTurnItemResultItemHandoff {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -22962,7 +23683,7 @@ pub struct OrchestrationV2GetTurnItemResultItemNotification {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -22999,6 +23720,7 @@ pub struct OrchestrationV2GetTurnItemResultItemNotification {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon,
     >,
@@ -23011,6 +23733,7 @@ pub struct OrchestrationV2GetTurnItemResultItemNotification {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -23087,7 +23810,7 @@ pub struct OrchestrationV2GetTurnItemResultItemProposedPlan {
     pub markdown: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -23124,6 +23847,7 @@ pub struct OrchestrationV2GetTurnItemResultItemProposedPlan {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon5,
     >,
@@ -23136,6 +23860,7 @@ pub struct OrchestrationV2GetTurnItemResultItemProposedPlan {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -23211,7 +23936,7 @@ pub struct OrchestrationV2GetTurnItemResultItemReasoning {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -23247,6 +23972,7 @@ pub struct OrchestrationV2GetTurnItemResultItemReasoning {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon4,
     >,
@@ -23259,6 +23985,7 @@ pub struct OrchestrationV2GetTurnItemResultItemReasoning {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -23335,7 +24062,7 @@ pub struct OrchestrationV2GetTurnItemResultItemRunInterruptRequest {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -23369,6 +24096,7 @@ pub struct OrchestrationV2GetTurnItemResultItemRunInterruptRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon14,
     >,
@@ -23381,6 +24109,7 @@ pub struct OrchestrationV2GetTurnItemResultItemRunInterruptRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -23459,7 +24188,7 @@ pub struct OrchestrationV2GetTurnItemResultItemRunInterruptResult {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -23493,6 +24222,7 @@ pub struct OrchestrationV2GetTurnItemResultItemRunInterruptResult {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon15,
     >,
@@ -23505,6 +24235,7 @@ pub struct OrchestrationV2GetTurnItemResultItemRunInterruptResult {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -23577,11 +24308,16 @@ pub struct OrchestrationV2GetTurnItemResultItemSecretRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub delivery: ::std::option::Option<
+        OrchestrationV2GetTurnItemResultItemSecretRequestDelivery,
+    >,
     pub id: ::std::string::String,
     pub label: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -23620,6 +24356,7 @@ pub struct OrchestrationV2GetTurnItemResultItemSecretRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon22,
     >,
@@ -23632,6 +24369,7 @@ pub struct OrchestrationV2GetTurnItemResultItemSecretRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -23642,6 +24380,59 @@ pub struct OrchestrationV2GetTurnItemResultItemSecretRequest {
     pub type_: OrchestrationV2GetTurnItemResultItemSecretRequestType,
     #[serde(rename = "updatedAt")]
     pub updated_at: ::std::string::String,
+}
+///`OrchestrationV2GetTurnItemResultItemSecretRequestDelivery`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum OrchestrationV2GetTurnItemResultItemSecretRequestDelivery {
+    #[serde(rename = "file")]
+    File,
+}
+impl ::std::fmt::Display for OrchestrationV2GetTurnItemResultItemSecretRequestDelivery {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::File => f.write_str("file"),
+        }
+    }
+}
+impl ::std::str::FromStr for OrchestrationV2GetTurnItemResultItemSecretRequestDelivery {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "file" => Ok(Self::File),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str>
+for OrchestrationV2GetTurnItemResultItemSecretRequestDelivery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for OrchestrationV2GetTurnItemResultItemSecretRequestDelivery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 ///`OrchestrationV2GetTurnItemResultItemSecretRequestType`
 #[derive(
@@ -23905,7 +24696,7 @@ pub struct OrchestrationV2GetTurnItemResultItemSubagent {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -23920,6 +24711,11 @@ pub struct OrchestrationV2GetTurnItemResultItemSubagent {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub progress: ::std::option::Option<::std::string::String>,
     pub prompt: ::std::string::String,
+    #[serde(
+        rename = "promptOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub prompt_omitted: ::std::option::Option<bool>,
     #[serde(rename = "providerInstanceId")]
     pub provider_instance_id: ::std::string::String,
     #[serde(
@@ -23934,6 +24730,11 @@ pub struct OrchestrationV2GetTurnItemResultItemSubagent {
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub result: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "resultOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub result_omitted: ::std::option::Option<bool>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
     #[serde(
@@ -23949,6 +24750,7 @@ pub struct OrchestrationV2GetTurnItemResultItemSubagent {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon23,
     >,
@@ -23961,6 +24763,7 @@ pub struct OrchestrationV2GetTurnItemResultItemSubagent {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -24036,7 +24839,7 @@ pub struct OrchestrationV2GetTurnItemResultItemSystemNotice {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -24070,6 +24873,7 @@ pub struct OrchestrationV2GetTurnItemResultItemSystemNotice {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon16,
     >,
@@ -24082,6 +24886,7 @@ pub struct OrchestrationV2GetTurnItemResultItemSystemNotice {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -24157,7 +24962,7 @@ pub struct OrchestrationV2GetTurnItemResultItemThreadCreated {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -24202,6 +25007,7 @@ pub struct OrchestrationV2GetTurnItemResultItemThreadCreated {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon21,
     >,
@@ -24214,6 +25020,7 @@ pub struct OrchestrationV2GetTurnItemResultItemThreadCreated {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -24291,7 +25098,7 @@ pub struct OrchestrationV2GetTurnItemResultItemTodoList {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -24322,12 +25129,14 @@ pub struct OrchestrationV2GetTurnItemResultItemTodoList {
     )]
     pub started_at: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2TurnItemStatus,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub steps: ::std::vec::Vec<OrchestrationV2PlanStep>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon6,
     >,
@@ -24340,6 +25149,7 @@ pub struct OrchestrationV2GetTurnItemResultItemTodoList {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -29172,7 +29982,7 @@ pub struct OrchestrationV2GetTurnItemResultItemUserInputRequest {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -29197,7 +30007,9 @@ pub struct OrchestrationV2GetTurnItemResultItemUserInputRequest {
         rename = "questionAnswer",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub question_answer: ::std::option::Option<UserInputAttachmentAnswerPayload>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub questions: ::std::vec::Vec<OrchestrationV2UserInputQuestion>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
@@ -29205,6 +30017,7 @@ pub struct OrchestrationV2GetTurnItemResultItemUserInputRequest {
         rename = "responseMode",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub response_mode: ::std::option::Option<
         OrchestrationV2GetTurnItemResultItemUserInputRequestResponseMode,
     >,
@@ -29221,6 +30034,7 @@ pub struct OrchestrationV2GetTurnItemResultItemUserInputRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon7,
     >,
@@ -29233,6 +30047,7 @@ pub struct OrchestrationV2GetTurnItemResultItemUserInputRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -29355,6 +30170,7 @@ for OrchestrationV2GetTurnItemResultItemUserInputRequestType {
 ///`OrchestrationV2GetTurnItemResultItemUserMessage`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2GetTurnItemResultItemUserMessage {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attachments: ::std::vec::Vec<crate::tagged::ChatAttachment>,
     #[serde(
         rename = "completedAt",
@@ -29362,19 +30178,25 @@ pub struct OrchestrationV2GetTurnItemResultItemUserMessage {
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub context: ::std::option::Option<OrchestrationMessageContext>,
     #[serde(rename = "createdBy")]
     pub created_by: OrchestrationV2Actor,
     #[serde(rename = "creationSource")]
     pub creation_source: OrchestrationV2CreationSource,
     pub id: ::std::string::String,
+    #[serde(
+        rename = "idleCompaction",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub idle_compaction: ::std::option::Option<OrchestrationV2IdleCompaction>,
     #[serde(rename = "inputIntent")]
     pub input_intent: OrchestrationV2UserMessageInputIntent,
     #[serde(rename = "messageId")]
     pub message_id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -29414,11 +30236,17 @@ pub struct OrchestrationV2GetTurnItemResultItemUserMessage {
     pub started_at: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2TurnItemStatus,
     pub text: ::std::string::String,
+    #[serde(
+        rename = "textOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub text_omitted: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon2,
     >,
@@ -29431,6 +30259,7 @@ pub struct OrchestrationV2GetTurnItemResultItemUserMessage {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -29511,7 +30340,7 @@ pub struct OrchestrationV2GetTurnItemResultItemWebSearch {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -29535,6 +30364,7 @@ pub struct OrchestrationV2GetTurnItemResultItemWebSearch {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub results: ::std::option::Option<::std::vec::Vec<OrchestrationV2WebSearchResult>>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -29549,6 +30379,7 @@ pub struct OrchestrationV2GetTurnItemResultItemWebSearch {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2GetTurnItemResultItemToolIcon11,
     >,
@@ -29561,6 +30392,7 @@ pub struct OrchestrationV2GetTurnItemResultItemWebSearch {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -29640,6 +30472,12 @@ pub struct OrchestrationV2GetWorkflowScriptResult {
     #[serde(rename = "scriptPath")]
     pub script_path: ::std::string::String,
     pub truncated: bool,
+}
+///`OrchestrationV2GetWorktreeThreadIdsInput`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2GetWorktreeThreadIdsInput {
+    #[serde(rename = "worktreePath")]
+    pub worktree_path: ::std::string::String,
 }
 ///`OrchestrationV2HistoricalMessage`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -30255,12 +31093,48 @@ for OrchestrationV2NotificationSourceVariant7Kind {
         value.parse()
     }
 }
+///`OrchestrationV2OlderSettledCount`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2OlderSettledCount {
+    pub count: i64,
+    #[serde(rename = "projectId")]
+    pub project_id: ::std::string::String,
+}
+///`OrchestrationV2OlderSettledCursor`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2OlderSettledCursor {
+    #[serde(rename = "settledAt")]
+    pub settled_at: ::std::string::String,
+    #[serde(rename = "threadId", skip_serializing_if = "::std::option::Option::is_none")]
+    pub thread_id: ::std::option::Option<::std::string::String>,
+}
+///`OrchestrationV2OlderSettledThreads`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2OlderSettledThreads {
+    #[serde(rename = "asOfSequence")]
+    pub as_of_sequence: i64,
+    pub before: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub counts: ::std::vec::Vec<OrchestrationV2OlderSettledCount>,
+}
+///`OrchestrationV2OlderSettledThreadsPage`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2OlderSettledThreadsPage {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub counts: ::std::vec::Vec<OrchestrationV2OlderSettledCount>,
+    #[serde(rename = "snapshotSequence")]
+    pub snapshot_sequence: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub threads: ::std::vec::Vec<OrchestrationV2ThreadShell>,
+}
 ///`OrchestrationV2PendingBackgroundTask`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[serde(remote = "Self")]
 pub enum OrchestrationV2PendingBackgroundTask {
     Variant0 {
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        awaited: ::std::option::Option<bool>,
         #[serde(
             rename = "childThreadId",
             skip_serializing_if = "::std::option::Option::is_none"
@@ -30284,6 +31158,8 @@ pub enum OrchestrationV2PendingBackgroundTask {
     },
     Variant1 {
         #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        awaited: ::std::option::Option<bool>,
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         description: ::std::option::Option<::std::string::String>,
         kind: OrchestrationV2PendingBackgroundTaskVariant1Kind,
         #[serde(
@@ -30295,6 +31171,8 @@ pub enum OrchestrationV2PendingBackgroundTask {
         task_id: ::std::string::String,
     },
     Variant2 {
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        awaited: ::std::option::Option<bool>,
         #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         description: ::std::option::Option<::std::string::String>,
         kind: OrchestrationV2PendingBackgroundTaskVariant2Kind,
@@ -30308,6 +31186,8 @@ pub enum OrchestrationV2PendingBackgroundTask {
     },
     Variant3 {
         #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        awaited: ::std::option::Option<bool>,
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         description: ::std::option::Option<::std::string::String>,
         kind: OrchestrationV2PendingBackgroundTaskVariant3Kind,
         #[serde(
@@ -30319,6 +31199,8 @@ pub enum OrchestrationV2PendingBackgroundTask {
         task_id: ::std::string::String,
     },
     Variant4 {
+        #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+        awaited: ::std::option::Option<bool>,
         #[serde(skip_serializing_if = "::std::option::Option::is_none")]
         description: ::std::option::Option<::std::string::String>,
         #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -30735,6 +31617,7 @@ pub struct OrchestrationV2PlanArtifactTodoList {
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2PlanArtifactTodoListStatus,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub steps: ::std::vec::Vec<OrchestrationV2PlanStep>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
@@ -30845,6 +31728,7 @@ pub struct OrchestrationV2ProviderCapabilities {
         rename = "runtimePolicy",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub runtime_policy: ::std::option::Option<OrchestrationV2RuntimePolicyCapabilities>,
     pub sessions: OrchestrationV2SessionCapabilities,
     pub streaming: OrchestrationV2StreamingCapabilities,
@@ -30967,6 +31851,7 @@ pub struct OrchestrationV2ProviderThread {
         rename = "contextUsage",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub context_usage: ::std::option::Option<ThreadTokenUsageSnapshot>,
     #[serde(rename = "createdAt")]
     pub created_at: ::std::string::String,
@@ -30978,10 +31863,11 @@ pub struct OrchestrationV2ProviderThread {
     pub first_run_ordinal: ::std::option::Option<i64>,
     #[serde(
         rename = "forkedFrom",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub forked_from: ::std::option::Option<OrchestrationV2ProviderThreadForkedFrom>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub goal: ::std::option::Option<OrchestrationV2ProviderGoal>,
     #[serde(rename = "handoffIds")]
     pub handoff_ids: ::std::vec::Vec<::std::string::String>,
@@ -30993,19 +31879,20 @@ pub struct OrchestrationV2ProviderThread {
     pub last_run_ordinal: ::std::option::Option<i64>,
     #[serde(
         rename = "nativeConversationHeadRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_conversation_head_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(
         rename = "nativeMetadata",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub native_metadata: ::std::option::Option<
         OrchestrationV2ProviderThreadNativeMetadata,
     >,
     #[serde(
         rename = "nativeThreadRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_thread_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(
@@ -31017,6 +31904,7 @@ pub struct OrchestrationV2ProviderThread {
         rename = "pendingBackgroundTasks",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub pending_background_tasks: ::std::option::Option<
         ::std::vec::Vec<OrchestrationV2PendingBackgroundTask>,
     >,
@@ -31051,6 +31939,14 @@ pub struct OrchestrationV2ProviderThreadForkedFrom {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct OrchestrationV2ProviderThreadNativeMetadata {
     #[serde(
+        rename = "claudeAttachmentBudget",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub claude_attachment_budget: ::std::option::Option<
+        OrchestrationV2ProviderThreadNativeMetadataClaudeAttachmentBudget,
+    >,
+    #[serde(
         rename = "forkHeadMessageId",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
@@ -31059,6 +31955,7 @@ pub struct OrchestrationV2ProviderThreadNativeMetadata {
         rename = "itemIdentityVersion",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub item_identity_version: ::std::option::Option<
         OrchestrationV2ProviderThreadNativeMetadataItemIdentityVersion,
     >,
@@ -31066,6 +31963,7 @@ pub struct OrchestrationV2ProviderThreadNativeMetadata {
         rename = "modelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub model_selection: ::std::option::Option<ModelSelection>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub title: ::std::option::Option<::std::string::String>,
@@ -31074,6 +31972,14 @@ pub struct OrchestrationV2ProviderThreadNativeMetadata {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub updated_at: ::std::option::Option<::std::string::String>,
+}
+///`OrchestrationV2ProviderThreadNativeMetadataClaudeAttachmentBudget`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2ProviderThreadNativeMetadataClaudeAttachmentBudget {
+    #[serde(rename = "bytesUsed")]
+    pub bytes_used: i64,
+    #[serde(rename = "pagesUsed")]
+    pub pages_used: i64,
 }
 ///`OrchestrationV2ProviderThreadNativeMetadataItemIdentityVersion`
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -31128,7 +32034,7 @@ pub struct OrchestrationV2ProviderTurn {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeTurnRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_turn_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId")]
@@ -31151,11 +32057,13 @@ pub struct OrchestrationV2ProviderTurn {
         rename = "tokenUsage",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub token_usage: ::std::option::Option<OrchestrationV2ProviderTurnTokenUsage>,
     #[serde(
         rename = "turnTokenUsage",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub turn_token_usage: ::std::option::Option<
         OrchestrationV2ProviderTurnTurnTokenUsage,
     >,
@@ -31462,6 +32370,8 @@ for OrchestrationV2ProviderTurnTurnTokenUsageVariant1UsageScope {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2RestartCancelledBackgroundWork {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub awaited: ::std::option::Option<bool>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub id: ::std::option::Option<::std::string::String>,
     pub kind: OrchestrationV2RestartCancelledBackgroundWorkKind,
     pub label: ::std::string::String,
@@ -31493,6 +32403,7 @@ pub struct OrchestrationV2Run {
         rename = "delegatedCompletion",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub delegated_completion: ::std::option::Option<
         OrchestrationV2DelegatedCompletionCohort,
     >,
@@ -31528,6 +32439,7 @@ pub struct OrchestrationV2Run {
         rename = "restartCancelledBackgroundWork",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub restart_cancelled_background_work: ::std::option::Option<
         ::std::vec::Vec<OrchestrationV2RestartCancelledBackgroundWork>,
     >,
@@ -31545,6 +32457,7 @@ pub struct OrchestrationV2Run {
         rename = "sourcePlanRef",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_plan_ref: ::std::option::Option<OrchestrationV2RunSourcePlanRef>,
     #[serde(
         rename = "startedAt",
@@ -31565,6 +32478,7 @@ pub struct OrchestrationV2Run {
         rename = "workspacePreparation",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub workspace_preparation: ::std::option::Option<
         crate::tagged::OrchestrationV2RunWorkspacePreparation,
     >,
@@ -31610,6 +32524,7 @@ pub struct OrchestrationV2RunAttempt {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2RunBackgroundWorkCancelled {
     #[serde(rename = "restartCancelledBackgroundWork")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub restart_cancelled_background_work: ::std::vec::Vec<
         OrchestrationV2RestartCancelledBackgroundWork,
     >,
@@ -31824,16 +32739,19 @@ pub struct OrchestrationV2RuntimePolicyCapabilities {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2RuntimeRequest {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub answers: ::std::option::Option<ProviderUserInputAnswers>,
     #[serde(rename = "createdAt")]
     pub created_at: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub decision: ::std::option::Option<ProviderApprovalDecision>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub feedback: ::std::option::Option<::std::string::String>,
     pub id: ::std::string::String,
     pub kind: OrchestrationV2RuntimeRequestKind,
     #[serde(
         rename = "nativeRequestRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_request_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId")]
@@ -31935,6 +32853,11 @@ for OrchestrationV2RuntimeRequestKind {
 pub struct OrchestrationV2RuntimeRequestResponseCapabilityLive {
     #[serde(rename = "providerSessionId")]
     pub provider_session_id: ::std::string::String,
+    #[serde(
+        rename = "supportsFeedback",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub supports_feedback: ::std::option::Option<bool>,
     #[serde(rename = "type")]
     pub type_: OrchestrationV2RuntimeRequestResponseCapabilityLiveType,
 }
@@ -32183,10 +33106,12 @@ pub struct OrchestrationV2SearchThreadInput {
     pub offset: ::std::option::Option<i64>,
     pub query: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub skills: ::std::option::Option<
         ::std::vec::Vec<OrchestrationV2SearchThreadInputSkillsItem>,
     >,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub start: ::std::option::Option<OrchestrationV2SearchThreadInputStart>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
@@ -32215,9 +33140,13 @@ pub struct OrchestrationV2SearchThreadResult {
     pub active_index: i64,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub complete: ::std::option::Option<bool>,
-    #[serde(rename = "match", deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(
+        rename = "match",
+        deserialize_with = "crate::forward_compat::lenient_option"
+    )]
     pub match_: ::std::option::Option<OrchestrationV2ThreadFindMatch>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub navigation: ::std::option::Option<
         ::std::vec::Vec<OrchestrationV2SearchThreadResultNavigationItem>,
     >,
@@ -32237,6 +33166,47 @@ pub struct OrchestrationV2SearchThreadResultNavigationItem {
     #[serde(rename = "startIndex")]
     pub start_index: i64,
 }
+///`OrchestrationV2SearchThreadsInput`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2SearchThreadsInput {
+    #[serde(
+        rename = "environmentLabel",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub environment_label: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub limit: ::std::option::Option<i64>,
+    #[serde(
+        rename = "olderSettledBefore",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub older_settled_before: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "projectIds",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub project_ids: ::std::option::Option<::std::vec::Vec<::std::string::String>>,
+    pub query: ::std::string::String,
+    #[serde(
+        rename = "titlesOnly",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub titles_only: ::std::option::Option<bool>,
+}
+///`OrchestrationV2SearchThreadsResult`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2SearchThreadsResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub matches: ::std::vec::Vec<OrchestrationThreadSearchMatch>,
+    #[serde(
+        rename = "snapshotSequence",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub snapshot_sequence: ::std::option::Option<i64>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
+    pub threads: ::std::option::Option<::std::vec::Vec<OrchestrationV2ThreadShell>>,
+}
 ///`OrchestrationV2SessionCapabilities`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2SessionCapabilities {
@@ -32255,12 +33225,21 @@ pub struct OrchestrationV2SessionCapabilities {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ShellSnapshot {
     #[serde(rename = "archivedThreads")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub archived_threads: ::std::vec::Vec<OrchestrationV2ThreadShell>,
+    #[serde(
+        rename = "olderSettled",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub older_settled: ::std::option::Option<OrchestrationV2OlderSettledThreads>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub projects: ::std::vec::Vec<OrchestrationProjectShell>,
     #[serde(rename = "schemaVersion")]
     pub schema_version: i64,
     #[serde(rename = "snapshotSequence")]
     pub snapshot_sequence: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub threads: ::std::vec::Vec<OrchestrationV2ThreadShell>,
 }
 ///`OrchestrationV2ShellStreamItemProjectRemoved`
@@ -32822,6 +33801,7 @@ pub struct OrchestrationV2Subagent {
         rename = "completionDelivery",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub completion_delivery: ::std::option::Option<
         OrchestrationV2DelegatedCompletionTaskDelivery,
     >,
@@ -32840,10 +33820,11 @@ pub struct OrchestrationV2Subagent {
         rename = "modelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "nativeTaskRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_task_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     pub origin: OrchestrationV2SubagentOrigin,
@@ -32852,6 +33833,11 @@ pub struct OrchestrationV2Subagent {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub progress: ::std::option::Option<::std::string::String>,
     pub prompt: ::std::string::String,
+    #[serde(
+        rename = "promptOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub prompt_omitted: ::std::option::Option<bool>,
     #[serde(rename = "providerInstanceId")]
     pub provider_instance_id: ::std::string::String,
     #[serde(
@@ -32861,6 +33847,11 @@ pub struct OrchestrationV2Subagent {
     pub provider_thread_id: ::std::option::Option<::std::string::String>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub result: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "resultOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub result_omitted: ::std::option::Option<bool>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
     #[serde(
@@ -32876,6 +33867,7 @@ pub struct OrchestrationV2Subagent {
     #[serde(rename = "updatedAt")]
     pub updated_at: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub workflow: ::std::option::Option<OrchestrationV2SubagentWorkflow>,
 }
 ///`OrchestrationV2SubagentCapabilities`
@@ -32897,6 +33889,7 @@ pub struct OrchestrationV2SubagentCapabilities {
 ///`OrchestrationV2SubagentWorkflow`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2SubagentWorkflow {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub agents: ::std::vec::Vec<OrchestrationV2WorkflowAgent>,
     #[serde(
         rename = "durationMs",
@@ -32905,11 +33898,13 @@ pub struct OrchestrationV2SubagentWorkflow {
     pub duration_ms: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub name: ::std::option::Option<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub phases: ::std::vec::Vec<OrchestrationV2WorkflowPhase>,
     #[serde(
         rename = "runHandles",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub run_handles: ::std::option::Option<OrchestrationV2WorkflowRunHandles>,
     #[serde(
         rename = "toolCalls",
@@ -32939,6 +33934,16 @@ pub struct OrchestrationV2SubscribeShellInput {
     )]
     pub after_sequence: ::std::option::Option<i64>,
     #[serde(
+        rename = "omitIdleSubagents",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub omit_idle_subagents: ::std::option::Option<bool>,
+    #[serde(
+        rename = "omitOlderSettled",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub omit_older_settled: ::std::option::Option<bool>,
+    #[serde(
         rename = "requestCompletionMarker",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
@@ -32953,10 +33958,20 @@ pub struct OrchestrationV2SubscribeThreadInput {
     )]
     pub accept_bounded_snapshot: ::std::option::Option<bool>,
     #[serde(
+        rename = "acceptCompactIds",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub accept_compact_ids: ::std::option::Option<bool>,
+    #[serde(
         rename = "acceptCompactTurnItems",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub accept_compact_turn_items: ::std::option::Option<bool>,
+    #[serde(
+        rename = "acceptDedupedBodies",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub accept_deduped_bodies: ::std::option::Option<bool>,
     #[serde(
         rename = "afterSequence",
         skip_serializing_if = "::std::option::Option::is_none"
@@ -32980,16 +33995,13 @@ pub struct OrchestrationV2ThreadBoundedSnapshot {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub history_cursor: ::std::option::Option<::std::string::String>,
+    #[serde(rename = "idTable", skip_serializing_if = "::std::option::Option::is_none")]
+    pub id_table: ::std::option::Option<bool>,
     #[serde(
         rename = "latestLocalTurnOrdinal",
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub latest_local_turn_ordinal: ::std::option::Option<i64>,
-    #[serde(
-        rename = "payloadBudgetExceeded",
-        skip_serializing_if = "::std::option::Option::is_none"
-    )]
-    pub payload_budget_exceeded: ::std::option::Option<bool>,
     pub projection: OrchestrationV2ThreadProjection,
     #[serde(rename = "snapshotSequence")]
     pub snapshot_sequence: i64,
@@ -33038,6 +34050,14 @@ pub struct OrchestrationV2ThreadDetailSnapshot {
     pub projection: OrchestrationV2ThreadProjection,
     #[serde(rename = "snapshotSequence")]
     pub snapshot_sequence: i64,
+}
+///`OrchestrationV2ThreadFamily`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2ThreadFamily {
+    #[serde(rename = "snapshotSequence")]
+    pub snapshot_sequence: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub threads: ::std::vec::Vec<OrchestrationV2ThreadShell>,
 }
 ///`OrchestrationV2ThreadFindMatch`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -33233,6 +34253,9 @@ for OrchestrationV2ThreadForkSourcePointRunType {
 pub struct OrchestrationV2ThreadHistoryPage {
     #[serde(rename = "hasMoreHistory")]
     pub has_more_history: bool,
+    #[serde(rename = "idTable", skip_serializing_if = "::std::option::Option::is_none")]
+    pub id_table: ::std::option::Option<bool>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub items: ::std::vec::Vec<OrchestrationV2ThreadHistoryPageItemsItem>,
     #[serde(
         rename = "nextCursor",
@@ -33263,15 +34286,21 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemApprovalRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "fullAccessOverride",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub full_access_override: ::std::option::Option<ProviderApprovalFullAccessOverride>,
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
     pub node_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub options: ::std::option::Option<::std::vec::Vec<ProviderApprovalOption>>,
     pub ordinal: i64,
     #[serde(
@@ -33291,6 +34320,8 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemApprovalRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub reason: ::std::option::Option<::std::string::String>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
     #[serde(rename = "requestKind")]
@@ -33308,6 +34339,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemApprovalRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon12,
     >,
@@ -33320,6 +34352,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemApprovalRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -33390,6 +34423,7 @@ for OrchestrationV2ThreadHistoryPageItemsItemItemApprovalRequestType {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ThreadHistoryPageItemsItemItemAssistantMessage {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub attachments: ::std::option::Option<
         ::std::vec::Vec<crate::tagged::ChatAttachment>,
     >,
@@ -33403,7 +34437,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemAssistantMessage {
     pub message_id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -33434,11 +34468,17 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemAssistantMessage {
     pub status: OrchestrationV2TurnItemStatus,
     pub streaming: bool,
     pub text: ::std::string::String,
+    #[serde(
+        rename = "textOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub text_omitted: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon3,
     >,
@@ -33451,6 +34491,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemAssistantMessage {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -33527,11 +34568,17 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemCheckpoint {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<OrchestrationV2CheckpointFileSummary>,
+    #[serde(
+        rename = "filesOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub files_omitted: ::std::option::Option<bool>,
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -33567,6 +34614,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemCheckpoint {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon13,
     >,
@@ -33579,6 +34627,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemCheckpoint {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -33657,9 +34706,11 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemCommandExecution {
     pub exit_code: ::std::option::Option<i64>,
     pub id: ::std::string::String,
     pub input: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub monitor: ::std::option::Option<bool>,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -33705,6 +34756,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemCommandExecution {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon9,
     >,
@@ -33717,6 +34769,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemCommandExecution {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -33806,7 +34859,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemCompaction {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -33842,6 +34895,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemCompaction {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon18,
     >,
@@ -33854,6 +34908,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemCompaction {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -33932,7 +34987,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemDynamicTool {
     pub input: ::serde_json::Value,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -33973,6 +35028,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemDynamicTool {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon24,
     >,
@@ -33990,6 +35046,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemDynamicTool {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -34073,7 +35130,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemError {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -34095,6 +35152,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemError {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub retry: ::std::option::Option<OrchestrationV2ProviderRetry>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -34109,6 +35167,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemError {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon17,
     >,
@@ -34121,6 +35180,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemError {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -34191,6 +35251,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFileChange {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub additions: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub changes: ::std::option::Option<::std::vec::Vec<OrchestrationV2FileChangeDetail>>,
     #[serde(
         rename = "completedAt",
@@ -34206,7 +35267,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFileChange {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "newStr", skip_serializing_if = "::std::option::Option::is_none")]
@@ -34244,6 +35305,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFileChange {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon8,
     >,
@@ -34256,6 +35318,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFileChange {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -34333,7 +35396,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFileSearch {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -34355,6 +35418,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFileSearch {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub results: ::std::option::Option<::std::vec::Vec<OrchestrationV2FileSearchResult>>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -34369,6 +35433,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFileSearch {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon10,
     >,
@@ -34381,6 +35446,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFileSearch {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -34458,7 +35524,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFork {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -34495,6 +35561,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFork {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon20,
     >,
@@ -34507,6 +35574,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemFork {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -34585,6 +35653,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemHandoff {
         rename = "fromModelSelections",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub from_model_selections: ::std::option::Option<::std::vec::Vec<ModelSelection>>,
     #[serde(rename = "fromProviderInstanceIds")]
     pub from_provider_instance_ids: ::std::vec::Vec<::std::string::String>,
@@ -34593,7 +35662,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemHandoff {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -34636,6 +35705,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemHandoff {
     #[serde(rename = "toProviderThreadId")]
     pub to_provider_thread_id: ::std::string::String,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon19,
     >,
@@ -34648,6 +35718,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemHandoff {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -34725,7 +35796,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemNotification {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -34762,6 +35833,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemNotification {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon,
     >,
@@ -34774,6 +35846,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemNotification {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -34852,7 +35925,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemProposedPlan {
     pub markdown: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -34889,6 +35962,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemProposedPlan {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon5,
     >,
@@ -34901,6 +35975,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemProposedPlan {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -34978,7 +36053,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemReasoning {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -35014,6 +36089,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemReasoning {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon4,
     >,
@@ -35026,6 +36102,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemReasoning {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -35102,7 +36179,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemRunInterruptRequest {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -35136,6 +36213,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemRunInterruptRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon14,
     >,
@@ -35148,6 +36226,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemRunInterruptRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -35226,7 +36305,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemRunInterruptResult {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -35260,6 +36339,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemRunInterruptResult {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon15,
     >,
@@ -35272,6 +36352,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemRunInterruptResult {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -35346,11 +36427,16 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub delivery: ::std::option::Option<
+        OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequestDelivery,
+    >,
     pub id: ::std::string::String,
     pub label: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -35389,6 +36475,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon22,
     >,
@@ -35401,6 +36488,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -35411,6 +36499,61 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequest {
     pub type_: OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequestType,
     #[serde(rename = "updatedAt")]
     pub updated_at: ::std::string::String,
+}
+///`OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequestDelivery`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequestDelivery {
+    #[serde(rename = "file")]
+    File,
+}
+impl ::std::fmt::Display
+for OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequestDelivery {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::File => f.write_str("file"),
+        }
+    }
+}
+impl ::std::str::FromStr
+for OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequestDelivery {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "file" => Ok(Self::File),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str>
+for OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequestDelivery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequestDelivery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 ///`OrchestrationV2ThreadHistoryPageItemsItemItemSecretRequestType`
 #[derive(
@@ -35678,7 +36821,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSubagent {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -35693,6 +36836,11 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSubagent {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub progress: ::std::option::Option<::std::string::String>,
     pub prompt: ::std::string::String,
+    #[serde(
+        rename = "promptOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub prompt_omitted: ::std::option::Option<bool>,
     #[serde(rename = "providerInstanceId")]
     pub provider_instance_id: ::std::string::String,
     #[serde(
@@ -35707,6 +36855,11 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSubagent {
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub result: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "resultOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub result_omitted: ::std::option::Option<bool>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
     #[serde(
@@ -35722,6 +36875,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSubagent {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon23,
     >,
@@ -35734,6 +36888,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSubagent {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -35810,7 +36965,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSystemNotice {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -35844,6 +36999,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSystemNotice {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon16,
     >,
@@ -35856,6 +37012,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemSystemNotice {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -35933,7 +37090,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemThreadCreated {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -35978,6 +37135,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemThreadCreated {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon21,
     >,
@@ -35990,6 +37148,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemThreadCreated {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -36069,7 +37228,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemTodoList {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -36100,12 +37259,14 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemTodoList {
     )]
     pub started_at: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2TurnItemStatus,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub steps: ::std::vec::Vec<OrchestrationV2PlanStep>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon6,
     >,
@@ -36118,6 +37279,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemTodoList {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -41065,7 +42227,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemUserInputRequest {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -41090,7 +42252,9 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemUserInputRequest {
         rename = "questionAnswer",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub question_answer: ::std::option::Option<UserInputAttachmentAnswerPayload>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub questions: ::std::vec::Vec<OrchestrationV2UserInputQuestion>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
@@ -41098,6 +42262,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemUserInputRequest {
         rename = "responseMode",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub response_mode: ::std::option::Option<
         OrchestrationV2ThreadHistoryPageItemsItemItemUserInputRequestResponseMode,
     >,
@@ -41114,6 +42279,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemUserInputRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon7,
     >,
@@ -41126,6 +42292,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemUserInputRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -41250,6 +42417,7 @@ for OrchestrationV2ThreadHistoryPageItemsItemItemUserInputRequestType {
 ///`OrchestrationV2ThreadHistoryPageItemsItemItemUserMessage`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ThreadHistoryPageItemsItemItemUserMessage {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attachments: ::std::vec::Vec<crate::tagged::ChatAttachment>,
     #[serde(
         rename = "completedAt",
@@ -41257,19 +42425,25 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemUserMessage {
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub context: ::std::option::Option<OrchestrationMessageContext>,
     #[serde(rename = "createdBy")]
     pub created_by: OrchestrationV2Actor,
     #[serde(rename = "creationSource")]
     pub creation_source: OrchestrationV2CreationSource,
     pub id: ::std::string::String,
+    #[serde(
+        rename = "idleCompaction",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub idle_compaction: ::std::option::Option<OrchestrationV2IdleCompaction>,
     #[serde(rename = "inputIntent")]
     pub input_intent: OrchestrationV2UserMessageInputIntent,
     #[serde(rename = "messageId")]
     pub message_id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -41309,11 +42483,17 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemUserMessage {
     pub started_at: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2TurnItemStatus,
     pub text: ::std::string::String,
+    #[serde(
+        rename = "textOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub text_omitted: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon2,
     >,
@@ -41326,6 +42506,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemUserMessage {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -41408,7 +42589,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemWebSearch {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -41432,6 +42613,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemWebSearch {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub results: ::std::option::Option<::std::vec::Vec<OrchestrationV2WebSearchResult>>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -41446,6 +42628,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemWebSearch {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadHistoryPageItemsItemItemToolIcon11,
     >,
@@ -41458,6 +42641,7 @@ pub struct OrchestrationV2ThreadHistoryPageItemsItemItemWebSearch {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -41609,6 +42793,7 @@ pub struct OrchestrationV2ThreadLaunchInput {
         rename = "initialMessage",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub initial_message: ::std::option::Option<
         OrchestrationV2ThreadLaunchInputInitialMessage,
     >,
@@ -41634,8 +42819,10 @@ pub struct OrchestrationV2ThreadLaunchInput {
 ///`OrchestrationV2ThreadLaunchInputInitialMessage`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ThreadLaunchInputInitialMessage {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attachments: ::std::vec::Vec<crate::tagged::ChatAttachment>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub context: ::std::option::Option<OrchestrationMessageContext>,
     #[serde(
         rename = "messageId",
@@ -41846,29 +43033,58 @@ for OrchestrationV2ThreadLaunchWorkspaceStrategyWorktreeType {
         value.parse()
     }
 }
+///`OrchestrationV2ThreadOpens`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2ThreadOpens {
+    #[serde(rename = "openedAt")]
+    pub opened_at: f64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub picks: ::std::vec::Vec<OrchestrationV2ThreadOpensPicksItem>,
+    pub score: f64,
+}
+///`OrchestrationV2ThreadOpensPicksItem`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2ThreadOpensPicksItem {
+    pub at: f64,
+    pub query: ::std::string::String,
+}
 ///`OrchestrationV2ThreadProjection`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ThreadProjection {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attempts: ::std::vec::Vec<OrchestrationV2RunAttempt>,
     #[serde(rename = "checkpointScopes")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub checkpoint_scopes: ::std::vec::Vec<OrchestrationV2CheckpointScope>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub checkpoints: ::std::vec::Vec<OrchestrationV2Checkpoint>,
     #[serde(rename = "contextHandoffs")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub context_handoffs: ::std::vec::Vec<OrchestrationV2ContextHandoff>,
     #[serde(rename = "contextTransfers")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub context_transfers: ::std::vec::Vec<OrchestrationV2ContextTransfer>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub messages: ::std::vec::Vec<OrchestrationV2ConversationMessage>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub nodes: ::std::vec::Vec<OrchestrationV2ExecutionNode>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub plans: ::std::vec::Vec<crate::tagged::OrchestrationV2PlanArtifact>,
     #[serde(rename = "providerSessions")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub provider_sessions: ::std::vec::Vec<OrchestrationV2ProviderSession>,
     #[serde(rename = "providerThreads")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub provider_threads: ::std::vec::Vec<OrchestrationV2ProviderThread>,
     #[serde(rename = "providerTurns")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub provider_turns: ::std::vec::Vec<OrchestrationV2ProviderTurn>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub runs: ::std::vec::Vec<OrchestrationV2Run>,
     #[serde(rename = "runtimeRequests")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub runtime_requests: ::std::vec::Vec<OrchestrationV2RuntimeRequest>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub subagents: ::std::vec::Vec<OrchestrationV2Subagent>,
     pub thread: OrchestrationV2AppThread,
     #[serde(rename = "turnItems")]
@@ -41879,6 +43095,7 @@ pub struct OrchestrationV2ThreadProjection {
     #[serde(rename = "updatedAt")]
     pub updated_at: ::std::string::String,
     #[serde(rename = "visibleTurnItems")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub visible_turn_items: ::std::vec::Vec<
         OrchestrationV2ThreadProjectionVisibleTurnItemsItem,
     >,
@@ -41893,15 +43110,21 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemApprovalRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "fullAccessOverride",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub full_access_override: ::std::option::Option<ProviderApprovalFullAccessOverride>,
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
     pub node_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub options: ::std::option::Option<::std::vec::Vec<ProviderApprovalOption>>,
     pub ordinal: i64,
     #[serde(
@@ -41921,6 +43144,8 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemApprovalRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub reason: ::std::option::Option<::std::string::String>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
     #[serde(rename = "requestKind")]
@@ -41938,6 +43163,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemApprovalRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon12,
     >,
@@ -41950,6 +43176,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemApprovalRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -42020,6 +43247,7 @@ for OrchestrationV2ThreadProjectionTurnItemsItemApprovalRequestType {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ThreadProjectionTurnItemsItemAssistantMessage {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub attachments: ::std::option::Option<
         ::std::vec::Vec<crate::tagged::ChatAttachment>,
     >,
@@ -42033,7 +43261,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemAssistantMessage {
     pub message_id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -42064,11 +43292,17 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemAssistantMessage {
     pub status: OrchestrationV2TurnItemStatus,
     pub streaming: bool,
     pub text: ::std::string::String,
+    #[serde(
+        rename = "textOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub text_omitted: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon3,
     >,
@@ -42081,6 +43315,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemAssistantMessage {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -42157,11 +43392,17 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemCheckpoint {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<OrchestrationV2CheckpointFileSummary>,
+    #[serde(
+        rename = "filesOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub files_omitted: ::std::option::Option<bool>,
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -42197,6 +43438,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemCheckpoint {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon13,
     >,
@@ -42209,6 +43451,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemCheckpoint {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -42285,9 +43528,11 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemCommandExecution {
     pub exit_code: ::std::option::Option<i64>,
     pub id: ::std::string::String,
     pub input: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub monitor: ::std::option::Option<bool>,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -42333,6 +43578,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemCommandExecution {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon9,
     >,
@@ -42345,6 +43591,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemCommandExecution {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -42434,7 +43681,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemCompaction {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -42470,6 +43717,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemCompaction {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon18,
     >,
@@ -42482,6 +43730,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemCompaction {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -42558,7 +43807,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemDynamicTool {
     pub input: ::serde_json::Value,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -42599,6 +43848,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemDynamicTool {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon24,
     >,
@@ -42616,6 +43866,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemDynamicTool {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -42699,7 +43950,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemError {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -42721,6 +43972,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemError {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub retry: ::std::option::Option<OrchestrationV2ProviderRetry>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -42735,6 +43987,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemError {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon17,
     >,
@@ -42747,6 +44000,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemError {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -42817,6 +44071,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFileChange {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub additions: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub changes: ::std::option::Option<::std::vec::Vec<OrchestrationV2FileChangeDetail>>,
     #[serde(
         rename = "completedAt",
@@ -42832,7 +44087,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFileChange {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "newStr", skip_serializing_if = "::std::option::Option::is_none")]
@@ -42870,6 +44125,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFileChange {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon8,
     >,
@@ -42882,6 +44138,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFileChange {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -42957,7 +44214,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFileSearch {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -42979,6 +44236,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFileSearch {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub results: ::std::option::Option<::std::vec::Vec<OrchestrationV2FileSearchResult>>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -42993,6 +44251,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFileSearch {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon10,
     >,
@@ -43005,6 +44264,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFileSearch {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -43080,7 +44340,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFork {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -43117,6 +44377,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFork {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon20,
     >,
@@ -43129,6 +44390,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemFork {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -43207,6 +44469,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemHandoff {
         rename = "fromModelSelections",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub from_model_selections: ::std::option::Option<::std::vec::Vec<ModelSelection>>,
     #[serde(rename = "fromProviderInstanceIds")]
     pub from_provider_instance_ids: ::std::vec::Vec<::std::string::String>,
@@ -43215,7 +44478,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemHandoff {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -43258,6 +44521,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemHandoff {
     #[serde(rename = "toProviderThreadId")]
     pub to_provider_thread_id: ::std::string::String,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon19,
     >,
@@ -43270,6 +44534,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemHandoff {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -43347,7 +44612,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemNotification {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -43384,6 +44649,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemNotification {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon,
     >,
@@ -43396,6 +44662,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemNotification {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -43474,7 +44741,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemProposedPlan {
     pub markdown: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -43511,6 +44778,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemProposedPlan {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon5,
     >,
@@ -43523,6 +44791,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemProposedPlan {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -43600,7 +44869,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemReasoning {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -43636,6 +44905,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemReasoning {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon4,
     >,
@@ -43648,6 +44918,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemReasoning {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -43724,7 +44995,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemRunInterruptRequest {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -43758,6 +45029,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemRunInterruptRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon14,
     >,
@@ -43770,6 +45042,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemRunInterruptRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -43848,7 +45121,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemRunInterruptResult {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -43882,6 +45155,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemRunInterruptResult {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon15,
     >,
@@ -43894,6 +45168,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemRunInterruptResult {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -43968,11 +45243,16 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSecretRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub delivery: ::std::option::Option<
+        OrchestrationV2ThreadProjectionTurnItemsItemSecretRequestDelivery,
+    >,
     pub id: ::std::string::String,
     pub label: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -44011,6 +45291,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSecretRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon22,
     >,
@@ -44023,6 +45304,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSecretRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -44033,6 +45315,61 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSecretRequest {
     pub type_: OrchestrationV2ThreadProjectionTurnItemsItemSecretRequestType,
     #[serde(rename = "updatedAt")]
     pub updated_at: ::std::string::String,
+}
+///`OrchestrationV2ThreadProjectionTurnItemsItemSecretRequestDelivery`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum OrchestrationV2ThreadProjectionTurnItemsItemSecretRequestDelivery {
+    #[serde(rename = "file")]
+    File,
+}
+impl ::std::fmt::Display
+for OrchestrationV2ThreadProjectionTurnItemsItemSecretRequestDelivery {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::File => f.write_str("file"),
+        }
+    }
+}
+impl ::std::str::FromStr
+for OrchestrationV2ThreadProjectionTurnItemsItemSecretRequestDelivery {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "file" => Ok(Self::File),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str>
+for OrchestrationV2ThreadProjectionTurnItemsItemSecretRequestDelivery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for OrchestrationV2ThreadProjectionTurnItemsItemSecretRequestDelivery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 ///`OrchestrationV2ThreadProjectionTurnItemsItemSecretRequestType`
 #[derive(
@@ -44298,7 +45635,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSubagent {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -44313,6 +45650,11 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSubagent {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub progress: ::std::option::Option<::std::string::String>,
     pub prompt: ::std::string::String,
+    #[serde(
+        rename = "promptOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub prompt_omitted: ::std::option::Option<bool>,
     #[serde(rename = "providerInstanceId")]
     pub provider_instance_id: ::std::string::String,
     #[serde(
@@ -44327,6 +45669,11 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSubagent {
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub result: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "resultOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub result_omitted: ::std::option::Option<bool>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
     #[serde(
@@ -44342,6 +45689,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSubagent {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon23,
     >,
@@ -44354,6 +45702,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSubagent {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -44430,7 +45779,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSystemNotice {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -44464,6 +45813,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSystemNotice {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon16,
     >,
@@ -44476,6 +45826,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemSystemNotice {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -44553,7 +45904,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemThreadCreated {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -44598,6 +45949,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemThreadCreated {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon21,
     >,
@@ -44610,6 +45962,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemThreadCreated {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -44689,7 +46042,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemTodoList {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -44720,12 +46073,14 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemTodoList {
     )]
     pub started_at: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2TurnItemStatus,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub steps: ::std::vec::Vec<OrchestrationV2PlanStep>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon6,
     >,
@@ -44738,6 +46093,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemTodoList {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -49685,7 +51041,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemUserInputRequest {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -49710,7 +51066,9 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemUserInputRequest {
         rename = "questionAnswer",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub question_answer: ::std::option::Option<UserInputAttachmentAnswerPayload>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub questions: ::std::vec::Vec<OrchestrationV2UserInputQuestion>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
@@ -49718,6 +51076,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemUserInputRequest {
         rename = "responseMode",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub response_mode: ::std::option::Option<
         OrchestrationV2ThreadProjectionTurnItemsItemUserInputRequestResponseMode,
     >,
@@ -49734,6 +51093,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemUserInputRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon7,
     >,
@@ -49746,6 +51106,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemUserInputRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -49870,6 +51231,7 @@ for OrchestrationV2ThreadProjectionTurnItemsItemUserInputRequestType {
 ///`OrchestrationV2ThreadProjectionTurnItemsItemUserMessage`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ThreadProjectionTurnItemsItemUserMessage {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attachments: ::std::vec::Vec<crate::tagged::ChatAttachment>,
     #[serde(
         rename = "completedAt",
@@ -49877,19 +51239,25 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemUserMessage {
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub context: ::std::option::Option<OrchestrationMessageContext>,
     #[serde(rename = "createdBy")]
     pub created_by: OrchestrationV2Actor,
     #[serde(rename = "creationSource")]
     pub creation_source: OrchestrationV2CreationSource,
     pub id: ::std::string::String,
+    #[serde(
+        rename = "idleCompaction",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub idle_compaction: ::std::option::Option<OrchestrationV2IdleCompaction>,
     #[serde(rename = "inputIntent")]
     pub input_intent: OrchestrationV2UserMessageInputIntent,
     #[serde(rename = "messageId")]
     pub message_id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -49929,11 +51297,17 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemUserMessage {
     pub started_at: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2TurnItemStatus,
     pub text: ::std::string::String,
+    #[serde(
+        rename = "textOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub text_omitted: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon2,
     >,
@@ -49946,6 +51320,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemUserMessage {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -50028,7 +51403,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemWebSearch {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -50052,6 +51427,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemWebSearch {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub results: ::std::option::Option<::std::vec::Vec<OrchestrationV2WebSearchResult>>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -50066,6 +51442,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemWebSearch {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionTurnItemsItemToolIcon11,
     >,
@@ -50078,6 +51455,7 @@ pub struct OrchestrationV2ThreadProjectionTurnItemsItemWebSearch {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -50163,15 +51541,21 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemApprovalReques
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "fullAccessOverride",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub full_access_override: ::std::option::Option<ProviderApprovalFullAccessOverride>,
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
     pub node_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub options: ::std::option::Option<::std::vec::Vec<ProviderApprovalOption>>,
     pub ordinal: i64,
     #[serde(
@@ -50191,6 +51575,8 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemApprovalReques
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub reason: ::std::option::Option<::std::string::String>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
     #[serde(rename = "requestKind")]
@@ -50208,6 +51594,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemApprovalReques
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon12,
     >,
@@ -50220,6 +51607,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemApprovalReques
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -50290,6 +51678,7 @@ for OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemApprovalRequestType {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemAssistantMessage {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub attachments: ::std::option::Option<
         ::std::vec::Vec<crate::tagged::ChatAttachment>,
     >,
@@ -50303,7 +51692,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemAssistantMessa
     pub message_id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -50334,11 +51723,17 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemAssistantMessa
     pub status: OrchestrationV2TurnItemStatus,
     pub streaming: bool,
     pub text: ::std::string::String,
+    #[serde(
+        rename = "textOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub text_omitted: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon3,
     >,
@@ -50351,6 +51746,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemAssistantMessa
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -50427,11 +51823,17 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemCheckpoint {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<OrchestrationV2CheckpointFileSummary>,
+    #[serde(
+        rename = "filesOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub files_omitted: ::std::option::Option<bool>,
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -50467,6 +51869,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemCheckpoint {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon13,
     >,
@@ -50479,6 +51882,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemCheckpoint {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -50557,9 +51961,11 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemCommandExecuti
     pub exit_code: ::std::option::Option<i64>,
     pub id: ::std::string::String,
     pub input: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub monitor: ::std::option::Option<bool>,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -50605,6 +52011,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemCommandExecuti
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon9,
     >,
@@ -50617,6 +52024,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemCommandExecuti
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -50706,7 +52114,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemCompaction {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -50742,6 +52150,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemCompaction {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon18,
     >,
@@ -50754,6 +52163,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemCompaction {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -50832,7 +52242,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemDynamicTool {
     pub input: ::serde_json::Value,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -50873,6 +52283,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemDynamicTool {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon24,
     >,
@@ -50890,6 +52301,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemDynamicTool {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -50973,7 +52385,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemError {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -50995,6 +52407,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemError {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub retry: ::std::option::Option<OrchestrationV2ProviderRetry>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -51009,6 +52422,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemError {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon17,
     >,
@@ -51021,6 +52435,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemError {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -51093,6 +52508,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFileChange {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub additions: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub changes: ::std::option::Option<::std::vec::Vec<OrchestrationV2FileChangeDetail>>,
     #[serde(
         rename = "completedAt",
@@ -51108,7 +52524,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFileChange {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "newStr", skip_serializing_if = "::std::option::Option::is_none")]
@@ -51146,6 +52562,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFileChange {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon8,
     >,
@@ -51158,6 +52575,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFileChange {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -51235,7 +52653,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFileSearch {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -51257,6 +52675,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFileSearch {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub results: ::std::option::Option<::std::vec::Vec<OrchestrationV2FileSearchResult>>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -51271,6 +52690,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFileSearch {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon10,
     >,
@@ -51283,6 +52703,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFileSearch {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -51360,7 +52781,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFork {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -51397,6 +52818,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFork {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon20,
     >,
@@ -51409,6 +52831,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemFork {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -51489,6 +52912,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemHandoff {
         rename = "fromModelSelections",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub from_model_selections: ::std::option::Option<::std::vec::Vec<ModelSelection>>,
     #[serde(rename = "fromProviderInstanceIds")]
     pub from_provider_instance_ids: ::std::vec::Vec<::std::string::String>,
@@ -51497,7 +52921,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemHandoff {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -51540,6 +52964,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemHandoff {
     #[serde(rename = "toProviderThreadId")]
     pub to_provider_thread_id: ::std::string::String,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon19,
     >,
@@ -51552,6 +52977,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemHandoff {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -51631,7 +53057,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemNotification {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -51668,6 +53094,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemNotification {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon,
     >,
@@ -51680,6 +53107,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemNotification {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -51758,7 +53186,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemProposedPlan {
     pub markdown: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -51795,6 +53223,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemProposedPlan {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon5,
     >,
@@ -51807,6 +53236,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemProposedPlan {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -51884,7 +53314,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemReasoning {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -51920,6 +53350,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemReasoning {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon4,
     >,
@@ -51932,6 +53363,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemReasoning {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -52010,7 +53442,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemRunInterruptRe
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -52044,6 +53476,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemRunInterruptRe
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon14,
     >,
@@ -52056,6 +53489,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemRunInterruptRe
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -52134,7 +53568,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemRunInterruptRe
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -52168,6 +53602,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemRunInterruptRe
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon15,
     >,
@@ -52180,6 +53615,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemRunInterruptRe
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -52254,11 +53690,16 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequest 
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub delivery: ::std::option::Option<
+        OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequestDelivery,
+    >,
     pub id: ::std::string::String,
     pub label: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -52297,6 +53738,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequest 
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon22,
     >,
@@ -52309,6 +53751,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequest 
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -52319,6 +53762,61 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequest 
     pub type_: OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequestType,
     #[serde(rename = "updatedAt")]
     pub updated_at: ::std::string::String,
+}
+///`OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequestDelivery`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequestDelivery {
+    #[serde(rename = "file")]
+    File,
+}
+impl ::std::fmt::Display
+for OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequestDelivery {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::File => f.write_str("file"),
+        }
+    }
+}
+impl ::std::str::FromStr
+for OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequestDelivery {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "file" => Ok(Self::File),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str>
+for OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequestDelivery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequestDelivery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 ///`OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSecretRequestType`
 #[derive(
@@ -52588,7 +54086,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSubagent {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -52603,6 +54101,11 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSubagent {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub progress: ::std::option::Option<::std::string::String>,
     pub prompt: ::std::string::String,
+    #[serde(
+        rename = "promptOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub prompt_omitted: ::std::option::Option<bool>,
     #[serde(rename = "providerInstanceId")]
     pub provider_instance_id: ::std::string::String,
     #[serde(
@@ -52617,6 +54120,11 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSubagent {
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub result: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "resultOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub result_omitted: ::std::option::Option<bool>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
     #[serde(
@@ -52632,6 +54140,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSubagent {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon23,
     >,
@@ -52644,6 +54153,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSubagent {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -52722,7 +54232,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSystemNotice {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -52756,6 +54266,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSystemNotice {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon16,
     >,
@@ -52768,6 +54279,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemSystemNotice {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -52845,7 +54357,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemThreadCreated 
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -52890,6 +54402,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemThreadCreated 
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon21,
     >,
@@ -52902,6 +54415,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemThreadCreated 
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -52981,7 +54495,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemTodoList {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -53012,12 +54526,14 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemTodoList {
     )]
     pub started_at: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2TurnItemStatus,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub steps: ::std::vec::Vec<OrchestrationV2PlanStep>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon6,
     >,
@@ -53030,6 +54546,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemTodoList {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -57979,7 +59496,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserInputReque
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -58004,7 +59521,9 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserInputReque
         rename = "questionAnswer",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub question_answer: ::std::option::Option<UserInputAttachmentAnswerPayload>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub questions: ::std::vec::Vec<OrchestrationV2UserInputQuestion>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
@@ -58012,6 +59531,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserInputReque
         rename = "responseMode",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub response_mode: ::std::option::Option<
         OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserInputRequestResponseMode,
     >,
@@ -58028,6 +59548,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserInputReque
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon7,
     >,
@@ -58040,6 +59561,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserInputReque
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -58164,6 +59686,7 @@ for OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserInputRequestType 
 ///`OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserMessage`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserMessage {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attachments: ::std::vec::Vec<crate::tagged::ChatAttachment>,
     #[serde(
         rename = "completedAt",
@@ -58171,19 +59694,25 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserMessage {
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub context: ::std::option::Option<OrchestrationMessageContext>,
     #[serde(rename = "createdBy")]
     pub created_by: OrchestrationV2Actor,
     #[serde(rename = "creationSource")]
     pub creation_source: OrchestrationV2CreationSource,
     pub id: ::std::string::String,
+    #[serde(
+        rename = "idleCompaction",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub idle_compaction: ::std::option::Option<OrchestrationV2IdleCompaction>,
     #[serde(rename = "inputIntent")]
     pub input_intent: OrchestrationV2UserMessageInputIntent,
     #[serde(rename = "messageId")]
     pub message_id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -58223,11 +59752,17 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserMessage {
     pub started_at: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2TurnItemStatus,
     pub text: ::std::string::String,
+    #[serde(
+        rename = "textOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub text_omitted: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon2,
     >,
@@ -58240,6 +59775,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemUserMessage {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -58322,7 +59858,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemWebSearch {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -58346,6 +59882,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemWebSearch {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub results: ::std::option::Option<::std::vec::Vec<OrchestrationV2WebSearchResult>>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -58360,6 +59897,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemWebSearch {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemToolIcon11,
     >,
@@ -58372,6 +59910,7 @@ pub struct OrchestrationV2ThreadProjectionVisibleTurnItemsItemItemWebSearch {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -58489,6 +60028,7 @@ pub struct OrchestrationV2ThreadShell {
         rename = "branchPullRequest",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub branch_pull_request: ::std::option::Option<ThreadLinkedPullRequest>,
     #[serde(rename = "createdAt")]
     pub created_at: ::std::string::String,
@@ -58503,12 +60043,13 @@ pub struct OrchestrationV2ThreadShell {
     pub deleted_at: ::std::option::Option<::std::string::String>,
     #[serde(
         rename = "forkedFrom",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub forked_from: ::std::option::Option<
         crate::tagged::OrchestrationV2ThreadShellForkedFrom,
     >,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub goal: ::std::option::Option<OrchestrationV2ProviderGoal>,
     #[serde(rename = "hasActionableProposedPlan")]
     pub has_actionable_proposed_plan: bool,
@@ -58532,6 +60073,11 @@ pub struct OrchestrationV2ThreadShell {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub last_error_class: ::std::option::Option<OrchestrationV2ProviderFailureClass>,
+    #[serde(
+        rename = "lastErrorCode",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub last_error_code: ::std::option::Option<::std::string::String>,
     #[serde(
         rename = "lastVisitedAt",
         skip_serializing_if = "::std::option::Option::is_none"
@@ -58558,6 +60104,11 @@ pub struct OrchestrationV2ThreadShell {
     )]
     pub latest_run_started_at: ::std::option::Option<::std::string::String>,
     #[serde(
+        rename = "latestRunStopRequested",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub latest_run_stop_requested: ::std::option::Option<bool>,
+    #[serde(
         rename = "latestUserAuthoredMessageAt",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
@@ -58569,7 +60120,7 @@ pub struct OrchestrationV2ThreadShell {
     pub latest_user_message_at: ::std::option::Option<::std::string::String>,
     #[serde(
         rename = "latestVisibleMessage",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub latest_visible_message: ::std::option::Option<
         OrchestrationV2LatestVisibleMessageSummary,
@@ -58578,25 +60129,36 @@ pub struct OrchestrationV2ThreadShell {
         rename = "limitRecovery",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub limit_recovery: ::std::option::Option<OrchestrationV2LimitRecovery>,
     pub lineage: OrchestrationV2AppThreadLineage,
     #[serde(
         rename = "linkedPullRequest",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub linked_pull_request: ::std::option::Option<ThreadLinkedPullRequest>,
     #[serde(rename = "modelSelection")]
     pub model_selection: ModelSelection,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::option")]
+    pub opens: ::std::option::Option<OrchestrationV2ThreadOpens>,
     #[serde(
         rename = "pendingBackgroundTasks",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub pending_background_tasks: ::std::option::Option<
         ::std::vec::Vec<OrchestrationV2PendingBackgroundTask>,
     >,
     #[serde(
+        rename = "pendingGuestMessageCount",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub pending_guest_message_count: ::std::option::Option<i64>,
+    #[serde(
         rename = "pendingRuntimeRequest",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub pending_runtime_request: ::std::option::Option<
         OrchestrationV2PendingRuntimeRequestSummary,
@@ -58623,6 +60185,7 @@ pub struct OrchestrationV2ThreadShell {
         rename = "pullRequests",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub pull_requests: ::std::option::Option<::std::vec::Vec<ThreadPullRequestLink>>,
     #[serde(rename = "runtimeMode")]
     pub runtime_mode: RuntimeMode,
@@ -58654,6 +60217,7 @@ pub struct OrchestrationV2ThreadShell {
         rename = "titleRegeneration",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub title_regeneration: ::std::option::Option<
         OrchestrationV2ThreadShellTitleRegeneration,
     >,
@@ -59012,17 +60576,14 @@ pub struct OrchestrationV2ThreadStreamItemSnapshot {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub history_cursor: ::std::option::Option<::std::string::String>,
+    #[serde(rename = "idTable", skip_serializing_if = "::std::option::Option::is_none")]
+    pub id_table: ::std::option::Option<bool>,
     pub kind: OrchestrationV2ThreadStreamItemSnapshotKind,
     #[serde(
         rename = "latestLocalTurnOrdinal",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub latest_local_turn_ordinal: ::std::option::Option<i64>,
-    #[serde(
-        rename = "payloadBudgetExceeded",
-        skip_serializing_if = "::std::option::Option::is_none"
-    )]
-    pub payload_budget_exceeded: ::std::option::Option<bool>,
     pub projection: OrchestrationV2ThreadProjection,
     #[serde(rename = "snapshotSequence")]
     pub snapshot_sequence: i64,
@@ -59144,6 +60705,7 @@ for OrchestrationV2ThreadStreamItemSynchronizedKind {
 ///`OrchestrationV2ThreadTranscript`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2ThreadTranscript {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub items: ::std::vec::Vec<OrchestrationV2ProjectedTurnItem>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
@@ -59202,15 +60764,21 @@ pub struct OrchestrationV2TurnItemApprovalRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "fullAccessOverride",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub full_access_override: ::std::option::Option<ProviderApprovalFullAccessOverride>,
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
     pub node_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub options: ::std::option::Option<::std::vec::Vec<ProviderApprovalOption>>,
     pub ordinal: i64,
     #[serde(
@@ -59230,6 +60798,8 @@ pub struct OrchestrationV2TurnItemApprovalRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub reason: ::std::option::Option<::std::string::String>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
     #[serde(rename = "requestKind")]
@@ -59247,6 +60817,7 @@ pub struct OrchestrationV2TurnItemApprovalRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon12,
     >,
@@ -59259,6 +60830,7 @@ pub struct OrchestrationV2TurnItemApprovalRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -59326,6 +60898,7 @@ for OrchestrationV2TurnItemApprovalRequestType {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2TurnItemAssistantMessage {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub attachments: ::std::option::Option<
         ::std::vec::Vec<crate::tagged::ChatAttachment>,
     >,
@@ -59339,7 +60912,7 @@ pub struct OrchestrationV2TurnItemAssistantMessage {
     pub message_id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -59370,11 +60943,17 @@ pub struct OrchestrationV2TurnItemAssistantMessage {
     pub status: OrchestrationV2TurnItemStatus,
     pub streaming: bool,
     pub text: ::std::string::String,
+    #[serde(
+        rename = "textOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub text_omitted: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon3,
     >,
@@ -59387,6 +60966,7 @@ pub struct OrchestrationV2TurnItemAssistantMessage {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -59460,11 +61040,17 @@ pub struct OrchestrationV2TurnItemCheckpoint {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<OrchestrationV2CheckpointFileSummary>,
+    #[serde(
+        rename = "filesOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub files_omitted: ::std::option::Option<bool>,
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -59500,6 +61086,7 @@ pub struct OrchestrationV2TurnItemCheckpoint {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon13,
     >,
@@ -59512,6 +61099,7 @@ pub struct OrchestrationV2TurnItemCheckpoint {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -59587,9 +61175,11 @@ pub struct OrchestrationV2TurnItemCommandExecution {
     pub exit_code: ::std::option::Option<i64>,
     pub id: ::std::string::String,
     pub input: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub monitor: ::std::option::Option<bool>,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -59635,6 +61225,7 @@ pub struct OrchestrationV2TurnItemCommandExecution {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon9,
     >,
@@ -59647,6 +61238,7 @@ pub struct OrchestrationV2TurnItemCommandExecution {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -59733,7 +61325,7 @@ pub struct OrchestrationV2TurnItemCompaction {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -59769,6 +61361,7 @@ pub struct OrchestrationV2TurnItemCompaction {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon18,
     >,
@@ -59781,6 +61374,7 @@ pub struct OrchestrationV2TurnItemCompaction {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -59856,7 +61450,7 @@ pub struct OrchestrationV2TurnItemDynamicTool {
     pub input: ::serde_json::Value,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -59897,6 +61491,7 @@ pub struct OrchestrationV2TurnItemDynamicTool {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon24,
     >,
@@ -59914,6 +61509,7 @@ pub struct OrchestrationV2TurnItemDynamicTool {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -59994,7 +61590,7 @@ pub struct OrchestrationV2TurnItemError {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -60016,6 +61612,7 @@ pub struct OrchestrationV2TurnItemError {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub retry: ::std::option::Option<OrchestrationV2ProviderRetry>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -60030,6 +61627,7 @@ pub struct OrchestrationV2TurnItemError {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon17,
     >,
@@ -60042,6 +61640,7 @@ pub struct OrchestrationV2TurnItemError {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -60111,6 +61710,7 @@ pub struct OrchestrationV2TurnItemFileChange {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub additions: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub changes: ::std::option::Option<::std::vec::Vec<OrchestrationV2FileChangeDetail>>,
     #[serde(
         rename = "completedAt",
@@ -60126,7 +61726,7 @@ pub struct OrchestrationV2TurnItemFileChange {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "newStr", skip_serializing_if = "::std::option::Option::is_none")]
@@ -60164,6 +61764,7 @@ pub struct OrchestrationV2TurnItemFileChange {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon8,
     >,
@@ -60176,6 +61777,7 @@ pub struct OrchestrationV2TurnItemFileChange {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -60250,7 +61852,7 @@ pub struct OrchestrationV2TurnItemFileSearch {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -60272,6 +61874,7 @@ pub struct OrchestrationV2TurnItemFileSearch {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub results: ::std::option::Option<::std::vec::Vec<OrchestrationV2FileSearchResult>>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -60286,6 +61889,7 @@ pub struct OrchestrationV2TurnItemFileSearch {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon10,
     >,
@@ -60298,6 +61902,7 @@ pub struct OrchestrationV2TurnItemFileSearch {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -60372,7 +61977,7 @@ pub struct OrchestrationV2TurnItemFork {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -60409,6 +62014,7 @@ pub struct OrchestrationV2TurnItemFork {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon20,
     >,
@@ -60421,6 +62027,7 @@ pub struct OrchestrationV2TurnItemFork {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -60497,6 +62104,7 @@ pub struct OrchestrationV2TurnItemHandoff {
         rename = "fromModelSelections",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub from_model_selections: ::std::option::Option<::std::vec::Vec<ModelSelection>>,
     #[serde(rename = "fromProviderInstanceIds")]
     pub from_provider_instance_ids: ::std::vec::Vec<::std::string::String>,
@@ -60505,7 +62113,7 @@ pub struct OrchestrationV2TurnItemHandoff {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -60548,6 +62156,7 @@ pub struct OrchestrationV2TurnItemHandoff {
     #[serde(rename = "toProviderThreadId")]
     pub to_provider_thread_id: ::std::string::String,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon19,
     >,
@@ -60560,6 +62169,7 @@ pub struct OrchestrationV2TurnItemHandoff {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -60636,7 +62246,7 @@ pub struct OrchestrationV2TurnItemNotification {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -60673,6 +62283,7 @@ pub struct OrchestrationV2TurnItemNotification {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<crate::tagged::OrchestrationV2TurnItemToolIcon>,
     #[serde(
         rename = "toolNonExecutionKind",
@@ -60683,6 +62294,7 @@ pub struct OrchestrationV2TurnItemNotification {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -60758,7 +62370,7 @@ pub struct OrchestrationV2TurnItemProposedPlan {
     pub markdown: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -60795,6 +62407,7 @@ pub struct OrchestrationV2TurnItemProposedPlan {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon5,
     >,
@@ -60807,6 +62420,7 @@ pub struct OrchestrationV2TurnItemProposedPlan {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -60881,7 +62495,7 @@ pub struct OrchestrationV2TurnItemReasoning {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -60917,6 +62531,7 @@ pub struct OrchestrationV2TurnItemReasoning {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon4,
     >,
@@ -60929,6 +62544,7 @@ pub struct OrchestrationV2TurnItemReasoning {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -61004,7 +62620,7 @@ pub struct OrchestrationV2TurnItemRunInterruptRequest {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -61038,6 +62654,7 @@ pub struct OrchestrationV2TurnItemRunInterruptRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon14,
     >,
@@ -61050,6 +62667,7 @@ pub struct OrchestrationV2TurnItemRunInterruptRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -61125,7 +62743,7 @@ pub struct OrchestrationV2TurnItemRunInterruptResult {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -61159,6 +62777,7 @@ pub struct OrchestrationV2TurnItemRunInterruptResult {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon15,
     >,
@@ -61171,6 +62790,7 @@ pub struct OrchestrationV2TurnItemRunInterruptResult {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -61242,11 +62862,14 @@ pub struct OrchestrationV2TurnItemSecretRequest {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub delivery: ::std::option::Option<OrchestrationV2TurnItemSecretRequestDelivery>,
     pub id: ::std::string::String,
     pub label: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -61285,6 +62908,7 @@ pub struct OrchestrationV2TurnItemSecretRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon22,
     >,
@@ -61297,6 +62921,7 @@ pub struct OrchestrationV2TurnItemSecretRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -61307,6 +62932,58 @@ pub struct OrchestrationV2TurnItemSecretRequest {
     pub type_: OrchestrationV2TurnItemSecretRequestType,
     #[serde(rename = "updatedAt")]
     pub updated_at: ::std::string::String,
+}
+///`OrchestrationV2TurnItemSecretRequestDelivery`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum OrchestrationV2TurnItemSecretRequestDelivery {
+    #[serde(rename = "file")]
+    File,
+}
+impl ::std::fmt::Display for OrchestrationV2TurnItemSecretRequestDelivery {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::File => f.write_str("file"),
+        }
+    }
+}
+impl ::std::str::FromStr for OrchestrationV2TurnItemSecretRequestDelivery {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "file" => Ok(Self::File),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OrchestrationV2TurnItemSecretRequestDelivery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for OrchestrationV2TurnItemSecretRequestDelivery {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 ///`OrchestrationV2TurnItemSecretRequestType`
 #[derive(
@@ -61564,7 +63241,7 @@ pub struct OrchestrationV2TurnItemSubagent {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -61579,6 +63256,11 @@ pub struct OrchestrationV2TurnItemSubagent {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub progress: ::std::option::Option<::std::string::String>,
     pub prompt: ::std::string::String,
+    #[serde(
+        rename = "promptOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub prompt_omitted: ::std::option::Option<bool>,
     #[serde(rename = "providerInstanceId")]
     pub provider_instance_id: ::std::string::String,
     #[serde(
@@ -61593,6 +63275,11 @@ pub struct OrchestrationV2TurnItemSubagent {
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub result: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "resultOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub result_omitted: ::std::option::Option<bool>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
     #[serde(
@@ -61608,6 +63295,7 @@ pub struct OrchestrationV2TurnItemSubagent {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon23,
     >,
@@ -61620,6 +63308,7 @@ pub struct OrchestrationV2TurnItemSubagent {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -61695,7 +63384,7 @@ pub struct OrchestrationV2TurnItemSystemNotice {
     pub message: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -61729,6 +63418,7 @@ pub struct OrchestrationV2TurnItemSystemNotice {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon16,
     >,
@@ -61741,6 +63431,7 @@ pub struct OrchestrationV2TurnItemSystemNotice {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -61815,7 +63506,7 @@ pub struct OrchestrationV2TurnItemThreadCreated {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -61860,6 +63551,7 @@ pub struct OrchestrationV2TurnItemThreadCreated {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon21,
     >,
@@ -61872,6 +63564,7 @@ pub struct OrchestrationV2TurnItemThreadCreated {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -61948,7 +63641,7 @@ pub struct OrchestrationV2TurnItemTodoList {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -61979,12 +63672,14 @@ pub struct OrchestrationV2TurnItemTodoList {
     )]
     pub started_at: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2TurnItemStatus,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub steps: ::std::vec::Vec<OrchestrationV2PlanStep>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon6,
     >,
@@ -61997,6 +63692,7 @@ pub struct OrchestrationV2TurnItemTodoList {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -66727,7 +68423,7 @@ pub struct OrchestrationV2TurnItemUserInputRequest {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -66752,7 +68448,9 @@ pub struct OrchestrationV2TurnItemUserInputRequest {
         rename = "questionAnswer",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub question_answer: ::std::option::Option<UserInputAttachmentAnswerPayload>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub questions: ::std::vec::Vec<OrchestrationV2UserInputQuestion>,
     #[serde(rename = "requestId")]
     pub request_id: ::std::string::String,
@@ -66760,6 +68458,7 @@ pub struct OrchestrationV2TurnItemUserInputRequest {
         rename = "responseMode",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub response_mode: ::std::option::Option<
         OrchestrationV2TurnItemUserInputRequestResponseMode,
     >,
@@ -66776,6 +68475,7 @@ pub struct OrchestrationV2TurnItemUserInputRequest {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon7,
     >,
@@ -66788,6 +68488,7 @@ pub struct OrchestrationV2TurnItemUserInputRequest {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -66907,6 +68608,7 @@ for OrchestrationV2TurnItemUserInputRequestType {
 ///`OrchestrationV2TurnItemUserMessage`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct OrchestrationV2TurnItemUserMessage {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attachments: ::std::vec::Vec<crate::tagged::ChatAttachment>,
     #[serde(
         rename = "completedAt",
@@ -66914,19 +68616,25 @@ pub struct OrchestrationV2TurnItemUserMessage {
     )]
     pub completed_at: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub context: ::std::option::Option<OrchestrationMessageContext>,
     #[serde(rename = "createdBy")]
     pub created_by: OrchestrationV2Actor,
     #[serde(rename = "creationSource")]
     pub creation_source: OrchestrationV2CreationSource,
     pub id: ::std::string::String,
+    #[serde(
+        rename = "idleCompaction",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub idle_compaction: ::std::option::Option<OrchestrationV2IdleCompaction>,
     #[serde(rename = "inputIntent")]
     pub input_intent: OrchestrationV2UserMessageInputIntent,
     #[serde(rename = "messageId")]
     pub message_id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -66966,11 +68674,17 @@ pub struct OrchestrationV2TurnItemUserMessage {
     pub started_at: ::std::option::Option<::std::string::String>,
     pub status: OrchestrationV2TurnItemStatus,
     pub text: ::std::string::String,
+    #[serde(
+        rename = "textOmitted",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub text_omitted: ::std::option::Option<bool>,
     #[serde(rename = "threadId")]
     pub thread_id: ::std::string::String,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon2,
     >,
@@ -66983,6 +68697,7 @@ pub struct OrchestrationV2TurnItemUserMessage {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -67062,7 +68777,7 @@ pub struct OrchestrationV2TurnItemWebSearch {
     pub id: ::std::string::String,
     #[serde(
         rename = "nativeItemRef",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub native_item_ref: ::std::option::Option<OrchestrationV2ProviderRef>,
     #[serde(rename = "nodeId", deserialize_with = "::std::option::Option::deserialize")]
@@ -67086,6 +68801,7 @@ pub struct OrchestrationV2TurnItemWebSearch {
     )]
     pub provider_turn_id: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub results: ::std::option::Option<::std::vec::Vec<OrchestrationV2WebSearchResult>>,
     #[serde(rename = "runId", deserialize_with = "::std::option::Option::deserialize")]
     pub run_id: ::std::option::Option<::std::string::String>,
@@ -67100,6 +68816,7 @@ pub struct OrchestrationV2TurnItemWebSearch {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub title: ::std::option::Option<::std::string::String>,
     #[serde(rename = "toolIcon", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_icon: ::std::option::Option<
         crate::tagged::OrchestrationV2TurnItemToolIcon11,
     >,
@@ -67112,6 +68829,7 @@ pub struct OrchestrationV2TurnItemWebSearch {
         rename = "toolSource",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub tool_source: ::std::option::Option<ToolActivitySource>,
     #[serde(
         rename = "toolSurface",
@@ -67195,6 +68913,7 @@ pub struct OrchestrationV2UserInputQuestion {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub multi_select: ::std::option::Option<bool>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub options: ::std::vec::Vec<OrchestrationV2UserInputQuestionOptionsItem>,
     pub question: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -67300,6 +69019,12 @@ pub struct OrchestrationV2WorkflowRunHandles {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub transcript_dir: ::std::option::Option<::std::string::String>,
+}
+///`OrchestrationV2WorktreeThreadIds`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct OrchestrationV2WorktreeThreadIds {
+    #[serde(rename = "threadIds")]
+    pub thread_ids: ::std::vec::Vec<::std::string::String>,
 }
 ///`OtlpEndpointCheckInput`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -67604,6 +69329,7 @@ impl ::std::convert::TryFrom<::std::string::String> for PersistChatAttachmentsEr
 ///`PersistChatAttachmentsInput`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PersistChatAttachmentsInput {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attachments: ::std::vec::Vec<UploadChatImageAttachment>,
     #[serde(rename = "messageId")]
     pub message_id: ::std::string::String,
@@ -67613,6 +69339,7 @@ pub struct PersistChatAttachmentsInput {
 ///`PersistChatAttachmentsResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PersistChatAttachmentsResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub attachments: ::std::vec::Vec<crate::tagged::ChatAttachment>,
 }
 ///`PreviewAdjustInput`
@@ -67638,6 +69365,7 @@ pub struct PreviewAdjustInput {
         rename = "zoomFactor",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub zoom_factor: ::std::option::Option<PreviewZoomFactor>,
 }
 ///`PreviewClearProfileError`
@@ -67847,6 +69575,7 @@ pub struct PreviewEventFailed {
     pub created_at: ::std::string::String,
     pub description: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub download: ::std::option::Option<PreviewEventFailedDownload>,
     pub revision: i64,
     #[serde(rename = "serverEpoch")]
@@ -68058,6 +69787,7 @@ pub struct PreviewEventResized {
     #[serde(rename = "createdAt")]
     pub created_at: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub request: ::std::option::Option<PreviewEventResizedRequest>,
     pub revision: i64,
     #[serde(rename = "serverEpoch")]
@@ -68206,6 +69936,7 @@ pub struct PreviewListResult {
     pub revision: i64,
     #[serde(rename = "serverEpoch")]
     pub server_epoch: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub sessions: ::std::vec::Vec<PreviewSessionSnapshot>,
 }
 ///`PreviewNavStatusIdle`
@@ -68270,6 +70001,7 @@ pub struct PreviewNavStatusLoadFailed {
     pub code: i64,
     pub description: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub download: ::std::option::Option<PreviewNavStatusLoadFailedDownload>,
     #[serde(rename = "_tag")]
     pub tag: PreviewNavStatusLoadFailedTag,
@@ -68480,6 +70212,7 @@ pub struct PreviewOpenInput {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub url: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub viewport: ::std::option::Option<crate::tagged::PreviewOpenInputViewport>,
 }
 ///`PreviewOpenInputViewportFill`
@@ -68674,7 +70407,14 @@ pub struct PreviewRefreshInput {
 pub struct PreviewReportProfilesInput {
     #[serde(rename = "defaultProfileId")]
     pub default_profile_id: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub profiles: ::std::vec::Vec<BrowserProfile>,
+    #[serde(
+        rename = "recordingFrameRate",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub recording_frame_rate: ::std::option::Option<BrowserRecordingFrameRate>,
 }
 ///`PreviewReportStatusInput`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -68789,6 +70529,7 @@ pub struct PreviewSessionSnapshot {
         rename = "revealRequest",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub reveal_request: ::std::option::Option<PreviewSessionSnapshotRevealRequest>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub runtime: ::std::option::Option<PreviewRuntime>,
@@ -68799,11 +70540,13 @@ pub struct PreviewSessionSnapshot {
     #[serde(rename = "updatedAt")]
     pub updated_at: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub viewport: ::std::option::Option<crate::tagged::PreviewSessionSnapshotViewport>,
     #[serde(
         rename = "zoomFactor",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub zoom_factor: ::std::option::Option<PreviewZoomFactor>,
 }
 ///`PreviewSessionSnapshotRevealRequest`
@@ -69235,7 +70978,7 @@ pub struct Project {
     pub created_at: ::std::string::String,
     #[serde(
         rename = "defaultModelSelection",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub default_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
@@ -69258,12 +71001,15 @@ pub struct Project {
         rename = "projectIcon",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_icon: ::std::option::Option<crate::tagged::ProjectProjectIcon>,
     #[serde(
         rename = "repositoryIdentity",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub repository_identity: ::std::option::Option<RepositoryIdentity>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub scripts: ::std::vec::Vec<ProjectScript>,
     pub title: ::std::string::String,
     #[serde(rename = "updatedAt")]
@@ -69300,10 +71046,12 @@ pub struct ProjectCloneSnapshot {
     pub project_id: ::std::string::String,
     #[serde(rename = "remoteUrl")]
     pub remote_url: ::std::string::String,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub repository: ::std::option::Option<SourceControlRepositoryInfo>,
     pub sequence: i64,
     pub stage: ProjectCloneStage,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub stalled: ::std::option::Option<bool>,
     #[serde(rename = "startedAt")]
     pub started_at: ::std::string::String,
 }
@@ -69337,7 +71085,7 @@ pub struct ProjectCloneStartResult {
     pub project_id: ::std::string::String,
     #[serde(rename = "remoteUrl")]
     pub remote_url: ::std::string::String,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub repository: ::std::option::Option<SourceControlRepositoryInfo>,
 }
 ///`ProjectCloneSubscribeInput`
@@ -69374,6 +71122,7 @@ pub struct ProjectContentMatch {
     #[serde(rename = "lineNumber")]
     pub line_number: i64,
     #[serde(rename = "matchRanges")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub match_ranges: ::std::vec::Vec<ProjectContentMatchRange>,
     pub path: ::std::string::String,
 }
@@ -69680,6 +71429,7 @@ pub struct ProjectListEntriesInput {
 ///`ProjectListEntriesResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ProjectListEntriesResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub entries: ::std::vec::Vec<ProjectEntry>,
     pub truncated: bool,
 }
@@ -69691,6 +71441,7 @@ pub struct ProjectListIgnoredFilesInput {
 ///`ProjectListIgnoredFilesResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ProjectListIgnoredFilesResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<ProjectIgnoredFile>,
     pub truncated: bool,
 }
@@ -69769,10 +71520,12 @@ pub struct ProjectMutationProjectCreate {
         rename = "defaultModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub default_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(rename = "projectId")]
     pub project_id: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub scripts: ::std::option::Option<::std::vec::Vec<ProjectScript>>,
     pub title: ::std::string::String,
     #[serde(rename = "type")]
@@ -70083,6 +71836,7 @@ pub struct ProjectMutationProjectUpdate {
         rename = "defaultModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub default_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "defaultThreadEnvMode",
@@ -70098,10 +71852,12 @@ pub struct ProjectMutationProjectUpdate {
         rename = "projectIcon",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_icon: ::std::option::Option<crate::tagged::ProjectMutationProjectIcon>,
     #[serde(rename = "projectId")]
     pub project_id: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub scripts: ::std::option::Option<::std::vec::Vec<ProjectScript>>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub title: ::std::option::Option<::std::string::String>,
@@ -70582,6 +72338,7 @@ pub struct ProjectSearchContentsInput {
 ///`ProjectSearchContentsResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ProjectSearchContentsResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub matches: ::std::vec::Vec<ProjectContentMatch>,
     #[serde(
         rename = "regexFallbackError",
@@ -70686,6 +72443,7 @@ pub struct ProjectSearchEntriesInput {
 ///`ProjectSearchEntriesResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ProjectSearchEntriesResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub entries: ::std::vec::Vec<ProjectEntry>,
     pub truncated: bool,
 }
@@ -70721,11 +72479,13 @@ pub struct ProjectSettingsOverrides {
         rename = "defaultModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub default_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "defaultProjectScripts",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub default_project_scripts: ::std::option::Option<::std::vec::Vec<ProjectScript>>,
     #[serde(
         rename = "defaultRuntimeMode",
@@ -70756,6 +72516,7 @@ pub struct ProjectSettingsOverrides {
         rename = "providerInstances",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_instances: ::std::option::Option<
         ::std::collections::BTreeMap<
             ::std::string::String,
@@ -70786,11 +72547,13 @@ pub struct ProjectSettingsOverrides {
         rename = "reviewGuideModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub review_guide_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "sidebarAutoSettleAfterDays",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub sidebar_auto_settle_after_days: ::std::option::Option<
         ProjectSettingsOverridesSidebarAutoSettleAfterDays,
     >,
@@ -70808,11 +72571,13 @@ pub struct ProjectSettingsOverrides {
         rename = "sourceControlWriterModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_writer_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "sourceControlWritingStyle",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_writing_style: ::std::option::Option<
         ProjectSettingsOverridesSourceControlWritingStyle,
     >,
@@ -70820,13 +72585,20 @@ pub struct ProjectSettingsOverrides {
         rename = "textGenerationModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub text_generation_model_selection: ::std::option::Option<
         ProjectSettingsOverridesTextGenerationModelSelection,
     >,
     #[serde(
+        rename = "threadTitleInstructions",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub thread_title_instructions: ::std::option::Option<::std::string::String>,
+    #[serde(
         rename = "worktreeCleanup",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub worktree_cleanup: ::std::option::Option<
         crate::tagged::ProjectSettingsOverridesWorktreeCleanup,
     >,
@@ -71044,6 +72816,7 @@ for ProjectSettingsOverridesWorktreeCleanupOffMode {
 ///`ProjectSnapshot`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ProjectSnapshot {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub projects: ::std::vec::Vec<Project>,
     #[serde(rename = "updatedAt")]
     pub updated_at: ::std::string::String,
@@ -71269,6 +73042,7 @@ for ProviderAuthInteractionBrowserType {
 ///`ProviderAuthInteractionCredentials`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ProviderAuthInteractionCredentials {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub fields: ::std::vec::Vec<ProviderAuthInteractionCredentialsFieldsItem>,
     pub id: ::std::string::String,
     #[serde(rename = "type")]
@@ -71611,6 +73385,7 @@ for ProviderAuthResponseCredentialsType {
 pub struct ProviderAuthResponseTerminal {
     pub data: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub size: ::std::option::Option<ProviderAuthResponseTerminalSize>,
     #[serde(rename = "type")]
     pub type_: ProviderAuthResponseTerminalType,
@@ -71729,6 +73504,7 @@ pub enum ProviderAuthStartSuccessInteractionValue {
         type_: ProviderAuthStartSuccessInteractionValueVariant2Type,
     },
     Variant3 {
+        #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
         fields: ::std::vec::Vec<
             ProviderAuthStartSuccessInteractionValueVariant3FieldsItem,
         >,
@@ -72134,6 +73910,7 @@ pub struct ProviderInstanceConfig {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub enabled: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub environment: ::std::option::Option<
         ::std::vec::Vec<ProviderInstanceEnvironmentVariable>,
     >,
@@ -72453,6 +74230,7 @@ pub struct PullRequestActionInput {
         rename = "expectedStackHeads",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub expected_stack_heads: ::std::option::Option<
         ::std::vec::Vec<PullRequestStackHead>,
     >,
@@ -72482,16 +74260,21 @@ pub struct PullRequestActionInput {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestActivity {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub author: ::std::option::Option<PullRequestActor>,
     #[serde(rename = "commentCount")]
     pub comment_count: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub comments: ::std::vec::Vec<PullRequestComment>,
     #[serde(rename = "commentsTruncated")]
     pub comments_truncated: bool,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub commits: ::std::vec::Vec<PullRequestCommit>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub reactions: ::std::option::Option<::std::vec::Vec<PullRequestReaction>>,
     #[serde(rename = "reviewThreads")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub review_threads: ::std::vec::Vec<PullRequestReviewThread>,
     #[serde(
         rename = "reviewThreadsTruncated",
@@ -72499,6 +74282,7 @@ pub struct PullRequestActivity {
     )]
     pub review_threads_truncated: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub reviewers: ::std::option::Option<::std::vec::Vec<PullRequestActor>>,
 }
 ///`PullRequestActor`
@@ -72520,6 +74304,11 @@ pub struct PullRequestActor {
 pub struct PullRequestCapabilities {
     #[serde(default, deserialize_with = "crate::forward_compat::vec")]
     pub actions: ::std::vec::Vec<PullRequestAction>,
+    #[serde(
+        rename = "checksAlwaysReport",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub checks_always_report: ::std::option::Option<bool>,
     pub comment: bool,
     #[serde(
         rename = "deleteBranch",
@@ -72528,6 +74317,7 @@ pub struct PullRequestCapabilities {
     pub delete_branch: ::std::option::Option<bool>,
     pub diff: bool,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub edit: ::std::option::Option<PullRequestEditCapabilities>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub labels: ::std::option::Option<bool>,
@@ -72573,13 +74363,19 @@ pub struct PullRequestCheck {
 ///`PullRequestChecks`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestChecks {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub checks: ::std::vec::Vec<PullRequestCheck>,
+    #[serde(
+        rename = "observedAt",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub observed_at: ::std::option::Option<f64>,
     pub state: PullRequestState,
 }
 ///`PullRequestComment`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestComment {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub author: ::std::option::Option<PullRequestActor>,
     pub body: ::std::string::String,
     #[serde(rename = "canEdit", skip_serializing_if = "::std::option::Option::is_none")]
@@ -72593,6 +74389,7 @@ pub struct PullRequestComment {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub path: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub reactions: ::std::option::Option<::std::vec::Vec<PullRequestReaction>>,
     #[serde(
         rename = "reviewState",
@@ -72653,6 +74450,7 @@ pub struct PullRequestCommit {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub additions: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub authors: ::std::option::Option<::std::vec::Vec<PullRequestActor>>,
     #[serde(rename = "committedDate")]
     pub committed_date: ::std::string::String,
@@ -72666,7 +74464,7 @@ pub struct PullRequestCommit {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestDetail {
     pub additions: i64,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub author: ::std::option::Option<PullRequestActor>,
     #[serde(
         rename = "autoMergeEnabled",
@@ -72691,6 +74489,7 @@ pub struct PullRequestDetail {
     pub capabilities: PullRequestCapabilities,
     #[serde(rename = "changedFiles")]
     pub changed_files: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub checks: ::std::vec::Vec<PullRequestCheck>,
     #[serde(
         rename = "closedAt",
@@ -72711,6 +74510,7 @@ pub struct PullRequestDetail {
     pub head_sha: ::std::option::Option<::std::string::String>,
     #[serde(rename = "isDraft")]
     pub is_draft: bool,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub labels: ::std::vec::Vec<PullRequestLabel>,
     #[serde(rename = "mergeCapabilities")]
     pub merge_capabilities: PullRequestMergeCapabilities,
@@ -72732,6 +74532,7 @@ pub struct PullRequestDetail {
     pub project_title: ::std::string::String,
     pub provider: ::std::string::String,
     pub repository: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub reviewers: ::std::vec::Vec<PullRequestActor>,
     pub state: PullRequestState,
     pub title: ::std::string::String,
@@ -72822,6 +74623,7 @@ pub struct PullRequestDiffResult {
         rename = "omittedFileStats",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub omitted_file_stats: ::std::option::Option<
         ::std::vec::Vec<PullRequestOmittedFileStat>,
     >,
@@ -72854,8 +74656,37 @@ pub struct PullRequestFileViewed {
 ///`PullRequestFilesViewedResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestFilesViewedResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<PullRequestFileViewed>,
     pub truncated: bool,
+}
+///`PullRequestFilterOptions`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct PullRequestFilterOptions {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub authors: ::std::vec::Vec<PullRequestActor>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub labels: ::std::vec::Vec<PullRequestLabel>,
+    pub truncated: bool,
+}
+///`PullRequestFilterOptionsInput`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct PullRequestFilterOptionsInput {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub host: ::std::option::Option<::std::string::String>,
+    pub kind: PullRequestFilterOptionKind,
+    #[serde(
+        rename = "projectId",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub project_id: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "projectIds",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub project_ids: ::std::option::Option<::std::vec::Vec<::std::string::String>>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub query: ::std::option::Option<::std::string::String>,
 }
 ///`PullRequestInvalidateInput`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
@@ -72866,6 +74697,7 @@ pub struct PullRequestInvalidateInput {
     )]
     pub files_viewed_only: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub reference: ::std::option::Option<PullRequestRef>,
 }
 ///`PullRequestLabel`
@@ -72889,6 +74721,7 @@ pub struct PullRequestLabelCandidate {
 ///`PullRequestLabelCandidateList`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestLabelCandidateList {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub candidates: ::std::vec::Vec<PullRequestLabelCandidate>,
     pub truncated: bool,
 }
@@ -72917,6 +74750,7 @@ pub struct PullRequestLabelChangeInput {
 ///`PullRequestLinkedThreadsResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestLinkedThreadsResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub threads: ::std::vec::Vec<PullRequestLinkedThreadsResultThreadsItem>,
 }
 ///`PullRequestLinkedThreadsResultThreadsItem`
@@ -72968,7 +74802,7 @@ impl ::std::convert::From<
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestListEntry {
     pub additions: i64,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub author: ::std::option::Option<PullRequestActor>,
     #[serde(rename = "baseBranch")]
     pub base_branch: ::std::string::String,
@@ -72985,6 +74819,7 @@ pub struct PullRequestListEntry {
     pub host: ::std::string::String,
     #[serde(rename = "isDraft")]
     pub is_draft: bool,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub labels: ::std::vec::Vec<PullRequestLabel>,
     pub mergeability: PullRequestMergeability,
     pub number: i64,
@@ -73005,6 +74840,7 @@ pub struct PullRequestListEntry {
     )]
     pub review_decision: ::std::option::Option<PullRequestReviewDecision>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub stack: ::std::option::Option<PullRequestStackMembership>,
     pub state: PullRequestState,
     pub title: ::std::string::String,
@@ -73029,6 +74865,7 @@ pub struct PullRequestListFilters {
     )]
     pub excluded_labels: ::std::option::Option<::std::vec::Vec<::std::string::String>>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub labels: ::std::option::Option<
         ::std::vec::Vec<::std::vec::Vec<::std::string::String>>,
     >,
@@ -73039,8 +74876,10 @@ pub struct PullRequestListFilters {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestListInput {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub cursors: ::std::option::Option<PullRequestListCursors>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub filters: ::std::option::Option<PullRequestListFilters>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub host: ::std::option::Option<::std::string::String>,
@@ -73074,10 +74913,13 @@ pub struct PullRequestListProjectError {
 ///`PullRequestListResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestListResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub entries: ::std::vec::Vec<PullRequestListEntry>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub errors: ::std::vec::Vec<PullRequestListProjectError>,
     #[serde(rename = "nextCursors")]
     pub next_cursors: PullRequestListCursors,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub providers: ::std::vec::Vec<PullRequestProviderSummary>,
     pub truncated: bool,
     pub viewers: ::std::collections::BTreeMap<
@@ -73088,11 +74930,13 @@ pub struct PullRequestListResult {
 ///`PullRequestListStatsInput`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestListStatsInput {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub refs: ::std::vec::Vec<PullRequestRef>,
 }
 ///`PullRequestListStatsResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestListStatsResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub stats: ::std::vec::Vec<PullRequestDiffStat>,
 }
 ///`PullRequestMergeCapabilities`
@@ -73117,6 +74961,7 @@ pub struct PullRequestOperationError {
     pub detail: ::std::string::String,
     pub operation: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub reason: ::std::option::Option<PullRequestOperationErrorReason>,
     #[serde(rename = "_tag")]
     pub tag: PullRequestOperationErrorTag,
@@ -73225,7 +75070,7 @@ impl ::std::convert::TryFrom<::std::string::String> for PullRequestOperationErro
 ///`PullRequestPreview`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestPreview {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub author: ::std::option::Option<PullRequestActor>,
     #[serde(rename = "createdAt")]
     pub created_at: ::std::string::String,
@@ -73314,6 +75159,8 @@ pub struct PullRequestRef {
 ///`PullRequestReportStateInput`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestReportStateInput {
+    #[serde(rename = "isDraft", skip_serializing_if = "::std::option::Option::is_none")]
+    pub is_draft: ::std::option::Option<bool>,
     pub reference: PullRequestRef,
     pub state: PullRequestState,
 }
@@ -73322,6 +75169,11 @@ pub struct PullRequestReportStateInput {
 pub struct PullRequestReviewCapabilities {
     #[serde(rename = "inlineComment")]
     pub inline_comment: bool,
+    #[serde(
+        rename = "rangeComment",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub range_comment: ::std::option::Option<bool>,
     pub reply: bool,
     pub resolve: bool,
     #[serde(default, deserialize_with = "crate::forward_compat::vec")]
@@ -73335,6 +75187,197 @@ pub struct PullRequestReviewCommentDraft {
     pub old_path: ::std::option::Option<::std::string::String>,
     pub path: ::std::string::String,
     pub position: crate::tagged::PullRequestReviewPosition,
+    #[serde(
+        rename = "startPosition",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub start_position: ::std::option::Option<
+        crate::tagged::PullRequestReviewCommentDraftStartPosition,
+    >,
+}
+///`PullRequestReviewCommentDraftStartPositionAdded`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct PullRequestReviewCommentDraftStartPositionAdded {
+    pub kind: PullRequestReviewCommentDraftStartPositionAddedKind,
+    #[serde(rename = "newLine")]
+    pub new_line: i64,
+}
+///`PullRequestReviewCommentDraftStartPositionAddedKind`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum PullRequestReviewCommentDraftStartPositionAddedKind {
+    #[serde(rename = "added")]
+    Added,
+}
+impl ::std::fmt::Display for PullRequestReviewCommentDraftStartPositionAddedKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Added => f.write_str("added"),
+        }
+    }
+}
+impl ::std::str::FromStr for PullRequestReviewCommentDraftStartPositionAddedKind {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "added" => Ok(Self::Added),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str>
+for PullRequestReviewCommentDraftStartPositionAddedKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for PullRequestReviewCommentDraftStartPositionAddedKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`PullRequestReviewCommentDraftStartPositionContext`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct PullRequestReviewCommentDraftStartPositionContext {
+    pub kind: PullRequestReviewCommentDraftStartPositionContextKind,
+    #[serde(rename = "newLine")]
+    pub new_line: i64,
+    #[serde(rename = "oldLine")]
+    pub old_line: i64,
+    pub side: PullRequestDiffSide,
+}
+///`PullRequestReviewCommentDraftStartPositionContextKind`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum PullRequestReviewCommentDraftStartPositionContextKind {
+    #[serde(rename = "context")]
+    Context,
+}
+impl ::std::fmt::Display for PullRequestReviewCommentDraftStartPositionContextKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Context => f.write_str("context"),
+        }
+    }
+}
+impl ::std::str::FromStr for PullRequestReviewCommentDraftStartPositionContextKind {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "context" => Ok(Self::Context),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str>
+for PullRequestReviewCommentDraftStartPositionContextKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for PullRequestReviewCommentDraftStartPositionContextKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+///`PullRequestReviewCommentDraftStartPositionDeleted`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct PullRequestReviewCommentDraftStartPositionDeleted {
+    pub kind: PullRequestReviewCommentDraftStartPositionDeletedKind,
+    #[serde(rename = "oldLine")]
+    pub old_line: i64,
+}
+///`PullRequestReviewCommentDraftStartPositionDeletedKind`
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd
+)]
+pub enum PullRequestReviewCommentDraftStartPositionDeletedKind {
+    #[serde(rename = "deleted")]
+    Deleted,
+}
+impl ::std::fmt::Display for PullRequestReviewCommentDraftStartPositionDeletedKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Deleted => f.write_str("deleted"),
+        }
+    }
+}
+impl ::std::str::FromStr for PullRequestReviewCommentDraftStartPositionDeletedKind {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "deleted" => Ok(Self::Deleted),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str>
+for PullRequestReviewCommentDraftStartPositionDeletedKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for PullRequestReviewCommentDraftStartPositionDeletedKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 ///`PullRequestReviewGuide`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -73345,6 +75388,7 @@ pub struct PullRequestReviewGuide {
     pub head_sha: ::std::string::String,
     #[serde(rename = "modelSelection")]
     pub model_selection: ModelSelection,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub stops: ::std::vec::Vec<PullRequestReviewGuideStop>,
 }
 ///`PullRequestReviewGuideAttention`
@@ -73378,9 +75422,9 @@ pub struct PullRequestReviewGuideResult {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub current_head_sha: ::std::option::Option<::std::string::String>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub guide: ::std::option::Option<PullRequestReviewGuide>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub run: ::std::option::Option<crate::tagged::PullRequestReviewGuideResultRun>,
 }
 ///`PullRequestReviewGuideResultRunFailed`
@@ -73632,10 +75676,13 @@ for PullRequestReviewGuideRunRunningTag {
 ///`PullRequestReviewGuideStop`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestReviewGuideStop {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub attention: ::std::option::Option<PullRequestReviewGuideAttention>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub excerpts: ::std::vec::Vec<PullRequestReviewGuideExcerpt>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<PullRequestReviewGuideStopFilesItem>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub notes: ::std::vec::Vec<PullRequestReviewGuideNote>,
     pub questions: ::std::vec::Vec<::std::string::String>,
     pub summary: ::std::string::String,
@@ -73841,6 +75888,7 @@ pub struct PullRequestReviewThread {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub comment_count: ::std::option::Option<i64>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub comments: ::std::vec::Vec<PullRequestThreadComment>,
     pub id: ::std::string::String,
     #[serde(rename = "isOutdated")]
@@ -73878,6 +75926,7 @@ pub struct PullRequestReviewerCandidate {
 ///`PullRequestReviewerCandidateList`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestReviewerCandidateList {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub candidates: ::std::vec::Vec<PullRequestReviewerCandidate>,
     pub truncated: bool,
 }
@@ -73908,6 +75957,7 @@ pub struct PullRequestReviewerRequestInput {
     pub project_id: ::std::string::String,
     pub repository: ::std::string::String,
     pub requested: bool,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub reviewers: ::std::vec::Vec<PullRequestReviewerRequestInputReviewersItem>,
 }
 ///`PullRequestReviewerRequestInputReviewersItem`
@@ -73927,60 +75977,8 @@ pub struct PullRequestRoutingIdentityResult {
     #[serde(rename = "accountId")]
     pub account_id: ::std::string::String,
     pub host: ::std::string::String,
-    pub provider: PullRequestRoutingIdentityResultProvider,
+    pub provider: ::std::string::String,
     pub viewer: ::std::string::String,
-}
-///`PullRequestRoutingIdentityResultProvider`
-#[derive(
-    ::serde::Deserialize,
-    ::serde::Serialize,
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Ord,
-    PartialEq,
-    PartialOrd
-)]
-pub enum PullRequestRoutingIdentityResultProvider {
-    #[serde(rename = "github")]
-    Github,
-}
-impl ::std::fmt::Display for PullRequestRoutingIdentityResultProvider {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Github => f.write_str("github"),
-        }
-    }
-}
-impl ::std::str::FromStr for PullRequestRoutingIdentityResultProvider {
-    type Err = self::error::ConversionError;
-    fn from_str(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "github" => Ok(Self::Github),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for PullRequestRoutingIdentityResultProvider {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: &str,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String>
-for PullRequestRoutingIdentityResultProvider {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
 }
 ///`PullRequestRoutingResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -74008,6 +76006,7 @@ pub struct PullRequestSetFilesViewedInput {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub expected_account_id: ::std::option::Option<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<PullRequestSetFilesViewedInputFilesItem>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub host: ::std::option::Option<::std::string::String>,
@@ -74027,6 +76026,7 @@ pub struct PullRequestSetFilesViewedInputFilesItem {
 pub struct PullRequestStack {
     pub base: ::std::string::String,
     pub id: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub layers: ::std::vec::Vec<PullRequestStackLayersItem>,
     pub number: i64,
     pub url: ::std::string::String,
@@ -74069,6 +76069,7 @@ pub struct PullRequestSubmitReviewInput {
     )]
     pub allow_stale: ::std::option::Option<bool>,
     pub body: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub comments: ::std::vec::Vec<PullRequestReviewCommentDraft>,
     #[serde(
         rename = "expectedAccountId",
@@ -74089,6 +76090,7 @@ pub struct PullRequestSummary {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub additions: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub author: ::std::option::Option<PullRequestActor>,
     #[serde(rename = "baseBranch")]
     pub base_branch: ::std::string::String,
@@ -74130,6 +76132,7 @@ pub struct PullRequestSummary {
     )]
     pub review_decision: ::std::option::Option<PullRequestReviewDecision>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub stack: ::std::option::Option<PullRequestStackMembership>,
     pub state: PullRequestState,
     pub title: ::std::string::String,
@@ -74140,7 +76143,7 @@ pub struct PullRequestSummary {
 ///`PullRequestThreadComment`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestThreadComment {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub author: ::std::option::Option<PullRequestActor>,
     pub body: ::std::string::String,
     #[serde(rename = "canEdit", skip_serializing_if = "::std::option::Option::is_none")]
@@ -74151,6 +76154,7 @@ pub struct PullRequestThreadComment {
     pub edited_at: ::std::option::Option<::std::string::String>,
     pub id: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub reactions: ::std::option::Option<::std::vec::Vec<PullRequestReaction>>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub url: ::std::option::Option<::std::string::String>,
@@ -74181,6 +76185,7 @@ pub struct PullRequestThreadCommentsInput {
 ///`PullRequestThreadCommentsResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct PullRequestThreadCommentsResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub comments: ::std::vec::Vec<PullRequestThreadComment>,
     #[serde(
         rename = "nextCursor",
@@ -74242,6 +76247,8 @@ pub struct PullRequestUnavailableError {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub provider: ::std::option::Option<::std::string::String>,
     pub reason: PullRequestUnavailableReason,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub requirement: ::std::option::Option<::std::string::String>,
     #[serde(rename = "_tag")]
     pub tag: PullRequestUnavailableErrorTag,
 }
@@ -74356,6 +76363,7 @@ pub struct PullRequestViewerPermissions {
 pub struct PullRequestsChangeBreakdownSuccess {
     pub code: PullRequestsChangeBreakdownSuccessCode,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub docs: ::std::option::Option<PullRequestsChangeBreakdownSuccessDocs>,
     pub generated: PullRequestsChangeBreakdownSuccessGenerated,
     pub mocks: PullRequestsChangeBreakdownSuccessMocks,
@@ -74525,6 +76533,7 @@ pub struct RelayAgentActivityAggregateRow {
 pub struct RelayAgentActivityAggregateState {
     #[serde(rename = "activeCount")]
     pub active_count: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub activities: ::std::vec::Vec<RelayAgentActivityAggregateRow>,
     pub subtitle: ::std::string::String,
     pub title: ::std::string::String,
@@ -74777,13 +76786,13 @@ for RelayAgentActivityPublishProofInvalidErrorTag {
 pub struct RelayAgentActivityPublishRequest {
     pub proof: ::std::string::String,
     ///Current agent-awareness state, or null to remove the published state.
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub state: ::std::option::Option<RelayAgentActivityState>,
 }
 ///`RelayAgentActivitySnapshotResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct RelayAgentActivitySnapshotResponse {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub aggregate: ::std::option::Option<RelayAgentActivityAggregateState>,
 }
 ///`RelayAgentActivityState`
@@ -74943,15 +76952,18 @@ impl ::std::convert::TryFrom<::std::string::String> for RelayAuthInvalidErrorTag
 ///`RelayAuthorizationServerMetadata`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct RelayAuthorizationServerMetadata {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub dpop_signing_alg_values_supported: ::std::vec::Vec<
         RelayAuthorizationServerMetadataDpopSigningAlgValuesSupportedItem,
     >,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub grant_types_supported: ::std::vec::Vec<
         RelayAuthorizationServerMetadataGrantTypesSupportedItem,
     >,
     pub issuer: ::std::string::String,
     pub scopes_supported: ::std::vec::Vec<RelayDpopAccessTokenScope>,
     pub token_endpoint: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub token_endpoint_auth_methods_supported: ::std::vec::Vec<
         RelayAuthorizationServerMetadataTokenEndpointAuthMethodsSupportedItem,
     >,
@@ -75973,7 +77985,7 @@ pub struct RelayEnvironmentConfigRequest {
     pub cloud_user_id: ::std::string::String,
     #[serde(
         rename = "endpointRuntime",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub endpoint_runtime: ::std::option::Option<RelayManagedEndpointRuntimeConfig>,
     #[serde(rename = "environmentCredential")]
@@ -76969,7 +78981,7 @@ pub struct RelayEnvironmentLinkResponse {
     pub endpoint: RelayManagedEndpoint,
     #[serde(
         rename = "endpointRuntime",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub endpoint_runtime: ::std::option::Option<RelayManagedEndpointRuntimeConfig>,
     #[serde(rename = "environmentCredential")]
@@ -77118,6 +79130,7 @@ pub struct RelayEnvironmentStatusResponse {
     #[serde(rename = "checkedAt")]
     pub checked_at: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub descriptor: ::std::option::Option<ExecutionEnvironmentDescriptor>,
     pub endpoint: RelayManagedEndpoint,
     #[serde(
@@ -77129,6 +79142,7 @@ pub struct RelayEnvironmentStatusResponse {
         rename = "endpointStatus",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub endpoint_status: ::std::option::Option<
         RelayEnvironmentStatusResponseEndpointStatus,
     >,
@@ -77140,6 +79154,7 @@ pub struct RelayEnvironmentStatusResponse {
         rename = "offlineReason",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub offline_reason: ::std::option::Option<
         RelayEnvironmentStatusResponseOfflineReason,
     >,
@@ -77423,11 +79438,13 @@ pub struct RelayLinkProofRequest {
 ///`RelayListDevicesResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct RelayListDevicesResponse {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub devices: ::std::vec::Vec<RelayClientDeviceRecord>,
 }
 ///`RelayListDevicesResponseV1`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct RelayListDevicesResponseV1 {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub devices: ::std::vec::Vec<RelayListDevicesResponseV1DevicesItem>,
 }
 ///`RelayListDevicesResponseV1DevicesItem`
@@ -77528,6 +79545,7 @@ for RelayListDevicesResponseV1DevicesItemPlatform {
 ///`RelayListEnvironmentsResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct RelayListEnvironmentsResponse {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub environments: ::std::vec::Vec<RelayClientEnvironmentRecord>,
 }
 ///`RelayLiveActivityRegistrationRequest`
@@ -77611,6 +79629,7 @@ pub struct RelayOkResponse {
 pub struct RelayProtectedResourceMetadata {
     pub authorization_servers: ::std::vec::Vec<::std::string::String>,
     pub dpop_bound_access_tokens_required: bool,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub dpop_signing_alg_values_supported: ::std::vec::Vec<
         RelayProtectedResourceMetadataDpopSigningAlgValuesSupportedItem,
     >,
@@ -77675,6 +79694,7 @@ for RelayProtectedResourceMetadataDpopSigningAlgValuesSupportedItem {
 ///`RelayPublishResponse`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct RelayPublishResponse {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub deliveries: ::std::vec::Vec<RelayDeliveryResult>,
     pub ok: bool,
 }
@@ -77705,6 +79725,7 @@ pub struct RepositoryIdentity {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub name: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub origin: ::std::option::Option<RepositoryOrigin>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub owner: ::std::option::Option<::std::string::String>,
@@ -77785,6 +79806,11 @@ pub struct RepositoryOrigin {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub display_name: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "remoteUrl",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub remote_url: ::std::option::Option<::std::string::String>,
 }
 ///`ResolvedKeybindingRule`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -77792,6 +79818,7 @@ pub struct ResolvedKeybindingRule {
     pub command: KeybindingCommand,
     pub shortcut: KeybindingShortcut,
     #[serde(rename = "whenAst", skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub when_ast: ::std::option::Option<crate::tagged::ResolvedKeybindingRuleWhenAst>,
 }
 ///`ResolvedKeybindingRuleWhenAstAnd`
@@ -78048,6 +80075,7 @@ pub struct ResourceAttributionEntry {
 ///`ResourceAttributionSnapshot`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ResourceAttributionSnapshot {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub entries: ::std::vec::Vec<ResourceAttributionEntry>,
     #[serde(rename = "readAt")]
     pub read_at: ::std::string::String,
@@ -78342,6 +80370,7 @@ for ResourceTelemetryHealthSidecarVersionSomeTag {
 pub struct ResourceTelemetryHistory {
     #[serde(rename = "bucketMs")]
     pub bucket_ms: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub buckets: ::std::vec::Vec<ResourceTelemetryHistoryBucket>,
     pub health: ResourceTelemetryHealth,
     #[serde(rename = "readAt")]
@@ -78351,6 +80380,7 @@ pub struct ResourceTelemetryHistory {
     #[serde(rename = "sampleIntervalMs")]
     pub sample_interval_ms: i64,
     #[serde(rename = "topProcesses")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub top_processes: ::std::vec::Vec<ResourceTelemetryProcessSummary>,
     #[serde(rename = "windowMs")]
     pub window_ms: i64,
@@ -78491,6 +80521,7 @@ pub struct ResourceTelemetrySnapshot {
     pub groups: ResourceTelemetryGroups,
     pub health: ResourceTelemetryHealth,
     pub power: HostPowerSnapshot,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub processes: ::std::vec::Vec<ResourceTelemetryProcess>,
     #[serde(rename = "readAt")]
     pub read_at: ::std::string::String,
@@ -78899,6 +80930,7 @@ pub struct ReviewDiffPreviewInput {
     pub base_ref: ::std::option::Option<::std::string::String>,
     pub cwd: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub file: ::std::option::Option<ReviewDiffPreviewInputFile>,
     #[serde(
         rename = "ignoreWhitespace",
@@ -78924,6 +80956,7 @@ pub struct ReviewDiffPreviewResult {
     pub cwd: ::std::string::String,
     #[serde(rename = "generatedAt")]
     pub generated_at: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub sources: ::std::vec::Vec<ReviewDiffPreviewSource>,
 }
 ///`ReviewDiffPreviewSource`
@@ -78935,6 +80968,7 @@ pub struct ReviewDiffPreviewSource {
     #[serde(rename = "diffHash")]
     pub diff_hash: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub files: ::std::option::Option<::std::vec::Vec<ReviewDiffFileStat>>,
     #[serde(rename = "headRef", deserialize_with = "::std::option::Option::deserialize")]
     pub head_ref: ::std::option::Option<::std::string::String>,
@@ -78992,6 +81026,7 @@ pub struct ScheduledTask {
     #[serde(rename = "updatedAt")]
     pub updated_at: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub webhook: ::std::option::Option<ScheduledTaskWebhookEndpoint>,
     #[serde(rename = "workspaceStrategy")]
     pub workspace_strategy: crate::tagged::OrchestrationV2ThreadLaunchWorkspaceStrategy,
@@ -79129,6 +81164,7 @@ pub struct ScheduledTaskListWebhookDeliveriesInput {
 ///`ScheduledTaskListWebhookDeliveriesResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ScheduledTaskListWebhookDeliveriesResult {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub deliveries: ::std::vec::Vec<ScheduledTaskWebhookDeliverySummary>,
 }
 ///`ScheduledTaskMutationResult`
@@ -79151,18 +81187,17 @@ pub struct ScheduledTaskRunNowInput {
 pub struct ScheduledTaskRunNowResult {
     pub task: ScheduledTask,
 }
-///Run at a fixed local wall-clock time on selected weekdays.
+///`ScheduledTaskScheduleFixedTime`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ScheduledTaskScheduleFixedTime {
     #[serde(rename = "timeOfDay")]
     pub time_of_day: ::std::string::String,
-    ///Select a fixed local wall-clock time.
     #[serde(rename = "type")]
     pub type_: ScheduledTaskScheduleFixedTimeType,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub weekdays: ::std::option::Option<::std::vec::Vec<i64>>,
 }
-///Select a fixed local wall-clock time.
+///`ScheduledTaskScheduleFixedTimeType`
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -79214,17 +81249,15 @@ for ScheduledTaskScheduleFixedTimeType {
         value.parse()
     }
 }
-///Run repeatedly after a fixed number of milliseconds.
+///`ScheduledTaskScheduleInterval`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ScheduledTaskScheduleInterval {
-    ///Positive interval in milliseconds.
     #[serde(rename = "everyMs")]
     pub every_ms: i64,
-    ///Select interval scheduling.
     #[serde(rename = "type")]
     pub type_: ScheduledTaskScheduleIntervalType,
 }
-///Select interval scheduling.
+///`ScheduledTaskScheduleIntervalType`
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -79276,25 +81309,26 @@ for ScheduledTaskScheduleIntervalType {
         value.parse()
     }
 }
-///Run on each request to the task's webhook URL. The prompt may use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}} and {{request}} placeholders.
+///Run on each webhook request.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ScheduledTaskScheduleWebhook {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub dedupe: ::std::option::Option<ScheduledTaskScheduleWebhookDedupe>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub filters: ::std::option::Option<::std::vec::Vec<ScheduledTaskWebhookFilter>>,
     #[serde(
         rename = "maxDeliveryAgeMinutes",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub max_delivery_age_minutes: ::std::option::Option<i64>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub signature: ::std::option::Option<ScheduledTaskWebhookSignature>,
-    ///Run when the task's webhook URL receives a request.
     #[serde(rename = "type")]
     pub type_: ScheduledTaskScheduleWebhookType,
 }
-///Replay key template (7 days), coalesce key template, and fixed window in seconds (default 120).
+///Replay and coalesce key templates. Window in seconds, default 120.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct ScheduledTaskScheduleWebhookDedupe {
     #[serde(
@@ -79313,7 +81347,7 @@ pub struct ScheduledTaskScheduleWebhookDedupe {
     )]
     pub replay_key: ::std::option::Option<::std::string::String>,
 }
-///Run when the task's webhook URL receives a request.
+///`ScheduledTaskScheduleWebhookType`
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -79414,18 +81448,17 @@ pub struct ScheduledTaskUpsertInput {
     #[serde(rename = "workspaceStrategy")]
     pub workspace_strategy: crate::tagged::OrchestrationV2ThreadLaunchWorkspaceStrategy,
 }
-///Run at a fixed local wall-clock time on selected weekdays.
+///`ScheduledTaskUpsertScheduleFixedTime`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ScheduledTaskUpsertScheduleFixedTime {
     #[serde(rename = "timeOfDay")]
     pub time_of_day: ::std::string::String,
-    ///Select a fixed local wall-clock time.
     #[serde(rename = "type")]
     pub type_: ScheduledTaskUpsertScheduleFixedTimeType,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub weekdays: ::std::option::Option<::std::vec::Vec<i64>>,
 }
-///Select a fixed local wall-clock time.
+///`ScheduledTaskUpsertScheduleFixedTimeType`
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -79477,17 +81510,16 @@ for ScheduledTaskUpsertScheduleFixedTimeType {
         value.parse()
     }
 }
-///Run repeatedly after a fixed number of milliseconds.
+///`ScheduledTaskUpsertScheduleInterval`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ScheduledTaskUpsertScheduleInterval {
-    ///Positive interval in milliseconds.
+    ///Min 60000.
     #[serde(rename = "everyMs")]
-    pub every_ms: ::serde_json::Value,
-    ///Select interval scheduling.
+    pub every_ms: i64,
     #[serde(rename = "type")]
     pub type_: ScheduledTaskUpsertScheduleIntervalType,
 }
-///Select interval scheduling.
+///`ScheduledTaskUpsertScheduleIntervalType`
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -79539,26 +81571,28 @@ for ScheduledTaskUpsertScheduleIntervalType {
         value.parse()
     }
 }
-///Run on each request to the task's webhook URL. The prompt may use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}} and {{request}} placeholders.
+///Run per webhook request. Prompt can use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}}, {{request}}.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ScheduledTaskUpsertScheduleWebhook {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub dedupe: ::std::option::Option<ScheduledTaskUpsertScheduleWebhookDedupe>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub filters: ::std::option::Option<::std::vec::Vec<ScheduledTaskWebhookFilter>>,
     #[serde(
         rename = "maxDeliveryAgeMinutes",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub max_delivery_age_minutes: ::std::option::Option<i64>,
-    ///Signature check; omit or null to accept requests by URL token only.
+    ///Omit for URL token only.
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub signature: ::std::option::Option<ScheduledTaskUpsertScheduleWebhookSignature>,
-    ///Run when the task's webhook URL receives a request.
     #[serde(rename = "type")]
     pub type_: ScheduledTaskUpsertScheduleWebhookType,
 }
-///Replay key template (7 days), coalesce key template, and fixed window in seconds (default 120).
+///Replay and coalesce key templates. Window in seconds, default 120.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct ScheduledTaskUpsertScheduleWebhookDedupe {
     #[serde(
@@ -79580,22 +81614,21 @@ pub struct ScheduledTaskUpsertScheduleWebhookDedupe {
 ///`ScheduledTaskUpsertScheduleWebhookSignature`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ScheduledTaskUpsertScheduleWebhookSignature {
-    ///How the HMAC-SHA256 digest is encoded in the header.
     pub encoding: ScheduledTaskUpsertScheduleWebhookSignatureEncoding,
     pub header: ::std::string::String,
-    ///Text before the digest in the header value, such as 'sha256='. Empty for none.
+    ///Text before the digest, such as 'sha256='. Empty for none.
     pub prefix: ::std::string::String,
-    ///Shared signing secret. Omit to keep the stored secret.
+    ///Default: stored secret.
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub secret: ::std::option::Option<::std::string::String>,
-    ///A secret the user entered through request_secret, used instead of secret. It is consumed by this save.
+    ///From `request_secret`. Instead of `secret`. Spent by this save.
     #[serde(
         rename = "secretRef",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub secret_ref: ::std::option::Option<::std::string::String>,
 }
-///Run when the task's webhook URL receives a request.
+///`ScheduledTaskUpsertScheduleWebhookType`
 #[derive(
     ::serde::Deserialize,
     ::serde::Serialize,
@@ -79807,7 +81840,7 @@ pub struct ScheduledTaskWebhookEndpoint {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub url: ::std::option::Option<::std::string::String>,
 }
-///Scalars compare as strings; objects and arrays only satisfy 'exists'. Every op but 'exists' fails when the path is missing.
+///Path: `headers.x-event` or `body.action`. String compare. Objects pass only 'exists'. A `[]` segment matches any array item. `notEquals` passes only if no item equals.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[serde(remote = "Self")]
@@ -79946,13 +81979,12 @@ for ScheduledTaskWebhookFilterVariant2Op {
         value.parse()
     }
 }
-///Optional HMAC-SHA256 signature check over the raw request body.
+///HMAC-SHA256 check on the raw body.
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ScheduledTaskWebhookSignature {
-    ///How the HMAC-SHA256 digest is encoded in the header.
     pub encoding: ScheduledTaskWebhookSignatureEncoding,
     pub header: ::std::string::String,
-    ///Text before the digest in the header value, such as 'sha256='. Empty for none.
+    ///Text before the digest, such as 'sha256='. Empty for none.
     pub prefix: ::std::string::String,
 }
 ///`SecretRequestAnswerInput`
@@ -80152,6 +82184,7 @@ pub struct SelectProviderOptionDescriptor {
     pub description: ::std::option::Option<::std::string::String>,
     pub id: ::std::string::String,
     pub label: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub options: ::std::vec::Vec<ProviderOptionChoice>,
     #[serde(
         rename = "promptInjectedValues",
@@ -80225,6 +82258,7 @@ pub struct ServerAuthDescriptor {
         rename = "serverUpdateScope",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub server_update_scope: ::std::option::Option<
         ServerAuthDescriptorServerUpdateScope,
     >,
@@ -80304,6 +82338,7 @@ pub struct ServerConfig {
         rename = "environmentThemes",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub environment_themes: ::std::option::Option<::std::vec::Vec<EnvironmentTheme>>,
     #[serde(default, deserialize_with = "crate::forward_compat::known_vec")]
     pub issues: ::std::vec::Vec<crate::tagged::ServerConfigIssue>,
@@ -80315,6 +82350,7 @@ pub struct ServerConfig {
         rename = "lastEventLoopStall",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub last_event_loop_stall: ::std::option::Option<ServerConfigLastEventLoopStall>,
     #[serde(
         rename = "newProjectsRoot",
@@ -80342,6 +82378,11 @@ pub struct ServerConfig {
     pub scratch_workspace_root: ::std::option::Option<::std::string::String>,
     pub settings: ServerSettings,
     #[serde(
+        rename = "shellOlderSettled",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub shell_older_settled: ::std::option::Option<bool>,
+    #[serde(
         rename = "shellResumeCompletionMarker",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
@@ -80356,6 +82397,11 @@ pub struct ServerConfig {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub shell_reveal_in_file_manager_kind: ::std::option::Option<FileManagerRevealKind>,
+    #[serde(
+        rename = "shellThreadFamilies",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub shell_thread_families: ::std::option::Option<bool>,
     #[serde(
         rename = "threadFind",
         skip_serializing_if = "::std::option::Option::is_none"
@@ -80388,6 +82434,7 @@ pub struct ServerConfig {
 ///`ServerConfigEnvironmentThemesUpdatedPayload`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ServerConfigEnvironmentThemesUpdatedPayload {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub themes: ::std::vec::Vec<EnvironmentTheme>,
 }
 ///`ServerConfigIssueKeybindingsInvalidEntry`
@@ -81508,6 +83555,7 @@ pub struct ServerLifecycleReadyPayload {
         rename = "updateOutcome",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub update_outcome: ::std::option::Option<ServerSelfUpdateOutcome>,
 }
 ///`ServerLifecycleStreamLegacyThreadMigrationEvent`
@@ -81853,24 +83901,54 @@ pub struct ServerObservability {
     )]
     pub otlp_logs_enabled: ::std::option::Option<bool>,
     #[serde(
+        rename = "otlpLogsSource",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub otlp_logs_source: ::std::option::Option<OtlpEndpointSource>,
+    #[serde(
         rename = "otlpLogsUrl",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub otlp_logs_url: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "otlpLogsVariable",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub otlp_logs_variable: ::std::option::Option<::std::string::String>,
     #[serde(rename = "otlpMetricsEnabled")]
     pub otlp_metrics_enabled: bool,
+    #[serde(
+        rename = "otlpMetricsSource",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub otlp_metrics_source: ::std::option::Option<OtlpEndpointSource>,
     #[serde(
         rename = "otlpMetricsUrl",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub otlp_metrics_url: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "otlpMetricsVariable",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub otlp_metrics_variable: ::std::option::Option<::std::string::String>,
     #[serde(rename = "otlpTracesEnabled")]
     pub otlp_traces_enabled: bool,
+    #[serde(
+        rename = "otlpTracesSource",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub otlp_traces_source: ::std::option::Option<OtlpEndpointSource>,
     #[serde(
         rename = "otlpTracesUrl",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub otlp_traces_url: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "otlpTracesVariable",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub otlp_traces_variable: ::std::option::Option<::std::string::String>,
 }
 ///`ServerProbePayload`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -82064,6 +84142,7 @@ pub struct ServerProcessDiagnosticsResult {
     pub error: crate::tagged::ServerProcessDiagnosticsResultError,
     #[serde(rename = "processCount")]
     pub process_count: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub processes: ::std::vec::Vec<ServerProcessDiagnosticsEntry>,
     #[serde(rename = "readAt")]
     pub read_at: ::std::string::String,
@@ -82223,6 +84302,7 @@ pub struct ServerProcessResourceHistoryInput {
 pub struct ServerProcessResourceHistoryResult {
     #[serde(rename = "bucketMs")]
     pub bucket_ms: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub buckets: ::std::vec::Vec<ServerProcessResourceHistoryBucket>,
     pub error: crate::tagged::ServerProcessResourceHistoryResultError,
     #[serde(rename = "readAt")]
@@ -82232,6 +84312,7 @@ pub struct ServerProcessResourceHistoryResult {
     #[serde(rename = "sampleIntervalMs")]
     pub sample_interval_ms: i64,
     #[serde(rename = "topProcesses")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub top_processes: ::std::vec::Vec<ServerProcessResourceHistorySummary>,
     #[serde(rename = "totalCpuSecondsApprox")]
     pub total_cpu_seconds_approx: crate::JsNumber,
@@ -82412,6 +84493,7 @@ pub struct ServerProvider {
         rename = "compatibilityAdvisory",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub compatibility_advisory: ::std::option::Option<
         ServerProviderCompatibilityAdvisory,
     >,
@@ -82421,6 +84503,7 @@ pub struct ServerProvider {
     )]
     pub configurable_providers: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub continuation: ::std::option::Option<ServerProviderContinuation>,
     #[serde(
         rename = "displayName",
@@ -82441,11 +84524,13 @@ pub struct ServerProvider {
     pub instance_id: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub message: ::std::option::Option<::std::string::String>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub models: ::std::vec::Vec<ServerProviderModel>,
     #[serde(
         rename = "nativeSessions",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub native_sessions: ::std::option::Option<ServerProviderNativeSessions>,
     #[serde(
         rename = "reportsContextWindow",
@@ -82461,8 +84546,10 @@ pub struct ServerProvider {
         rename = "runtimePaths",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub runtime_paths: ::std::option::Option<ServerProviderRuntimePaths>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub setup: ::std::option::Option<ServerProviderSetup>,
     #[serde(
         rename = "showInteractionModeToggle",
@@ -82470,11 +84557,13 @@ pub struct ServerProvider {
     )]
     pub show_interaction_mode_toggle: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub skills: ::std::option::Option<::std::vec::Vec<ServerProviderSkill>>,
     #[serde(
         rename = "slashCommands",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub slash_commands: ::std::option::Option<
         ::std::vec::Vec<ServerProviderSlashCommand>,
     >,
@@ -82504,6 +84593,7 @@ pub struct ServerProvider {
         rename = "updateRequiredModels",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub update_required_models: ::std::option::Option<
         ::std::vec::Vec<ServerProviderUpdateRequiredModel>,
     >,
@@ -82511,11 +84601,13 @@ pub struct ServerProvider {
         rename = "updateState",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub update_state: ::std::option::Option<ServerProviderUpdateState>,
     #[serde(
         rename = "usageLimits",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub usage_limits: ::std::option::Option<ServerProviderUsageLimits>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub version: ::std::option::Option<::std::string::String>,
@@ -82523,11 +84615,13 @@ pub struct ServerProvider {
         rename = "versionAdvisory",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub version_advisory: ::std::option::Option<ServerProviderVersionAdvisory>,
     #[serde(
         rename = "workspaceSnapshots",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub workspace_snapshots: ::std::option::Option<
         ::std::vec::Vec<ServerProviderWorkspaceSnapshot>,
     >,
@@ -82536,6 +84630,7 @@ pub struct ServerProvider {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ServerProviderAuth {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub action: ::std::option::Option<AcpRegistryUrlAuthAction>,
     #[serde(
         rename = "canLogout",
@@ -82599,8 +84694,9 @@ pub struct ServerProviderModel {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub aliases: ::std::option::Option<::std::vec::Vec<::std::string::String>>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub badge: ::std::option::Option<ServerProviderModelBadge>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub capabilities: ::std::option::Option<ModelCapabilities>,
     #[serde(rename = "isCustom")]
     pub is_custom: bool,
@@ -82767,6 +84863,7 @@ pub struct ServerProviderSlashCommand {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub description: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub input: ::std::option::Option<ServerProviderSlashCommandInput>,
     pub name: ::std::string::String,
 }
@@ -82854,6 +84951,7 @@ pub struct ServerProviderUpdateInput {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ServerProviderUpdateRequiredModel {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub badge: ::std::option::Option<ServerProviderUpdateRequiredModelBadge>,
     #[serde(rename = "minVersion")]
     pub min_version: ::std::string::String,
@@ -82951,13 +85049,16 @@ pub struct ServerProviderUsageLimits {
         rename = "externalUsage",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub external_usage: ::std::option::Option<ServerProviderUsageLimitsExternalUsage>,
     #[serde(
         rename = "resetCredits",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub reset_credits: ::std::option::Option<ServerProviderResetCredits>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub unavailable: ::std::option::Option<ServerProviderUsageLimitsUnavailable>,
     #[serde(default, deserialize_with = "crate::forward_compat::vec")]
     pub windows: ::std::vec::Vec<ServerProviderUsageWindow>,
@@ -83038,11 +85139,14 @@ pub struct ServerProviderWorkspaceSnapshot {
         rename = "optionDescriptors",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub option_descriptors: ::std::option::Option<
         ::std::vec::Vec<crate::tagged::ProviderOptionDescriptor>,
     >,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub skills: ::std::vec::Vec<ServerProviderSkill>,
     #[serde(rename = "slashCommands")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub slash_commands: ::std::vec::Vec<ServerProviderSlashCommand>,
     #[serde(
         rename = "slashCommandsPending",
@@ -83067,6 +85171,16 @@ pub struct ServerRefreshProvidersPayload {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub refresh_models: ::std::option::Option<bool>,
+    #[serde(
+        rename = "usageLimitsCommand",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub usage_limits_command: ::std::option::Option<bool>,
+    #[serde(
+        rename = "workspaceSnapshotsOnDemand",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub workspace_snapshots_on_demand: ::std::option::Option<bool>,
 }
 ///`ServerRefreshUsageRatesPayload`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -83385,6 +85499,7 @@ pub struct ServerSettings {
         rename = "automaticGitFetchInterval",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub automatic_git_fetch_interval: ::std::option::Option<
         ServerSettingsAutomaticGitFetchInterval,
     >,
@@ -83392,6 +85507,7 @@ pub struct ServerSettings {
         rename = "backgroundActivity",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub background_activity: ::std::option::Option<BackgroundActivitySettings>,
     #[serde(
         rename = "backgroundActivityProfile",
@@ -83417,7 +85533,8 @@ pub struct ServerSettings {
         rename = "compactIdleThreads",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
-    pub compact_idle_threads: ::std::option::Option<bool>,
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub compact_idle_threads: ::std::option::Option<ServerSettingsCompactIdleThreads>,
     #[serde(
         rename = "continueThreadsAfterServerUpdate",
         skip_serializing_if = "::std::option::Option::is_none"
@@ -83437,11 +85554,13 @@ pub struct ServerSettings {
         rename = "defaultModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub default_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "defaultProjectScripts",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub default_project_scripts: ::std::option::Option<::std::vec::Vec<ProjectScript>>,
     #[serde(
         rename = "defaultRuntimeMode",
@@ -83468,6 +85587,7 @@ pub struct ServerSettings {
         rename = "deviceHosts",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub device_hosts: ::std::option::Option<::std::vec::Vec<SshDeviceHostConfig>>,
     #[serde(
         rename = "deviceOnboardingCompleted",
@@ -83478,6 +85598,7 @@ pub struct ServerSettings {
         rename = "easDeviceHosts",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub eas_device_hosts: ::std::option::Option<::std::vec::Vec<EasDeviceHostConfig>>,
     #[serde(
         rename = "enableAgentBrowserAccess",
@@ -83506,13 +85627,25 @@ pub struct ServerSettings {
     #[serde(default, deserialize_with = "crate::forward_compat::option")]
     pub environment_icon: ::std::option::Option<EnvironmentMachineKind>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub favorites: ::std::option::Option<::std::vec::Vec<ModelFavorite>>,
+    #[serde(
+        rename = "guestSharingEnabled",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub guest_sharing_enabled: ::std::option::Option<bool>,
+    #[serde(
+        rename = "idleCompaction",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub idle_compaction: ::std::option::Option<IdleCompactionMode>,
     #[serde(
         rename = "newWorktreesStartFromOrigin",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub new_worktrees_start_from_origin: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub observability: ::std::option::Option<ObservabilitySettings>,
     #[serde(
         rename = "previousWorktreesDirectories",
@@ -83525,6 +85658,7 @@ pub struct ServerSettings {
         rename = "projectAgentBrowserAccessOverrides",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_agent_browser_access_overrides: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, bool>,
     >,
@@ -83532,6 +85666,7 @@ pub struct ServerSettings {
         rename = "projectAutoPullOverrides",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_auto_pull_overrides: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, bool>,
     >,
@@ -83539,6 +85674,7 @@ pub struct ServerSettings {
         rename = "projectScriptOverrides",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_script_overrides: ::std::option::Option<
         ::std::collections::BTreeMap<
             ::std::string::String,
@@ -83554,6 +85690,7 @@ pub struct ServerSettings {
         rename = "projectSettingsOverrides",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_settings_overrides: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, ProjectSettingsOverrides>,
     >,
@@ -83561,6 +85698,7 @@ pub struct ServerSettings {
         rename = "providerHealthRefreshInterval",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_health_refresh_interval: ::std::option::Option<
         ServerSettingsProviderHealthRefreshInterval,
     >,
@@ -83568,6 +85706,7 @@ pub struct ServerSettings {
         rename = "providerInstances",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_instances: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, ProviderInstanceConfig>,
     >,
@@ -83575,6 +85714,7 @@ pub struct ServerSettings {
         rename = "providerModelPreferences",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_model_preferences: ::std::option::Option<ProviderModelPreferences>,
     #[serde(
         rename = "pullRequestMergeMethod",
@@ -83600,6 +85740,7 @@ pub struct ServerSettings {
         rename = "reviewGuideModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub review_guide_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "reviewGuidesEnabled",
@@ -83630,6 +85771,7 @@ pub struct ServerSettings {
         rename = "sourceControlHosts",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_hosts: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, SourceControlHostSettings>,
     >,
@@ -83637,11 +85779,13 @@ pub struct ServerSettings {
         rename = "sourceControlWriterModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_writer_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "sourceControlWritingStyle",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_writing_style: ::std::option::Option<
         ServerSettingsSourceControlWritingStyle,
     >,
@@ -83649,16 +85793,24 @@ pub struct ServerSettings {
         rename = "storageCleanup",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub storage_cleanup: ::std::option::Option<StorageCleanupSettings>,
     #[serde(
         rename = "textGenerationModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub text_generation_model_selection: ::std::option::Option<ModelSelection>,
+    #[serde(
+        rename = "threadTitleInstructions",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub thread_title_instructions: ::std::option::Option<::std::string::String>,
     #[serde(
         rename = "usageLimitSources",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub usage_limit_sources: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, UsageLimitSourceConfig>,
     >,
@@ -83666,6 +85818,7 @@ pub struct ServerSettings {
         rename = "usageModelAliases",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub usage_model_aliases: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
     >,
@@ -83673,6 +85826,7 @@ pub struct ServerSettings {
         rename = "usagePriceOverrides",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub usage_price_overrides: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, UsageModelPriceOverride>,
     >,
@@ -83680,6 +85834,7 @@ pub struct ServerSettings {
         rename = "worktreeCleanup",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub worktree_cleanup: ::std::option::Option<
         crate::tagged::ServerSettingsWorktreeCleanup,
     >,
@@ -83731,6 +85886,43 @@ impl ::std::convert::From<ServerSettingsAutomaticGitFetchIntervalString>
 for ServerSettingsAutomaticGitFetchInterval {
     fn from(value: ServerSettingsAutomaticGitFetchIntervalString) -> Self {
         Self::String(value)
+    }
+}
+///`ServerSettingsCompactIdleThreads`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[serde(remote = "Self")]
+pub enum ServerSettingsCompactIdleThreads {
+    Boolean(bool),
+    IdleCompactionMode(IdleCompactionMode),
+    Null,
+}
+impl ::serde::Serialize for ServerSettingsCompactIdleThreads {
+    fn serialize<S: ::serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> ::std::result::Result<S::Ok, S::Error> {
+        ServerSettingsCompactIdleThreads::serialize(self, serializer)
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ServerSettingsCompactIdleThreads {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> ::std::result::Result<Self, D::Error> {
+        crate::forward_compat::untagged(
+            deserializer,
+            |value| ServerSettingsCompactIdleThreads::deserialize(value),
+        )
+    }
+}
+impl ::std::convert::From<bool> for ServerSettingsCompactIdleThreads {
+    fn from(value: bool) -> Self {
+        Self::Boolean(value)
+    }
+}
+impl ::std::convert::From<IdleCompactionMode> for ServerSettingsCompactIdleThreads {
+    fn from(value: IdleCompactionMode) -> Self {
+        Self::IdleCompactionMode(value)
     }
 }
 ///`ServerSettingsError`
@@ -83826,6 +86018,7 @@ pub struct ServerSettingsPatch {
         rename = "backgroundActivity",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub background_activity: ::std::option::Option<
         ServerSettingsPatchBackgroundActivity,
     >,
@@ -83853,7 +86046,10 @@ pub struct ServerSettingsPatch {
         rename = "compactIdleThreads",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
-    pub compact_idle_threads: ::std::option::Option<bool>,
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
+    pub compact_idle_threads: ::std::option::Option<
+        ServerSettingsPatchCompactIdleThreads,
+    >,
     #[serde(
         rename = "continueThreadsAfterServerUpdate",
         skip_serializing_if = "::std::option::Option::is_none"
@@ -83873,11 +86069,13 @@ pub struct ServerSettingsPatch {
         rename = "defaultModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub default_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "defaultProjectScripts",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub default_project_scripts: ::std::option::Option<::std::vec::Vec<ProjectScript>>,
     #[serde(
         rename = "defaultRuntimeMode",
@@ -83893,6 +86091,7 @@ pub struct ServerSettingsPatch {
         rename = "deviceHosts",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub device_hosts: ::std::option::Option<::std::vec::Vec<SshDeviceHostConfig>>,
     #[serde(
         rename = "deviceOnboardingCompleted",
@@ -83903,6 +86102,7 @@ pub struct ServerSettingsPatch {
         rename = "easDeviceHosts",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub eas_device_hosts: ::std::option::Option<::std::vec::Vec<EasDeviceHostConfig>>,
     #[serde(
         rename = "enableAgentBrowserAccess",
@@ -83930,11 +86130,23 @@ pub struct ServerSettingsPatch {
     )]
     pub environment_icon: ::std::option::Option<EnvironmentMachineKind>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub favorites: ::std::option::Option<::std::vec::Vec<ModelFavorite>>,
+    #[serde(
+        rename = "guestSharingEnabled",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub guest_sharing_enabled: ::std::option::Option<bool>,
+    #[serde(
+        rename = "idleCompaction",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub idle_compaction: ::std::option::Option<IdleCompactionMode>,
     #[serde(
         rename = "migrateModelPreferences",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub migrate_model_preferences: ::std::option::Option<
         ServerSettingsPatchMigrateModelPreferences,
     >,
@@ -83944,11 +86156,13 @@ pub struct ServerSettingsPatch {
     )]
     pub new_worktrees_start_from_origin: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub observability: ::std::option::Option<ServerSettingsPatchObservability>,
     #[serde(
         rename = "projectAgentBrowserAccessOverrides",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_agent_browser_access_overrides: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, ::std::option::Option<bool>>,
     >,
@@ -83956,6 +86170,7 @@ pub struct ServerSettingsPatch {
         rename = "projectAutoPullOverrides",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_auto_pull_overrides: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, ::std::option::Option<bool>>,
     >,
@@ -83963,6 +86178,7 @@ pub struct ServerSettingsPatch {
         rename = "projectScriptOverrides",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_script_overrides: ::std::option::Option<
         ::std::collections::BTreeMap<
             ::std::string::String,
@@ -83973,6 +86189,7 @@ pub struct ServerSettingsPatch {
         rename = "projectSettingsOverrides",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub project_settings_overrides: ::std::option::Option<
         ::std::collections::BTreeMap<
             ::std::string::String,
@@ -83990,6 +86207,7 @@ pub struct ServerSettingsPatch {
         rename = "providerInstances",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_instances: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, ProviderInstanceConfig>,
     >,
@@ -83997,6 +86215,7 @@ pub struct ServerSettingsPatch {
         rename = "providerModelPreferences",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_model_preferences: ::std::option::Option<
         ::std::collections::BTreeMap<
             ::std::string::String,
@@ -84027,6 +86246,7 @@ pub struct ServerSettingsPatch {
         rename = "reviewGuideModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub review_guide_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "reviewGuidesEnabled",
@@ -84037,6 +86257,7 @@ pub struct ServerSettingsPatch {
         rename = "setModelFavorites",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub set_model_favorites: ::std::option::Option<
         ::std::vec::Vec<ServerSettingsPatchSetModelFavoritesItem>,
     >,
@@ -84044,6 +86265,7 @@ pub struct ServerSettingsPatch {
         rename = "setModelsHidden",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub set_models_hidden: ::std::option::Option<
         ::std::vec::Vec<ServerSettingsPatchSetModelsHiddenItem>,
     >,
@@ -84051,6 +86273,7 @@ pub struct ServerSettingsPatch {
         rename = "setProviderModelOrder",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub set_provider_model_order: ::std::option::Option<
         ServerSettingsPatchSetProviderModelOrder,
     >,
@@ -84058,6 +86281,7 @@ pub struct ServerSettingsPatch {
         rename = "sidebarAutoSettleAfterDays",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub sidebar_auto_settle_after_days: ::std::option::Option<
         ServerSettingsPatchSidebarAutoSettleAfterDays,
     >,
@@ -84080,6 +86304,7 @@ pub struct ServerSettingsPatch {
         rename = "sourceControlHosts",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_hosts: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, SourceControlHostSettings>,
     >,
@@ -84087,11 +86312,13 @@ pub struct ServerSettingsPatch {
         rename = "sourceControlWriterModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_writer_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "sourceControlWritingStyle",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_writing_style: ::std::option::Option<
         ServerSettingsPatchSourceControlWritingStyle,
     >,
@@ -84099,18 +86326,26 @@ pub struct ServerSettingsPatch {
         rename = "storageCleanup",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub storage_cleanup: ::std::option::Option<ServerSettingsPatchStorageCleanup>,
     #[serde(
         rename = "textGenerationModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub text_generation_model_selection: ::std::option::Option<
         ServerSettingsPatchTextGenerationModelSelection,
     >,
     #[serde(
+        rename = "threadTitleInstructions",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub thread_title_instructions: ::std::option::Option<::std::string::String>,
+    #[serde(
         rename = "usageLimitSources",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub usage_limit_sources: ::std::option::Option<
         ::std::collections::BTreeMap<
             ::std::string::String,
@@ -84121,6 +86356,7 @@ pub struct ServerSettingsPatch {
         rename = "usageModelAliases",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub usage_model_aliases: ::std::option::Option<
         ::std::collections::BTreeMap<
             ::std::string::String,
@@ -84131,6 +86367,7 @@ pub struct ServerSettingsPatch {
         rename = "usagePriceOverrides",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub usage_price_overrides: ::std::option::Option<
         ::std::collections::BTreeMap<
             ::std::string::String,
@@ -84141,6 +86378,7 @@ pub struct ServerSettingsPatch {
         rename = "worktreeCleanup",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub worktree_cleanup: ::std::option::Option<
         crate::tagged::ServerSettingsPatchWorktreeCleanup,
     >,
@@ -84164,6 +86402,7 @@ pub struct ServerSettingsPatchBackgroundActivity {
     )]
     pub base_profile: ::std::option::Option<BackgroundActivityProfile>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub overrides: ::std::option::Option<ServerSettingsPatchBackgroundActivityOverrides>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub profile: ::std::option::Option<BackgroundActivityProfileSelection>,
@@ -84171,6 +86410,7 @@ pub struct ServerSettingsPatchBackgroundActivity {
         rename = "schemaVersion",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub schema_version: ::std::option::Option<
         ServerSettingsPatchBackgroundActivitySchemaVersion,
     >,
@@ -84262,15 +86502,94 @@ for ServerSettingsPatchBackgroundActivitySchemaVersion {
             .map_err(|e| { <D::Error as ::serde::de::Error>::custom(e.to_string()) })
     }
 }
+///`ServerSettingsPatchCompactIdleThreads`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[serde(remote = "Self")]
+pub enum ServerSettingsPatchCompactIdleThreads {
+    Boolean(bool),
+    IdleCompactionMode(IdleCompactionMode),
+}
+impl ::serde::Serialize for ServerSettingsPatchCompactIdleThreads {
+    fn serialize<S: ::serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> ::std::result::Result<S::Ok, S::Error> {
+        ServerSettingsPatchCompactIdleThreads::serialize(self, serializer)
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ServerSettingsPatchCompactIdleThreads {
+    fn deserialize<D: ::serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> ::std::result::Result<Self, D::Error> {
+        crate::forward_compat::untagged(
+            deserializer,
+            |value| ServerSettingsPatchCompactIdleThreads::deserialize(value),
+        )
+    }
+}
+impl ::std::fmt::Display for ServerSettingsPatchCompactIdleThreads {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match self {
+            Self::Boolean(x) => x.fmt(f),
+            Self::IdleCompactionMode(x) => x.fmt(f),
+        }
+    }
+}
+impl ::std::str::FromStr for ServerSettingsPatchCompactIdleThreads {
+    type Err = self::error::ConversionError;
+    fn from_str(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        crate::forward_compat::strict_first(|| {
+            if let Ok(v) = value.parse() {
+                Ok(Self::Boolean(v))
+            } else if let Ok(v) = value.parse() {
+                Ok(Self::IdleCompactionMode(v))
+            } else {
+                Err("string conversion failed for all variants".into())
+            }
+        })
+    }
+}
+impl ::std::convert::TryFrom<&str> for ServerSettingsPatchCompactIdleThreads {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: &str,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String>
+for ServerSettingsPatchCompactIdleThreads {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::From<bool> for ServerSettingsPatchCompactIdleThreads {
+    fn from(value: bool) -> Self {
+        Self::Boolean(value)
+    }
+}
+impl ::std::convert::From<IdleCompactionMode> for ServerSettingsPatchCompactIdleThreads {
+    fn from(value: IdleCompactionMode) -> Self {
+        Self::IdleCompactionMode(value)
+    }
+}
 ///`ServerSettingsPatchMigrateModelPreferences`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
 pub struct ServerSettingsPatchMigrateModelPreferences {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub favorites: ::std::option::Option<::std::vec::Vec<ModelFavorite>>,
     #[serde(
         rename = "providerModelPreferences",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_model_preferences: ::std::option::Option<
         ::std::collections::BTreeMap<
             ::std::string::String,
@@ -84455,6 +86774,7 @@ pub struct ServerSettingsPatchTextGenerationModelSelection {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub model: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub options: ::std::option::Option<
         ServerSettingsPatchTextGenerationModelSelectionOptions,
     >,
@@ -85016,6 +87336,7 @@ pub struct ServerTraceDiagnosticsRecentFailure {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ServerTraceDiagnosticsResult {
     #[serde(rename = "commonFailures")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub common_failures: ::std::vec::Vec<ServerTraceDiagnosticsFailureSummary>,
     pub error: crate::tagged::ServerTraceDiagnosticsResultError,
     #[serde(rename = "failureCount")]
@@ -85027,8 +87348,10 @@ pub struct ServerTraceDiagnosticsResult {
     #[serde(rename = "lastSpanAt")]
     pub last_span_at: crate::tagged::ServerTraceDiagnosticsResultLastSpanAt,
     #[serde(rename = "latestFailures")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub latest_failures: ::std::vec::Vec<ServerTraceDiagnosticsRecentFailure>,
     #[serde(rename = "latestWarningAndErrorLogs")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub latest_warning_and_error_logs: ::std::vec::Vec<ServerTraceDiagnosticsLogEvent>,
     #[serde(rename = "logLevelCounts")]
     pub log_level_counts: ::std::collections::BTreeMap<::std::string::String, i64>,
@@ -85047,8 +87370,10 @@ pub struct ServerTraceDiagnosticsResult {
     #[serde(rename = "slowSpanThresholdMs")]
     pub slow_span_threshold_ms: i64,
     #[serde(rename = "slowestSpans")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub slowest_spans: ::std::vec::Vec<ServerTraceDiagnosticsSpanOccurrence>,
     #[serde(rename = "topSpansByCount")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub top_spans_by_count: ::std::vec::Vec<ServerTraceDiagnosticsSpanSummary>,
     #[serde(rename = "traceFilePath")]
     pub trace_file_path: ::std::string::String,
@@ -85556,6 +87881,7 @@ pub struct ServerUpdateSettingsPayload {
         rename = "providerInstanceMutation",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_instance_mutation: ::std::option::Option<
         crate::tagged::ServerUpdateSettingsPayloadProviderInstanceMutation,
     >,
@@ -85592,11 +87918,13 @@ pub struct ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue {
         rename = "defaultModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub default_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "defaultProjectScripts",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub default_project_scripts: ::std::option::Option<::std::vec::Vec<ProjectScript>>,
     #[serde(
         rename = "defaultRuntimeMode",
@@ -85627,6 +87955,7 @@ pub struct ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue {
         rename = "providerInstances",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub provider_instances: ::std::option::Option<
         ::std::collections::BTreeMap<
             ::std::string::String,
@@ -85657,11 +87986,13 @@ pub struct ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue {
         rename = "reviewGuideModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub review_guide_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "sidebarAutoSettleAfterDays",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub sidebar_auto_settle_after_days: ::std::option::Option<
         ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueSidebarAutoSettleAfterDays,
     >,
@@ -85679,11 +88010,13 @@ pub struct ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue {
         rename = "sourceControlWriterModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_writer_model_selection: ::std::option::Option<ModelSelection>,
     #[serde(
         rename = "sourceControlWritingStyle",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_writing_style: ::std::option::Option<
         ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueSourceControlWritingStyle,
     >,
@@ -85691,13 +88024,20 @@ pub struct ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValue {
         rename = "textGenerationModelSelection",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub text_generation_model_selection: ::std::option::Option<
         ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueTextGenerationModelSelection,
     >,
     #[serde(
+        rename = "threadTitleInstructions",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub thread_title_instructions: ::std::option::Option<::std::string::String>,
+    #[serde(
         rename = "worktreeCleanup",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub worktree_cleanup: ::std::option::Option<
         crate::tagged::ServerUpdateSettingsPayloadPatchProjectSettingsOverridesValueWorktreeCleanup,
     >,
@@ -86105,6 +88445,7 @@ pub struct ServerUpsertKeybindingInput {
     pub command: KeybindingCommand,
     pub key: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub replace: ::std::option::Option<ServerRemoveKeybindingInput>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub when: ::std::option::Option<::std::string::String>,
@@ -86160,8 +88501,9 @@ impl<'de> ::serde::Deserialize<'de> for SnapShotAccessibility {
 pub struct SnapShotAccessibilityNode {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub actions: ::std::option::Option<::std::vec::Vec<::std::string::String>>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub bounds: ::std::option::Option<SnapShotAccessibilityNodeBounds>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub children: ::std::vec::Vec<SnapShotAccessibilityNode>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub description: ::std::option::Option<::std::string::String>,
@@ -86169,6 +88511,7 @@ pub struct SnapShotAccessibilityNode {
     pub name: ::std::option::Option<::std::string::String>,
     pub role: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub state: ::std::option::Option<SnapShotAccessibilityNodeState>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub value: ::std::option::Option<::std::string::String>,
@@ -86265,6 +88608,7 @@ pub struct SnapShotAccessibilityVariant1ImageSize {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct SnapShotSource {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub accessibility: ::std::option::Option<SnapShotSourceAccessibility>,
     #[serde(
         rename = "accessibleText",
@@ -86461,15 +88805,17 @@ pub struct SourceControlCloneRepositoryResult {
     pub cwd: ::std::string::String,
     #[serde(rename = "remoteUrl")]
     pub remote_url: ::std::string::String,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub repository: ::std::option::Option<SourceControlRepositoryInfo>,
 }
 ///`SourceControlDiscoveryResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct SourceControlDiscoveryResult {
     #[serde(rename = "sourceControlProviders")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub source_control_providers: ::std::vec::Vec<SourceControlProviderDiscoveryItem>,
     #[serde(rename = "versionControlSystems")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub version_control_systems: ::std::vec::Vec<VcsDiscoveryItem>,
 }
 ///`SourceControlHostSettings`
@@ -86503,6 +88849,7 @@ for SourceControlHostSettings {
 pub struct SourceControlProviderAuth {
     pub account: crate::tagged::SourceControlProviderAuthAccount,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
     pub accounts: ::std::option::Option<
         ::std::vec::Vec<SourceControlProviderAuthAccountsItem>,
     >,
@@ -87328,6 +89675,7 @@ pub struct SshDeviceHostConfig {
     )]
     pub identity_file: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub kind: ::std::option::Option<SshDeviceHostConfigKind>,
     pub label: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -87392,8 +89740,10 @@ pub struct StorageCleanupReport {
         rename = "bytesFreed",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub bytes_freed: ::std::option::Option<StorageCleanupReportBytesFreed>,
     pub counts: StorageCleanupReportCounts,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub entries: ::std::vec::Vec<StorageCleanupReportEntry>,
     #[serde(rename = "finishedAt")]
     pub finished_at: ::std::string::String,
@@ -87636,7 +89986,10 @@ for SubscribePreviewEventsPayload {
 ///`SubscribeProjectClonesChunk`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(transparent)]
-pub struct SubscribeProjectClonesChunk(pub ::std::vec::Vec<ProjectCloneSnapshot>);
+pub struct SubscribeProjectClonesChunk(
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub ::std::vec::Vec<ProjectCloneSnapshot>,
+);
 impl ::std::ops::Deref for SubscribeProjectClonesChunk {
     type Target = ::std::vec::Vec<ProjectCloneSnapshot>;
     fn deref(&self) -> &::std::vec::Vec<ProjectCloneSnapshot> {
@@ -87699,6 +90052,11 @@ pub struct SubscribeServerConfigPayload {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub usage_limits_command: ::std::option::Option<bool>,
+    #[serde(
+        rename = "workspaceSnapshotsOnDemand",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub workspace_snapshots_on_demand: ::std::option::Option<bool>,
 }
 ///`SubscribeServerLifecyclePayload`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -87826,6 +90184,7 @@ pub struct TerminalAttachInput {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub cwd: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub env: ::std::option::Option<
         ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     >,
@@ -89223,6 +91582,7 @@ for TerminalMetadataStreamEventRemoveType {
 ///`TerminalMetadataStreamEventSnapshot`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct TerminalMetadataStreamEventSnapshot {
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub terminals: ::std::vec::Vec<TerminalSummary>,
     #[serde(rename = "type")]
     pub type_: TerminalMetadataStreamEventSnapshotType,
@@ -89405,6 +91765,7 @@ pub struct TerminalOpenInput {
     pub cols: ::std::option::Option<i64>,
     pub cwd: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub env: ::std::option::Option<
         ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     >,
@@ -89633,6 +91994,7 @@ pub struct TerminalRestartInput {
     pub cols: i64,
     pub cwd: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub env: ::std::option::Option<
         ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     >,
@@ -89909,6 +92271,37 @@ impl ::std::convert::TryFrom<::std::string::String> for TextGenerationErrorTag {
         value.parse()
     }
 }
+///`ThreadGuestMessage`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct ThreadGuestMessage {
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option_vec")]
+    pub attachments: ::std::option::Option<
+        ::std::vec::Vec<crate::tagged::ChatAttachment>,
+    >,
+    pub id: ::std::string::String,
+    pub status: ThreadGuestMessageStatus,
+    #[serde(rename = "submittedAt")]
+    pub submitted_at: ::std::string::String,
+    pub text: ::std::string::String,
+}
+///`ThreadGuestShare`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct ThreadGuestShare {
+    #[serde(rename = "createdAt")]
+    pub created_at: ::std::string::String,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: ::std::string::String,
+    #[serde(
+        rename = "guestName",
+        deserialize_with = "::std::option::Option::deserialize"
+    )]
+    pub guest_name: ::std::option::Option<::std::string::String>,
+    pub host: ::std::string::String,
+    pub id: ::std::string::String,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
+    pub messages: ::std::vec::Vec<ThreadGuestMessage>,
+}
 ///`ThreadLinkedPullRequest`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ThreadLinkedPullRequest {
@@ -89925,6 +92318,7 @@ pub struct ThreadPullRequestLink {
         rename = "endedWatch",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub ended_watch: ::std::option::Option<ThreadPullRequestWatch>,
     pub host: ::std::string::String,
     #[serde(rename = "linkedAt")]
@@ -89936,13 +92330,14 @@ pub struct ThreadPullRequestLink {
         skip_serializing_if = "::std::option::Option::is_none"
     )]
     pub repository_web_url: ::std::option::Option<::std::string::String>,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub snapshot: ::std::option::Option<ThreadPullRequestSnapshot>,
     pub source: ThreadPullRequestLinkSource,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub stack: ::std::option::Option<ThreadPullRequestStack>,
     pub url: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub watch: ::std::option::Option<ThreadPullRequestWatch>,
 }
 ///`ThreadPullRequestSnapshot`
@@ -89951,6 +92346,7 @@ pub struct ThreadPullRequestSnapshot {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub additions: ::std::option::Option<i64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub author: ::std::option::Option<PullRequestActor>,
     #[serde(rename = "baseBranch")]
     pub base_branch: ::std::string::String,
@@ -89997,6 +92393,7 @@ pub struct ThreadPullRequestStack {
     pub base: ::std::string::String,
     pub id: ::std::string::String,
     pub kind: ThreadPullRequestStackKind,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub layers: ::std::vec::Vec<ThreadPullRequestStackLayer>,
     pub number: i64,
     pub url: ::std::string::String,
@@ -90063,11 +92460,21 @@ pub struct ThreadPullRequestStackLayer {
 ///`ThreadPullRequestWatch`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ThreadPullRequestWatch {
+    #[serde(
+        rename = "checksAwaitedSince",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub checks_awaited_since: ::std::option::Option<::std::string::String>,
     pub conflicting: bool,
     #[serde(rename = "failedChecks")]
     pub failed_checks: ::std::vec::Vec<::std::string::String>,
     #[serde(rename = "headSha", deserialize_with = "::std::option::Option::deserialize")]
     pub head_sha: ::std::option::Option<::std::string::String>,
+    #[serde(
+        rename = "owedChecks",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub owed_checks: ::std::option::Option<::std::vec::Vec<::std::string::String>>,
     pub passed: bool,
     #[serde(
         rename = "passedChecks",
@@ -90101,6 +92508,7 @@ pub struct ThreadTokenUsageSnapshot {
     )]
     pub compacts_automatically: ::std::option::Option<bool>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub cost: ::std::option::Option<ThreadTokenUsageSnapshotCost>,
     #[serde(
         rename = "durationMs",
@@ -90494,6 +92902,7 @@ for ToolActivityNativeAppReferenceDisplayNameTag {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct ToolActivitySource {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub icon: ::std::option::Option<crate::tagged::ToolActivitySourceIcon>,
     pub key: ::std::string::String,
     pub kind: ToolActivitySourceKind,
@@ -90946,6 +93355,7 @@ pub struct UploadChatImageAttachment {
     #[serde(rename = "sizeBytes")]
     pub size_bytes: i64,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source: ::std::option::Option<SnapShotSource>,
     #[serde(rename = "type")]
     pub type_: UploadChatImageAttachmentType,
@@ -91010,6 +93420,7 @@ pub struct UsageBucket {
         rename = "categoryCostUsd",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub category_cost_usd: ::std::option::Option<UsageCategoryCost>,
     #[serde(rename = "costSource")]
     pub cost_source: UsageCostSource,
@@ -91020,6 +93431,7 @@ pub struct UsageBucket {
         rename = "fastCostUsd",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub fast_cost_usd: ::std::option::Option<UsageBucketFastCostUsd>,
     #[serde(
         rename = "hourStart",
@@ -91039,12 +93451,14 @@ pub struct UsageBucket {
         rename = "speedPremiumUsd",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub speed_premium_usd: ::std::option::Option<UsageBucketSpeedPremiumUsd>,
     pub totals: UsageTokenTotals,
     #[serde(
         rename = "ultrafastCostUsd",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub ultrafast_cost_usd: ::std::option::Option<UsageBucketUltrafastCostUsd>,
     #[serde(rename = "unpricedRecords")]
     pub unpriced_records: i64,
@@ -91481,6 +93895,7 @@ impl ::std::convert::TryFrom<::std::string::String> for UsageReadErrorTag {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct UsageSource {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub action: ::std::option::Option<UsageSourceAction>,
     #[serde(rename = "distinctSessions")]
     pub distinct_sessions: i64,
@@ -91631,6 +94046,7 @@ pub struct UserInputAttachmentAnswerPayload {
         rename = "questionTextById",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub question_text_by_id: ::std::option::Option<
         ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
     >,
@@ -92016,6 +94432,7 @@ pub struct VcsListRefsResult {
         deserialize_with = "::std::option::Option::deserialize"
     )]
     pub next_cursor: ::std::option::Option<i64>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub refs: ::std::vec::Vec<VcsRef>,
     #[serde(rename = "totalCount")]
     pub total_count: i64,
@@ -92546,6 +94963,16 @@ pub struct VcsRef {
     )]
     pub worktree_path: ::std::option::Option<::std::string::String>,
 }
+///`VcsRefreshStatusPayload`
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+pub struct VcsRefreshStatusPayload {
+    pub cwd: ::std::string::String,
+    #[serde(
+        rename = "localOnly",
+        skip_serializing_if = "::std::option::Option::is_none"
+    )]
+    pub local_only: ::std::option::Option<bool>,
+}
 ///`VcsRemoveWorktreeInput`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct VcsRemoveWorktreeInput {
@@ -92617,11 +95044,6 @@ impl ::std::convert::TryFrom<::std::string::String> for VcsRepositoryDetectionEr
         value.parse()
     }
 }
-///`VcsStatusInput`
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-pub struct VcsStatusInput {
-    pub cwd: ::std::string::String,
-}
 ///`VcsStatusLocalResult`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct VcsStatusLocalResult {
@@ -92629,6 +95051,7 @@ pub struct VcsStatusLocalResult {
         rename = "branchChanges",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub branch_changes: ::std::option::Option<VcsStatusLocalResultBranchChanges>,
     #[serde(rename = "hasPrimaryRemote")]
     pub has_primary_remote: bool,
@@ -92644,6 +95067,7 @@ pub struct VcsStatusLocalResult {
         rename = "sourceControlProvider",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_provider: ::std::option::Option<SourceControlProviderInfo>,
     #[serde(rename = "workingTree")]
     pub working_tree: VcsStatusLocalResultWorkingTree,
@@ -92660,6 +95084,7 @@ pub struct VcsStatusLocalResultBranchChanges {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct VcsStatusLocalResultWorkingTree {
     pub deletions: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<VcsStatusLocalResultWorkingTreeFilesItem>,
     pub insertions: i64,
     #[serde(rename = "rootPath", skip_serializing_if = "::std::option::Option::is_none")]
@@ -92686,7 +95111,7 @@ pub struct VcsStatusRemoteResult {
     pub behind_count: i64,
     #[serde(rename = "hasUpstream")]
     pub has_upstream: bool,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub pr: ::std::option::Option<VcsStatusRemoteResultPr>,
 }
 ///`VcsStatusRemoteResultPr`
@@ -92724,6 +95149,7 @@ pub struct VcsStatusResult {
         rename = "branchChanges",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub branch_changes: ::std::option::Option<VcsStatusResultBranchChanges>,
     #[serde(rename = "hasPrimaryRemote")]
     pub has_primary_remote: bool,
@@ -92735,7 +95161,7 @@ pub struct VcsStatusResult {
     pub is_default_ref: bool,
     #[serde(rename = "isRepo")]
     pub is_repo: bool,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub pr: ::std::option::Option<VcsStatusResultPr>,
     #[serde(rename = "refName", deserialize_with = "::std::option::Option::deserialize")]
     pub ref_name: ::std::option::Option<::std::string::String>,
@@ -92743,6 +95169,7 @@ pub struct VcsStatusResult {
         rename = "sourceControlProvider",
         skip_serializing_if = "::std::option::Option::is_none"
     )]
+    #[serde(default, deserialize_with = "crate::forward_compat::lenient_option")]
     pub source_control_provider: ::std::option::Option<SourceControlProviderInfo>,
     #[serde(rename = "workingTree")]
     pub working_tree: VcsStatusResultWorkingTree,
@@ -92778,6 +95205,7 @@ pub struct VcsStatusResultPr {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct VcsStatusResultWorkingTree {
     pub deletions: i64,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub files: ::std::vec::Vec<VcsStatusResultWorkingTreeFilesItem>,
     pub insertions: i64,
     #[serde(rename = "rootPath", skip_serializing_if = "::std::option::Option::is_none")]
@@ -92852,7 +95280,7 @@ for VcsStatusStreamEventLocalUpdatedTag {
 ///`VcsStatusStreamEventRemoteUpdated`
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct VcsStatusStreamEventRemoteUpdated {
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub remote: ::std::option::Option<VcsStatusRemoteResult>,
     #[serde(rename = "_tag")]
     pub tag: VcsStatusStreamEventRemoteUpdatedTag,
@@ -92913,7 +95341,7 @@ for VcsStatusStreamEventRemoteUpdatedTag {
 #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
 pub struct VcsStatusStreamEventSnapshot {
     pub local: VcsStatusLocalResult,
-    #[serde(deserialize_with = "::std::option::Option::deserialize")]
+    #[serde(deserialize_with = "crate::forward_compat::lenient_option")]
     pub remote: ::std::option::Option<VcsStatusRemoteResult>,
     #[serde(rename = "_tag")]
     pub tag: VcsStatusStreamEventSnapshotTag,
@@ -93104,9 +95532,10 @@ pub struct WorktreeSetupSnapshot {
     pub sequence: i64,
     #[serde(
         rename = "setupScript",
-        deserialize_with = "::std::option::Option::deserialize"
+        deserialize_with = "crate::forward_compat::lenient_option"
     )]
     pub setup_script: ::std::option::Option<WorktreeSetupSnapshotSetupScript>,
+    #[serde(deserialize_with = "crate::forward_compat::lenient_vec")]
     pub stages: ::std::vec::Vec<WorktreeSetupStage>,
     #[serde(rename = "startedAt")]
     pub started_at: ::std::string::String,
@@ -93351,6 +95780,13 @@ crate::string_enum! {
         "invalid_client" => InvalidClient,
         "invalid_grant" => InvalidGrant,
         "unsupported_grant_type" => UnsupportedGrantType,
+    }
+}
+crate::string_enum! {
+    ///`AuthWebSocketTicketUse`
+    pub enum AuthWebSocketTicketUse {
+        "rpc" => Rpc,
+        "media" => Media,
     }
 }
 crate::string_enum! {
@@ -93831,6 +96267,8 @@ crate::string_enum! {
         "host_key_unverified" => HostKeyUnverified,
         "not_a_repository" => NotARepository,
         "path_already_exists" => PathAlreadyExists,
+        "push_rejected_by_remote" => PushRejectedByRemote,
+        "push_rejected_non_fast_forward" => PushRejectedNonFastForward,
         "ref_not_found" => RefNotFound,
         "remote_unreachable" => RemoteUnreachable,
         "tag_would_be_clobbered" => TagWouldBeClobbered,
@@ -93901,6 +96339,16 @@ crate::string_enum! {
     }
 }
 crate::string_enum! {
+    ///`GuestShareCreateErrorReason`
+    pub enum GuestShareCreateErrorReason {
+        "disabled" => Disabled,
+        "connect_unavailable" => ConnectUnavailable,
+        "thread_unavailable" => ThreadUnavailable,
+        "read_failed" => ReadFailed,
+        "changed" => Changed,
+    }
+}
+crate::string_enum! {
     ///`HostPowerSnapshotIdleSecondsString`
     pub enum HostPowerSnapshotIdleSecondsString {
         "Infinity" => Infinity,
@@ -93942,6 +96390,14 @@ crate::string_enum! {
     pub enum HttpOrchestrationThreadHistoryPageQueryView {
         "conversation" => Conversation,
         "activity" => Activity,
+    }
+}
+crate::string_enum! {
+    ///`IdleCompactionMode`
+    pub enum IdleCompactionMode {
+        "onReturn" => OnReturn,
+        "beforeCacheExpires" => BeforeCacheExpires,
+        "off" => Off,
     }
 }
 crate::string_enum! {
@@ -94262,6 +96718,7 @@ crate::string_enum! {
         "thread.interaction-mode-updated" => ThreadInteractionModeUpdated,
         "thread.model-selection-updated" => ThreadModelSelectionUpdated,
         "thread.provider-switched" => ThreadProviderSwitched,
+        "thread.guest-share-updated" => ThreadGuestShareUpdated,
     }
 }
 crate::string_enum! {
@@ -94326,6 +96783,13 @@ crate::string_enum! {
     pub enum OrchestrationV2HistoricalMessageRole {
         "user" => User,
         "assistant" => Assistant,
+    }
+}
+crate::string_enum! {
+    ///`OrchestrationV2IdleCompaction`
+    pub enum OrchestrationV2IdleCompaction {
+        "beforeCacheExpires" => BeforeCacheExpires,
+        "onReturn" => OnReturn,
     }
 }
 crate::string_enum! {
@@ -94773,6 +97237,14 @@ crate::string_enum! {
     }
 }
 crate::string_enum! {
+    ///`OtlpEndpointSource`
+    pub enum OtlpEndpointSource {
+        "environment" => Environment,
+        "bootstrap" => Bootstrap,
+        "settings" => Settings,
+    }
+}
+crate::string_enum! {
     ///`OtlpSignal`
     pub enum OtlpSignal {
         "traces" => Traces,
@@ -95023,6 +97495,13 @@ crate::string_enum! {
     }
 }
 crate::string_enum! {
+    ///`ProviderApprovalFullAccessOverride`
+    pub enum ProviderApprovalFullAccessOverride {
+        "ask_rule" => AskRule,
+        "provider_check" => ProviderCheck,
+    }
+}
+crate::string_enum! {
     ///`ProviderAuthMethodType`
     pub enum ProviderAuthMethodType {
         "agent" => Agent,
@@ -95190,6 +97669,13 @@ crate::string_enum! {
         "unviewed" => Unviewed,
         "viewed" => Viewed,
         "dismissed" => Dismissed,
+    }
+}
+crate::string_enum! {
+    ///`PullRequestFilterOptionKind`
+    pub enum PullRequestFilterOptionKind {
+        "labels" => Labels,
+        "authors" => Authors,
     }
 }
 crate::string_enum! {
@@ -95627,7 +98113,7 @@ crate::string_enum! {
     }
 }
 crate::string_enum! {
-    ///How the HMAC-SHA256 digest is encoded in the header.
+    ///`ScheduledTaskUpsertScheduleWebhookSignatureEncoding`
     pub enum ScheduledTaskUpsertScheduleWebhookSignatureEncoding {
         "hex" => Hex,
         "base64" => Base64,
@@ -95656,7 +98142,7 @@ crate::string_enum! {
     }
 }
 crate::string_enum! {
-    ///How the HMAC-SHA256 digest is encoded in the header.
+    ///`ScheduledTaskWebhookSignatureEncoding`
     pub enum ScheduledTaskWebhookSignatureEncoding {
         "hex" => Hex,
         "base64" => Base64,
@@ -95676,6 +98162,7 @@ crate::string_enum! {
         "ref_unavailable" => RefUnavailable,
         "ref_expired" => RefExpired,
         "consume_failed" => ConsumeFailed,
+        "not_a_file_request" => NotAFileRequest,
     }
 }
 crate::string_enum! {
@@ -96013,6 +98500,14 @@ crate::string_enum! {
     }
 }
 crate::string_enum! {
+    ///`ThreadGuestMessageStatus`
+    pub enum ThreadGuestMessageStatus {
+        "pending" => Pending,
+        "sent" => Sent,
+        "dismissed" => Dismissed,
+    }
+}
+crate::string_enum! {
     ///`ThreadPullRequestLinkSource`
     pub enum ThreadPullRequestLinkSource {
         "manual" => Manual,
@@ -96094,6 +98589,7 @@ crate::string_enum! {
         "opencode" => Opencode,
         "antigravity" => Antigravity,
         "pi" => Pi,
+        "muse" => Muse,
     }
 }
 crate::string_enum! {

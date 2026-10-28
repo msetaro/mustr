@@ -13,6 +13,9 @@
 //!    serde's derived code strictly first (`crate::forward_compat::untagged`).
 //! 4. Fields listed in the manifest's `forwardCompat` (T3's lenient fields) get a
 //!    `#[serde(deserialize_with = "crate::forward_compat::...")]` decoder.
+//! 5. Every other list or optional field of a struct or union type gets a lenient decoder
+//!    (`lenient_vec`, `lenient_option_vec`, `lenient_option`), which drops an element or value
+//!    that doesn't decode instead of failing the whole value around it.
 //!
 //! It also refuses serde-tagged enums (typify's own discriminated unions), which would
 //! have no fallback: dump-schemas.ts must hoist those into `tagged.rs`.
@@ -272,11 +275,124 @@ pub fn run(tokens: TokenStream, lenient_fields: &[LenientField]) -> Result<Outpu
     }
     stats.insert("lenientFields", applied);
 
+    // 5. Lenient lists and optionals everywhere else.
+    let mut containers = 0;
+    for item in &mut file.items {
+        let fields: Vec<&mut syn::Field> = match item {
+            Item::Struct(s) => match &mut s.fields {
+                Fields::Named(named) => named.named.iter_mut().collect(),
+                // `#[serde(transparent)] struct Chunk(Vec<T>)`, a list on its own.
+                Fields::Unnamed(unnamed) if unnamed.unnamed.len() == 1 => {
+                    unnamed.unnamed.iter_mut().collect()
+                }
+                _ => continue,
+            },
+            Item::Enum(e) => e
+                .variants
+                .iter_mut()
+                .flat_map(|v| match &mut v.fields {
+                    Fields::Named(named) => named.named.iter_mut().collect::<Vec<_>>(),
+                    _ => Vec::new(),
+                })
+                .collect(),
+            _ => continue,
+        };
+        for f in fields {
+            if make_lenient(f, &enums)? {
+                containers += 1;
+            }
+        }
+    }
+    stats.insert("lenientContainers", containers);
+
     Ok(Output {
         file,
         string_enums,
         stats,
     })
+}
+
+/// Types whose values can't fail to decode leniently except on a JSON type mismatch: scalars,
+/// untyped JSON, and string enums (which have `Unrecognized`).
+fn is_plain(ty: &Type, string_enums: &BTreeMap<String, Vec<EnumValue>>) -> bool {
+    const PLAIN: &[&str] = &[
+        "String", "bool", "i64", "u64", "i32", "u32", "f64", "f32", "Value", "JsNumber",
+    ];
+    type_ident(ty)
+        .is_some_and(|name| PLAIN.contains(&name.as_str()) || string_enums.contains_key(&name))
+        && generic_arg(ty, "Box").is_none()
+}
+
+/// Gives a list or optional field of a struct or union type a lenient decoder (step 5).
+/// Leaves fields that already have a decoder of their own (T3's lenient fields) alone, and keeps
+/// whether the key is required: a required nullable field's `Option::deserialize` is replaced,
+/// and an optional key gets `default`.
+fn make_lenient(
+    field: &mut syn::Field,
+    string_enums: &BTreeMap<String, Vec<EnumValue>>,
+) -> Result<bool> {
+    const REQUIRED_NULLABLE: &str = "::std::option::Option::deserialize";
+    let decoder = serde_value(&field.attrs, "deserialize_with")?;
+    let flags = serde_flags(&field.attrs)?;
+    if flags.contains("with") || decoder.as_deref().is_some_and(|d| d != REQUIRED_NULLABLE) {
+        return Ok(false);
+    }
+    let lenient = if let Some(element) = generic_arg(&field.ty, "Vec") {
+        (!is_plain(element, string_enums)).then_some("lenient_vec")
+    } else if let Some(inner) = generic_arg(&field.ty, "Option") {
+        match generic_arg(inner, "Vec") {
+            Some(element) => (!is_plain(element, string_enums)).then_some("lenient_option_vec"),
+            None => (!is_plain(inner, string_enums)).then_some("lenient_option"),
+        }
+    } else {
+        None
+    };
+    let Some(lenient) = lenient else {
+        return Ok(false);
+    };
+    let path = format!("crate::forward_compat::{lenient}");
+    if decoder.is_some() {
+        // `deserialize_with = "::std::option::Option::deserialize"`: the key stays required.
+        for attr in field
+            .attrs
+            .iter_mut()
+            .filter(|a| a.path().is_ident("serde"))
+        {
+            let text = attr
+                .to_token_stream()
+                .to_string()
+                .replace(&format!("{REQUIRED_NULLABLE:?}"), &format!("{path:?}"));
+            *attr = syn::parse_str::<syn::DeriveInput>(&format!("{text} struct X;"))?
+                .attrs
+                .remove(0);
+        }
+    } else if generic_arg(&field.ty, "Option").is_some() && !flags.contains("default") {
+        field
+            .attrs
+            .push(parse_quote!(#[serde(default, deserialize_with = #path)]));
+    } else {
+        field
+            .attrs
+            .push(parse_quote!(#[serde(deserialize_with = #path)]));
+    }
+    Ok(true)
+}
+
+/// The string value of `key = "..."` inside the field's `#[serde(...)]` attributes.
+fn serde_value(attrs: &[Attribute], key: &str) -> Result<Option<String>> {
+    let mut out = None;
+    for attr in attrs.iter().filter(|a| a.path().is_ident("serde")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident(key) {
+                let value: LitStr = meta.value()?.parse()?;
+                out = Some(value.value());
+            } else if meta.input.peek(Token![=]) {
+                let _: syn::Expr = meta.value()?.parse()?;
+            }
+            Ok(())
+        })?;
+    }
+    Ok(out)
 }
 
 struct EnumValue {

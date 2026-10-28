@@ -656,6 +656,7 @@ pub(crate) fn message_context(
         return None;
     }
     Some(OrchestrationMessageContext {
+        guest: None,
         records: picked.into_iter().map(|(_, record)| record).collect(),
         version: OrchestrationMessageContextVersion::try_from(1.)
             .expect("T3's context version is 1"),

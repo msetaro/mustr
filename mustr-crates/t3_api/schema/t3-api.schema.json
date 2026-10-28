@@ -1043,7 +1043,7 @@
           "$ref": "#/definitions/AssetProjectFaviconNotFoundError"
         },
         {
-          "$ref": "#/definitions/AssetGitHubMediaUrlValidationError"
+          "$ref": "#/definitions/AssetSourceControlMediaUrlValidationError"
         },
         {
           "$ref": "#/definitions/AssetSigningKeyLoadError"
@@ -1107,25 +1107,21 @@
               "type": "null"
             }
           ]
+        },
+        "fileRevision": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "relativeUrl",
         "expiresAt"
-      ]
-    },
-    "AssetGitHubMediaUrlValidationError": {
-      "type": "object",
-      "properties": {
-        "_tag": {
-          "type": "string",
-          "enum": [
-            "AssetGitHubMediaUrlValidationError"
-          ]
-        }
-      },
-      "required": [
-        "_tag"
       ]
     },
     "AssetImageDimensions": {
@@ -1286,7 +1282,7 @@
           "$ref": "#/definitions/AssetProjectFaviconNotFoundError"
         },
         {
-          "$ref": "#/definitions/AssetGitHubMediaUrlValidationError"
+          "$ref": "#/definitions/AssetSourceControlMediaUrlValidationError"
         },
         {
           "$ref": "#/definitions/AssetSigningKeyLoadError"
@@ -1314,6 +1310,20 @@
         "_tag",
         "resource",
         "cause"
+      ]
+    },
+    "AssetSourceControlMediaUrlValidationError": {
+      "type": "object",
+      "properties": {
+        "_tag": {
+          "type": "string",
+          "enum": [
+            "AssetGitHubMediaUrlValidationError"
+          ]
+        }
+      },
+      "required": [
+        "_tag"
       ]
     },
     "AssetsPersistChatAttachmentsRpcError": {
@@ -2675,6 +2685,17 @@
         "requested_token_type"
       ]
     },
+    "AuthWebSocketTicketParams": {
+      "type": "object",
+      "properties": {
+        "use": {
+          "$ref": "#/definitions/AuthWebSocketTicketUse"
+        }
+      },
+      "required": [
+        "use"
+      ]
+    },
     "AuthWebSocketTicketResult": {
       "type": "object",
       "properties": {
@@ -2688,6 +2709,13 @@
       "required": [
         "ticket",
         "expiresAt"
+      ]
+    },
+    "AuthWebSocketTicketUse": {
+      "type": "string",
+      "enum": [
+        "rpc",
+        "media"
       ]
     },
     "BackgroundActivityOverrides": {
@@ -2921,6 +2949,13 @@
       "enum": [
         "persistent",
         "incognito"
+      ]
+    },
+    "BrowserRecordingFrameRate": {
+      "type": "number",
+      "enum": [
+        30,
+        60
       ]
     },
     "ChatAttachment": {
@@ -5964,6 +5999,9 @@
         "usageLimitSources": {
           "type": "boolean"
         },
+        "providerWorkspaceSnapshotsOnDemand": {
+          "type": "boolean"
+        },
         "usagePriceOverrides": {
           "type": "boolean"
         },
@@ -6664,6 +6702,8 @@
         "host_key_unverified",
         "not_a_repository",
         "path_already_exists",
+        "push_rejected_by_remote",
+        "push_rejected_non_fast_forward",
         "ref_not_found",
         "remote_unreachable",
         "tag_would_be_clobbered"
@@ -7292,6 +7332,96 @@
         "commit_push_pr"
       ]
     },
+    "GuestMessageAttribution": {
+      "type": "object",
+      "properties": {
+        "guestMessageId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "shareId": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "guestMessageId",
+        "name",
+        "text"
+      ]
+    },
+    "GuestShareCreateError": {
+      "type": "object",
+      "properties": {
+        "_tag": {
+          "type": "string",
+          "enum": [
+            "GuestShareCreateError"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "disabled",
+            "connect_unavailable",
+            "thread_unavailable",
+            "read_failed",
+            "changed"
+          ]
+        }
+      },
+      "required": [
+        "_tag",
+        "reason"
+      ]
+    },
+    "GuestShareCreateInput": {
+      "type": "object",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ]
+    },
+    "GuestShareCreateResult": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "share": {
+          "$ref": "#/definitions/ThreadGuestShare"
+        }
+      },
+      "required": [
+        "url",
+        "share"
+      ]
+    },
+    "GuestShareCreateRpcError": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/GuestShareCreateError"
+        },
+        {
+          "$ref": "#/definitions/EnvironmentAuthorizationError"
+        }
+      ]
+    },
     "HostPowerSnapshot": {
       "type": "object",
       "properties": {
@@ -7519,6 +7649,17 @@
     "HttpAuthTokenHeaders": {
       "type": "object",
       "properties": {
+        "dpop": {
+          "type": "string"
+        }
+      }
+    },
+    "HttpAuthWebSocketTicketForHeaders": {
+      "type": "object",
+      "properties": {
+        "authorization": {
+          "type": "string"
+        },
         "dpop": {
           "type": "string"
         }
@@ -7962,6 +8103,20 @@
         "x-t3-orchestration-protocol"
       ]
     },
+    "HttpOrchestrationShellSnapshotQuery": {
+      "type": "object",
+      "properties": {
+        "omitIdleSubagents": {
+          "type": "string"
+        },
+        "omitOlderSettled": {
+          "type": "string"
+        }
+      }
+    },
+    "HttpOrchestrationShellSnapshotResponseThreadsItemOpensValue": {
+      "$ref": "#/definitions/OrchestrationV2ThreadOpens"
+    },
     "HttpOrchestrationThreadBoundedSnapshotHeaders": {
       "type": "object",
       "properties": {
@@ -7997,6 +8152,12 @@
       "type": "object",
       "properties": {
         "compactTurnItems": {
+          "type": "string"
+        },
+        "dedupeBodies": {
+          "type": "string"
+        },
+        "compactIds": {
           "type": "string"
         }
       }
@@ -8061,6 +8222,9 @@
               "type": "null"
             }
           ]
+        },
+        "compactIds": {
+          "type": "string"
         }
       },
       "required": [
@@ -8336,6 +8500,14 @@
       },
       "required": [
         "deliveryId"
+      ]
+    },
+    "IdleCompactionMode": {
+      "type": "string",
+      "enum": [
+        "onReturn",
+        "beforeCacheExpires",
+        "off"
       ]
     },
     "KeybindingCommand": {
@@ -9017,6 +9189,26 @@
         }
       ]
     },
+    "OrchestrationGetOlderSettledThreadsRpcError": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/OrchestrationV2GetShellSnapshotError"
+        },
+        {
+          "$ref": "#/definitions/EnvironmentAuthorizationError"
+        }
+      ]
+    },
+    "OrchestrationGetThreadFamilyRpcError": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/OrchestrationV2GetShellSnapshotError"
+        },
+        {
+          "$ref": "#/definitions/EnvironmentAuthorizationError"
+        }
+      ]
+    },
     "OrchestrationGetThreadProjectionRpcError": {
       "oneOf": [
         {
@@ -9026,6 +9218,9 @@
           "$ref": "#/definitions/EnvironmentAuthorizationError"
         }
       ]
+    },
+    "OrchestrationGetThreadProjectionSuccessThreadOpensValue": {
+      "$ref": "#/definitions/OrchestrationV2ThreadOpens"
     },
     "OrchestrationGetTurnDiffError": {
       "type": "object",
@@ -9145,6 +9340,16 @@
         }
       ]
     },
+    "OrchestrationGetWorktreeThreadIdsRpcError": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/OrchestrationV2GetShellSnapshotError"
+        },
+        {
+          "$ref": "#/definitions/EnvironmentAuthorizationError"
+        }
+      ]
+    },
     "OrchestrationLaunchThreadRpcError": {
       "oneOf": [
         {
@@ -9162,6 +9367,16 @@
           "type": "number",
           "enum": [
             1
+          ]
+        },
+        "guest": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/GuestMessageAttribution"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "records": {
@@ -9304,34 +9519,6 @@
         "message"
       ]
     },
-    "OrchestrationSearchThreadsInput": {
-      "type": "object",
-      "properties": {
-        "query": {
-          "type": "string"
-        },
-        "limit": {
-          "type": "integer"
-        }
-      },
-      "required": [
-        "query"
-      ]
-    },
-    "OrchestrationSearchThreadsResult": {
-      "type": "object",
-      "properties": {
-        "matches": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/OrchestrationThreadSearchMatch"
-          }
-        }
-      },
-      "required": [
-        "matches"
-      ]
-    },
     "OrchestrationSearchThreadsRpcError": {
       "oneOf": [
         {
@@ -9341,6 +9528,9 @@
           "$ref": "#/definitions/EnvironmentAuthorizationError"
         }
       ]
+    },
+    "OrchestrationSearchThreadsSuccessThreadsItemOpensValue": {
+      "$ref": "#/definitions/OrchestrationV2ThreadOpens"
     },
     "OrchestrationSearchThreadStreamRpcError": {
       "oneOf": [
@@ -9396,6 +9586,9 @@
         }
       ]
     },
+    "OrchestrationSubscribeThreadChunkProjectionThreadOpensValue": {
+      "$ref": "#/definitions/OrchestrationV2ThreadOpens"
+    },
     "OrchestrationSubscribeThreadRpcError": {
       "oneOf": [
         {
@@ -9430,6 +9623,15 @@
               "type": "null"
             }
           ]
+        },
+        "quality": {
+          "type": "number"
+        },
+        "hits": {
+          "type": "integer"
+        },
+        "messageId": {
+          "type": "string"
         }
       },
       "required": [
@@ -9696,6 +9898,16 @@
             }
           ]
         },
+        "guestShare": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ThreadGuestShare"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "pinnedAt": {
           "oneOf": [
             {
@@ -9740,6 +9952,16 @@
           "oneOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opens": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OrchestrationV2ThreadOpens"
             },
             {
               "type": "null"
@@ -10156,6 +10378,12 @@
           "$ref": "#/definitions/OrchestrationV2CommandThreadArchive"
         },
         {
+          "$ref": "#/definitions/OrchestrationV2CommandThreadGuestShareClose"
+        },
+        {
+          "$ref": "#/definitions/OrchestrationV2CommandThreadGuestMessageDismiss"
+        },
+        {
           "$ref": "#/definitions/OrchestrationV2CommandThreadUnarchive"
         },
         {
@@ -10259,6 +10487,9 @@
         },
         {
           "$ref": "#/definitions/OrchestrationV2CommandQueueResume"
+        },
+        {
+          "$ref": "#/definitions/OrchestrationV2CommandQueuedRunStart"
         },
         {
           "$ref": "#/definitions/OrchestrationV2CommandQueuedRunReorder"
@@ -10887,6 +11118,16 @@
             }
           ]
         },
+        "idleCompaction": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OrchestrationV2IdleCompaction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workflowScript": {
           "oneOf": [
             {
@@ -11320,7 +11561,8 @@
                 "thread.runtime-mode-updated",
                 "thread.interaction-mode-updated",
                 "thread.model-selection-updated",
-                "thread.provider-switched"
+                "thread.provider-switched",
+                "thread.guest-share-updated"
               ]
             },
             "payload": {
@@ -13338,6 +13580,34 @@
         "fileName"
       ]
     },
+    "OrchestrationV2GetOlderSettledThreadsInput": {
+      "type": "object",
+      "properties": {
+        "before": {
+          "$ref": "#/definitions/OrchestrationV2OlderSettledCursor"
+        },
+        "projectIds": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "before",
+        "limit"
+      ]
+    },
     "OrchestrationV2GetShellSnapshotError": {
       "type": "object",
       "properties": {
@@ -13362,6 +13632,17 @@
       "required": [
         "_tag",
         "message"
+      ]
+    },
+    "OrchestrationV2GetThreadFamilyInput": {
+      "type": "object",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
       ]
     },
     "OrchestrationV2GetThreadProjectionError": {
@@ -13482,6 +13763,17 @@
         "truncated"
       ]
     },
+    "OrchestrationV2GetWorktreeThreadIdsInput": {
+      "type": "object",
+      "properties": {
+        "worktreePath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "worktreePath"
+      ]
+    },
     "OrchestrationV2HistoricalMessage": {
       "type": "object",
       "properties": {
@@ -13570,6 +13862,13 @@
         "nativeTurnIds",
         "nativeItemIds",
         "nativeRequestIds"
+      ]
+    },
+    "OrchestrationV2IdleCompaction": {
+      "type": "string",
+      "enum": [
+        "beforeCacheExpires",
+        "onReturn"
       ]
     },
     "OrchestrationV2LatestVisibleMessageSummary": {
@@ -13893,6 +14192,82 @@
         }
       ]
     },
+    "OrchestrationV2OlderSettledCount": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "projectId",
+        "count"
+      ]
+    },
+    "OrchestrationV2OlderSettledCursor": {
+      "type": "object",
+      "properties": {
+        "settledAt": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "settledAt"
+      ]
+    },
+    "OrchestrationV2OlderSettledThreads": {
+      "type": "object",
+      "properties": {
+        "before": {
+          "type": "string"
+        },
+        "asOfSequence": {
+          "type": "integer"
+        },
+        "counts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/OrchestrationV2OlderSettledCount"
+          }
+        }
+      },
+      "required": [
+        "before",
+        "asOfSequence",
+        "counts"
+      ]
+    },
+    "OrchestrationV2OlderSettledThreadsPage": {
+      "type": "object",
+      "properties": {
+        "snapshotSequence": {
+          "type": "integer"
+        },
+        "threads": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/OrchestrationV2ThreadShell"
+          }
+        },
+        "counts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/OrchestrationV2OlderSettledCount"
+          }
+        }
+      },
+      "required": [
+        "snapshotSequence",
+        "threads",
+        "counts"
+      ]
+    },
     "OrchestrationV2PendingBackgroundTask": {
       "oneOf": [
         {
@@ -13915,6 +14290,19 @@
               "oneOf": [
                 {
                   "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "awaited": {
+              "oneOf": [
+                {
+                  "type": "boolean",
+                  "enum": [
+                    true
+                  ]
                 },
                 {
                   "type": "null"
@@ -13979,6 +14367,19 @@
                 }
               ]
             },
+            "awaited": {
+              "oneOf": [
+                {
+                  "type": "boolean",
+                  "enum": [
+                    true
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "kind": {
               "type": "string",
               "enum": [
@@ -14011,6 +14412,19 @@
               "oneOf": [
                 {
                   "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "awaited": {
+              "oneOf": [
+                {
+                  "type": "boolean",
+                  "enum": [
+                    true
+                  ]
                 },
                 {
                   "type": "null"
@@ -14055,6 +14469,19 @@
                 }
               ]
             },
+            "awaited": {
+              "oneOf": [
+                {
+                  "type": "boolean",
+                  "enum": [
+                    true
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "kind": {
               "type": "string",
               "enum": [
@@ -14087,6 +14514,19 @@
               "oneOf": [
                 {
                   "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "awaited": {
+              "oneOf": [
+                {
+                  "type": "boolean",
+                  "enum": [
+                    true
+                  ]
                 },
                 {
                   "type": "null"
@@ -14892,6 +15332,28 @@
               "type": "null"
             }
           ]
+        },
+        "claudeAttachmentBudget": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "bytesUsed": {
+                  "type": "integer"
+                },
+                "pagesUsed": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "bytesUsed",
+                "pagesUsed"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -15244,6 +15706,19 @@
           "oneOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "awaited": {
+          "oneOf": [
+            {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
             },
             {
               "type": "null"
@@ -15701,6 +16176,16 @@
             }
           ]
         },
+        "feedback": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "answers": {
           "oneOf": [
             {
@@ -15880,6 +16365,72 @@
         "match"
       ]
     },
+    "OrchestrationV2SearchThreadsInput": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "olderSettledBefore": {
+          "type": "string"
+        },
+        "projectIds": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "environmentLabel": {
+          "type": "string"
+        },
+        "titlesOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "OrchestrationV2SearchThreadsResult": {
+      "type": "object",
+      "properties": {
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/OrchestrationThreadSearchMatch"
+          }
+        },
+        "snapshotSequence": {
+          "type": "integer"
+        },
+        "threads": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/OrchestrationV2ThreadShell"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "matches"
+      ]
+    },
     "OrchestrationV2SecretRequestStatus": {
       "type": "string",
       "enum": [
@@ -15942,6 +16493,9 @@
           "items": {
             "$ref": "#/definitions/OrchestrationProjectShell"
           }
+        },
+        "olderSettled": {
+          "$ref": "#/definitions/OrchestrationV2OlderSettledThreads"
         }
       },
       "required": [
@@ -16259,6 +16813,18 @@
         },
         "updatedAt": {
           "type": "string"
+        },
+        "promptOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        },
+        "resultOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         }
       },
       "required": [
@@ -16408,6 +16974,12 @@
         },
         "requestCompletionMarker": {
           "type": "boolean"
+        },
+        "omitIdleSubagents": {
+          "type": "boolean"
+        },
+        "omitOlderSettled": {
+          "type": "boolean"
         }
       }
     },
@@ -16427,6 +16999,12 @@
           "type": "boolean"
         },
         "acceptCompactTurnItems": {
+          "type": "boolean"
+        },
+        "acceptDedupedBodies": {
+          "type": "boolean"
+        },
+        "acceptCompactIds": {
           "type": "boolean"
         }
       },
@@ -16466,17 +17044,13 @@
             }
           ]
         },
-        "payloadBudgetExceeded": {
-          "oneOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
+        "turnItemsOmitLocalVisible": {
+          "type": "boolean",
+          "enum": [
+            true
           ]
         },
-        "turnItemsOmitLocalVisible": {
+        "idTable": {
           "type": "boolean",
           "enum": [
             true
@@ -16562,6 +17136,24 @@
       "required": [
         "snapshotSequence",
         "projection"
+      ]
+    },
+    "OrchestrationV2ThreadFamily": {
+      "type": "object",
+      "properties": {
+        "snapshotSequence": {
+          "type": "integer"
+        },
+        "threads": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/OrchestrationV2ThreadShell"
+          }
+        }
+      },
+      "required": [
+        "snapshotSequence",
+        "threads"
       ]
     },
     "OrchestrationV2ThreadFindMatch": {
@@ -16663,6 +17255,12 @@
         },
         "hasMoreHistory": {
           "type": "boolean"
+        },
+        "idTable": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         }
       },
       "required": [
@@ -16856,6 +17454,40 @@
         {
           "$ref": "#/definitions/OrchestrationV2ThreadLaunchWorkspaceStrategyWorktree"
         }
+      ]
+    },
+    "OrchestrationV2ThreadOpens": {
+      "type": "object",
+      "properties": {
+        "openedAt": {
+          "type": "number"
+        },
+        "score": {
+          "type": "number"
+        },
+        "picks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "query",
+              "at"
+            ]
+          }
+        }
+      },
+      "required": [
+        "openedAt",
+        "score",
+        "picks"
       ]
     },
     "OrchestrationV2ThreadProjection": {
@@ -17170,6 +17802,16 @@
             }
           ]
         },
+        "latestRunStopRequested": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "activeRunId": {
           "oneOf": [
             {
@@ -17239,6 +17881,16 @@
             }
           ]
         },
+        "lastErrorCode": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "usageLimitResetAt": {
           "oneOf": [
             {
@@ -17253,6 +17905,16 @@
           "oneOf": [
             {
               "$ref": "#/definitions/OrchestrationV2PendingRuntimeRequestSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pendingGuestMessageCount": {
+          "oneOf": [
+            {
+              "type": "integer"
             },
             {
               "type": "null"
@@ -17458,6 +18120,16 @@
           "oneOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opens": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OrchestrationV2ThreadOpens"
             },
             {
               "type": "null"
@@ -18102,6 +18774,20 @@
         }
       }
     },
+    "OrchestrationV2WorktreeThreadIds": {
+      "type": "object",
+      "properties": {
+        "threadIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "threadIds"
+      ]
+    },
     "OtlpEndpointCheckInput": {
       "type": "object",
       "properties": {
@@ -18128,6 +18814,14 @@
         {
           "$ref": "#/definitions/OtlpEndpointCheckResultUnreachable"
         }
+      ]
+    },
+    "OtlpEndpointSource": {
+      "type": "string",
+      "enum": [
+        "environment",
+        "bootstrap",
+        "settings"
       ]
     },
     "OtlpSignal": {
@@ -18678,6 +19372,16 @@
         },
         "defaultProfileId": {
           "type": "string"
+        },
+        "recordingFrameRate": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/BrowserRecordingFrameRate"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -19144,6 +19848,9 @@
               "type": "null"
             }
           ]
+        },
+        "stalled": {
+          "type": "boolean"
         },
         "error": {
           "oneOf": [
@@ -20356,6 +21063,9 @@
             "model"
           ]
         },
+        "threadTitleInstructions": {
+          "type": "string"
+        },
         "sourceControlWriterModelSelection": {
           "oneOf": [
             {
@@ -20678,6 +21388,13 @@
         "acceptAlways",
         "decline",
         "cancel"
+      ]
+    },
+    "ProviderApprovalFullAccessOverride": {
+      "type": "string",
+      "enum": [
+        "ask_rule",
+        "provider_check"
       ]
     },
     "ProviderApprovalOption": {
@@ -22088,6 +22805,16 @@
               "type": "null"
             }
           ]
+        },
+        "checksAlwaysReport": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -22150,6 +22877,16 @@
     "PullRequestChecks": {
       "type": "object",
       "properties": {
+        "observedAt": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "state": {
           "$ref": "#/definitions/PullRequestState"
         },
@@ -22991,6 +23728,92 @@
         "unviewed",
         "viewed",
         "dismissed"
+      ]
+    },
+    "PullRequestFilterOptionKind": {
+      "type": "string",
+      "enum": [
+        "labels",
+        "authors"
+      ]
+    },
+    "PullRequestFilterOptions": {
+      "type": "object",
+      "properties": {
+        "labels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PullRequestLabel"
+          }
+        },
+        "authors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PullRequestActor"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "labels",
+        "authors",
+        "truncated"
+      ]
+    },
+    "PullRequestFilterOptionsInput": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/PullRequestFilterOptionKind"
+        },
+        "projectId": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projectIds": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "host": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "query": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind"
       ]
     },
     "PullRequestInvalidateInput": {
@@ -23989,6 +24812,16 @@
         },
         "state": {
           "$ref": "#/definitions/PullRequestState"
+        },
+        "isDraft": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -24001,6 +24834,16 @@
       "properties": {
         "inlineComment": {
           "type": "boolean"
+        },
+        "rangeComment": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "reply": {
           "type": "boolean"
@@ -24040,6 +24883,16 @@
         },
         "position": {
           "$ref": "#/definitions/PullRequestReviewPosition"
+        },
+        "startPosition": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/PullRequestReviewCommentDraftStartPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "body": {
           "type": "string"
@@ -24560,10 +25413,7 @@
           "type": "string"
         },
         "provider": {
-          "type": "string",
-          "enum": [
-            "github"
-          ]
+          "type": "string"
         },
         "viewer": {
           "type": "string"
@@ -24850,6 +25700,19 @@
       ]
     },
     "PullRequestsFilesViewedRpcError": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/PullRequestUnavailableError"
+        },
+        {
+          "$ref": "#/definitions/PullRequestOperationError"
+        },
+        {
+          "$ref": "#/definitions/EnvironmentAuthorizationError"
+        }
+      ]
+    },
+    "PullRequestsFilterOptionsRpcError": {
       "oneOf": [
         {
           "$ref": "#/definitions/PullRequestUnavailableError"
@@ -25833,6 +26696,16 @@
           "$ref": "#/definitions/PullRequestUnavailableReason"
         },
         "provider": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requirement": {
           "oneOf": [
             {
               "type": "string"
@@ -28157,6 +29030,9 @@
         "canonicalKey": {
           "type": "string"
         },
+        "remoteUrl": {
+          "type": "string"
+        },
         "displayName": {
           "type": "string"
         }
@@ -29462,7 +30338,6 @@
       ]
     },
     "ScheduledTaskSchedule": {
-      "description": "Structured trigger. Pass an object with type 'interval', 'fixed_time' or 'webhook'.",
       "oneOf": [
         {
           "$ref": "#/definitions/ScheduledTaskScheduleInterval"
@@ -29685,7 +30560,6 @@
       ]
     },
     "ScheduledTaskUpsertSchedule": {
-      "description": "Writable trigger. Pass an object with type 'interval', 'fixed_time' or 'webhook'.",
       "oneOf": [
         {
           "$ref": "#/definitions/ScheduledTaskUpsertScheduleInterval"
@@ -29924,7 +30798,7 @@
       ]
     },
     "ScheduledTaskWebhookFilter": {
-      "description": "Scalars compare as strings; objects and arrays only satisfy 'exists'. Every op but 'exists' fails when the path is missing.",
+      "description": "Path: `headers.x-event` or `body.action`. String compare. Objects pass only 'exists'. A `[]` segment matches any array item. `notEquals` passes only if no item equals.",
       "oneOf": [
         {
           "type": "object",
@@ -30007,12 +30881,11 @@
           "enum": [
             "hex",
             "base64"
-          ],
-          "description": "How the HMAC-SHA256 digest is encoded in the header."
+          ]
         },
         "prefix": {
           "type": "string",
-          "description": "Text before the digest in the header value, such as 'sha256='. Empty for none."
+          "description": "Text before the digest, such as 'sha256='. Empty for none."
         }
       },
       "required": [
@@ -30020,7 +30893,7 @@
         "encoding",
         "prefix"
       ],
-      "description": "Optional HMAC-SHA256 signature check over the raw request body."
+      "description": "HMAC-SHA256 check on the raw body."
     },
     "SecretRequestAnswerInput": {
       "type": "object",
@@ -30073,7 +30946,8 @@
         "read_failed",
         "ref_unavailable",
         "ref_expired",
-        "consume_failed"
+        "consume_failed",
+        "not_a_file_request"
       ]
     },
     "SecretsAnswerRequestRpcError": {
@@ -30289,6 +31163,12 @@
           "$ref": "#/definitions/ServerSettings"
         },
         "shellResumeCompletionMarker": {
+          "type": "boolean"
+        },
+        "shellThreadFamilies": {
+          "type": "boolean"
+        },
+        "shellOlderSettled": {
           "type": "boolean"
         },
         "shellRevealInFileManager": {
@@ -31060,6 +31940,26 @@
             }
           ]
         },
+        "otlpTracesSource": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OtlpEndpointSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "otlpTracesVariable": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "otlpTracesEnabled": {
           "type": "boolean"
         },
@@ -31073,10 +31973,50 @@
             }
           ]
         },
+        "otlpMetricsSource": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OtlpEndpointSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "otlpMetricsVariable": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "otlpMetricsEnabled": {
           "type": "boolean"
         },
         "otlpLogsUrl": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "otlpLogsSource": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OtlpEndpointSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "otlpLogsVariable": {
           "oneOf": [
             {
               "type": "string"
@@ -32672,6 +33612,26 @@
               "type": "null"
             }
           ]
+        },
+        "workspaceSnapshotsOnDemand": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usageLimitsCommand": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -33183,9 +34143,15 @@
               "type": "boolean"
             },
             {
+              "$ref": "#/definitions/IdleCompactionMode"
+            },
+            {
               "type": "null"
             }
           ]
+        },
+        "idleCompaction": {
+          "$ref": "#/definitions/IdleCompactionMode"
         },
         "snoozeLimitedThreads": {
           "oneOf": [
@@ -33198,6 +34164,16 @@
           ]
         },
         "autoResumeLimitedThreads": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "guestSharingEnabled": {
           "oneOf": [
             {
               "type": "boolean"
@@ -33350,6 +34326,16 @@
           "oneOf": [
             {
               "$ref": "#/definitions/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threadTitleInstructions": {
+          "oneOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -34053,7 +35039,17 @@
           ]
         },
         "compactIdleThreads": {
-          "type": "boolean"
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/IdleCompactionMode"
+            }
+          ]
+        },
+        "idleCompaction": {
+          "$ref": "#/definitions/IdleCompactionMode"
         },
         "sidebarAutoSettleKeepPullRequests": {
           "type": "boolean"
@@ -34065,6 +35061,9 @@
           "type": "boolean"
         },
         "snoozeLimitedThreads": {
+          "type": "boolean"
+        },
+        "guestSharingEnabled": {
           "type": "boolean"
         },
         "backgroundActivity": {
@@ -34184,6 +35183,9 @@
               ]
             }
           }
+        },
+        "threadTitleInstructions": {
+          "type": "string"
         },
         "branchNamingMode": {
           "$ref": "#/definitions/BranchNamingMode"
@@ -34799,6 +35801,9 @@
           "required": [
             "model"
           ]
+        },
+        "threadTitleInstructions": {
+          "type": "string"
         },
         "sourceControlWriterModelSelection": {
           "oneOf": [
@@ -36321,6 +37326,16 @@
               "type": "null"
             }
           ]
+        },
+        "workspaceSnapshotsOnDemand": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -37550,6 +38565,91 @@
         "worktree"
       ]
     },
+    "ThreadGuestMessage": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/ThreadGuestMessageStatus"
+        },
+        "submittedAt": {
+          "type": "string"
+        },
+        "attachments": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/ChatAttachment"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "status",
+        "submittedAt"
+      ]
+    },
+    "ThreadGuestMessageStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "sent",
+        "dismissed"
+      ]
+    },
+    "ThreadGuestShare": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "guestName": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ThreadGuestMessage"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "host",
+        "createdAt",
+        "expiresAt",
+        "guestName",
+        "messages"
+      ]
+    },
     "ThreadLinkedPullRequest": {
       "type": "object",
       "properties": {
@@ -37892,6 +38992,19 @@
             }
           ]
         },
+        "owedChecks": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "remarksThrough": {
           "type": "string"
         },
@@ -37906,6 +39019,16 @@
         },
         "wakes": {
           "type": "integer"
+        },
+        "checksAwaitedSince": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -38789,7 +39912,8 @@
         "cursor",
         "opencode",
         "antigravity",
-        "pi"
+        "pi",
+        "muse"
       ]
     },
     "UsageReadError": {
@@ -39944,6 +41068,27 @@
         "worktreePath"
       ]
     },
+    "VcsRefreshStatusPayload": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "localOnly": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "cwd"
+      ]
+    },
     "VcsRefreshStatusRpcError": {
       "oneOf": [
         {
@@ -40033,17 +41178,6 @@
         "operation",
         "cwd",
         "detail"
-      ]
-    },
-    "VcsStatusInput": {
-      "type": "object",
-      "properties": {
-        "cwd": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "cwd"
       ]
     },
     "VcsStatusLocalResult": {
@@ -41721,6 +42855,19 @@
         }
       ]
     },
+    "PullRequestReviewCommentDraftStartPosition": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/PullRequestReviewCommentDraftStartPositionAdded"
+        },
+        {
+          "$ref": "#/definitions/PullRequestReviewCommentDraftStartPositionDeleted"
+        },
+        {
+          "$ref": "#/definitions/PullRequestReviewCommentDraftStartPositionContext"
+        }
+      ]
+    },
     "PullRequestReviewGuideResultRun": {
       "oneOf": [
         {
@@ -43372,6 +44519,12 @@
         },
         "path": {
           "type": "string"
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "attachment"
+          ]
         }
       },
       "required": [
@@ -44754,6 +45907,16 @@
               "type": "null"
             }
           ]
+        },
+        "stopDelegatedTasks": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -44901,6 +46064,54 @@
         "type",
         "commandId",
         "threadId"
+      ]
+    },
+    "OrchestrationV2CommandThreadGuestShareClose": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "thread.guest-share.close"
+          ]
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "commandId",
+        "threadId"
+      ]
+    },
+    "OrchestrationV2CommandThreadGuestMessageDismiss": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "thread.guest-message.dismiss"
+          ]
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "guestMessageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "commandId",
+        "threadId",
+        "guestMessageId"
       ]
     },
     "OrchestrationV2CommandThreadUnarchive": {
@@ -45248,6 +46459,26 @@
         },
         "visitedAt": {
           "type": "string"
+        },
+        "opened": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "searchQuery": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -45872,6 +47103,16 @@
             }
           ]
         },
+        "guestMessageId": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "createdBy": {
           "$ref": "#/definitions/OrchestrationV2Actor"
         },
@@ -45892,6 +47133,16 @@
           "oneOf": [
             {
               "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idleCompaction": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OrchestrationV2IdleCompaction"
             },
             {
               "type": "null"
@@ -46338,6 +47589,32 @@
         "threadId"
       ]
     },
+    "OrchestrationV2CommandQueuedRunStart": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "queued-run.start"
+          ]
+        },
+        "commandId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "commandId",
+        "threadId",
+        "runId"
+      ]
+    },
     "OrchestrationV2CommandQueuedRunReorder": {
       "type": "object",
       "properties": {
@@ -46476,6 +47753,16 @@
           "oneOf": [
             {
               "$ref": "#/definitions/ProviderApprovalDecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feedback": {
+          "oneOf": [
+            {
+              "type": "string"
             },
             {
               "type": "null"
@@ -47520,10 +48807,13 @@
             }
           ]
         },
-        "payloadBudgetExceeded": {
-          "type": "boolean"
-        },
         "turnItemsOmitLocalVisible": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        },
+        "idTable": {
           "type": "boolean",
           "enum": [
             true
@@ -47981,6 +49271,16 @@
             }
           ]
         },
+        "idleCompaction": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OrchestrationV2IdleCompaction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workflowScript": {
           "oneOf": [
             {
@@ -47996,6 +49296,12 @@
         },
         "text": {
           "type": "string"
+        },
+        "textOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         },
         "context": {
           "oneOf": [
@@ -48197,6 +49503,12 @@
         },
         "text": {
           "type": "string"
+        },
+        "textOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         },
         "attachments": {
           "oneOf": [
@@ -49439,6 +50751,16 @@
               "type": "null"
             }
           ]
+        },
+        "monitor": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -50015,6 +51337,26 @@
             }
           ]
         },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fullAccessOverride": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ProviderApprovalFullAccessOverride"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "appName": {
           "oneOf": [
             {
@@ -50224,6 +51566,12 @@
           "items": {
             "$ref": "#/definitions/OrchestrationV2CheckpointFileSummary"
           }
+        },
+        "filesOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         }
       },
       "required": [
@@ -51968,6 +53316,19 @@
             }
           ]
         },
+        "delivery": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "file"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "secretStatus": {
           "$ref": "#/definitions/OrchestrationV2SecretRequestStatus"
         }
@@ -52194,6 +53555,18 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "promptOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        },
+        "resultOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
           ]
         }
       },
@@ -53632,19 +55005,16 @@
           "type": "string",
           "enum": [
             "interval"
-          ],
-          "description": "Select interval scheduling."
+          ]
         },
         "everyMs": {
-          "type": "integer",
-          "description": "Positive interval in milliseconds."
+          "type": "integer"
         }
       },
       "required": [
         "type",
         "everyMs"
-      ],
-      "description": "Run repeatedly after a fixed number of milliseconds."
+      ]
     },
     "ScheduledTaskScheduleFixedTime": {
       "type": "object",
@@ -53653,8 +55023,7 @@
           "type": "string",
           "enum": [
             "fixed_time"
-          ],
-          "description": "Select a fixed local wall-clock time."
+          ]
         },
         "timeOfDay": {
           "type": "string"
@@ -53663,10 +55032,10 @@
           "oneOf": [
             {
               "type": "array",
-              "description": "Optional weekdays; omit to run every day.",
+              "description": "Default: every day.",
               "items": {
                 "type": "integer",
-                "description": "Weekday number where 0 is Sunday and 6 is Saturday."
+                "description": "Weekday. 0 is Sunday, 6 is Saturday."
               }
             },
             {
@@ -53678,8 +55047,7 @@
       "required": [
         "type",
         "timeOfDay"
-      ],
-      "description": "Run at a fixed local wall-clock time on selected weekdays."
+      ]
     },
     "ScheduledTaskScheduleWebhook": {
       "type": "object",
@@ -53688,8 +55056,7 @@
           "type": "string",
           "enum": [
             "webhook"
-          ],
-          "description": "Run when the task's webhook URL receives a request."
+          ]
         },
         "signature": {
           "oneOf": [
@@ -53705,7 +55072,7 @@
           "oneOf": [
             {
               "type": "integer",
-              "description": "Skip requests the relay held longer than this many minutes while the environment was offline. Null runs every request."
+              "description": "Skip requests held offline over this many minutes. Omit to run all."
             },
             {
               "type": "null"
@@ -53748,7 +55115,7 @@
                   ]
                 }
               },
-              "description": "Replay key template (7 days), coalesce key template, and fixed window in seconds (default 120)."
+              "description": "Replay and coalesce key templates. Window in seconds, default 120."
             },
             {
               "type": "null"
@@ -53759,7 +55126,7 @@
           "oneOf": [
             {
               "type": "array",
-              "description": "Run only when every filter matches the request; other requests are logged as filtered. Up to 16. Omit to keep the stored filters; pass [] to clear them.",
+              "description": "All must match. Max 16. Omitted: keep stored. [] clears.",
               "items": {
                 "$ref": "#/definitions/ScheduledTaskWebhookFilter"
               }
@@ -53774,7 +55141,7 @@
         "type",
         "signature"
       ],
-      "description": "Run on each request to the task's webhook URL. The prompt may use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}} and {{request}} placeholders."
+      "description": "Run on each webhook request."
     },
     "ScheduledTaskUpsertScheduleInterval": {
       "type": "object",
@@ -53783,24 +55150,17 @@
           "type": "string",
           "enum": [
             "interval"
-          ],
-          "description": "Select interval scheduling."
+          ]
         },
         "everyMs": {
           "type": "integer",
-          "description": "Positive interval in milliseconds.",
-          "allOf": [
-            {
-              "description": "Interval in milliseconds, with a minimum of 60000 (one minute)."
-            }
-          ]
+          "description": "Min 60000."
         }
       },
       "required": [
         "type",
         "everyMs"
-      ],
-      "description": "Run repeatedly after a fixed number of milliseconds."
+      ]
     },
     "ScheduledTaskUpsertScheduleFixedTime": {
       "type": "object",
@@ -53809,8 +55169,7 @@
           "type": "string",
           "enum": [
             "fixed_time"
-          ],
-          "description": "Select a fixed local wall-clock time."
+          ]
         },
         "timeOfDay": {
           "type": "string"
@@ -53819,10 +55178,10 @@
           "oneOf": [
             {
               "type": "array",
-              "description": "Optional weekdays; omit to run every day.",
+              "description": "Default: every day.",
               "items": {
                 "type": "integer",
-                "description": "Weekday number where 0 is Sunday and 6 is Saturday."
+                "description": "Weekday. 0 is Sunday, 6 is Saturday."
               }
             },
             {
@@ -53834,8 +55193,7 @@
       "required": [
         "type",
         "timeOfDay"
-      ],
-      "description": "Run at a fixed local wall-clock time on selected weekdays."
+      ]
     },
     "ScheduledTaskUpsertScheduleWebhook": {
       "type": "object",
@@ -53844,11 +55202,10 @@
           "type": "string",
           "enum": [
             "webhook"
-          ],
-          "description": "Run when the task's webhook URL receives a request."
+          ]
         },
         "signature": {
-          "description": "Signature check; omit or null to accept requests by URL token only.",
+          "description": "Omit for URL token only.",
           "oneOf": [
             {
               "type": "object",
@@ -53861,15 +55218,14 @@
                   "enum": [
                     "hex",
                     "base64"
-                  ],
-                  "description": "How the HMAC-SHA256 digest is encoded in the header."
+                  ]
                 },
                 "prefix": {
                   "type": "string",
-                  "description": "Text before the digest in the header value, such as 'sha256='. Empty for none."
+                  "description": "Text before the digest, such as 'sha256='. Empty for none."
                 },
                 "secret": {
-                  "description": "Shared signing secret. Omit to keep the stored secret.",
+                  "description": "Default: stored secret.",
                   "oneOf": [
                     {
                       "type": "string"
@@ -53880,7 +55236,7 @@
                   ]
                 },
                 "secretRef": {
-                  "description": "A secret the user entered through request_secret, used instead of secret. It is consumed by this save.",
+                  "description": "From `request_secret`. Instead of `secret`. Spent by this save.",
                   "oneOf": [
                     {
                       "type": "string"
@@ -53906,7 +55262,7 @@
           "oneOf": [
             {
               "type": "integer",
-              "description": "Skip requests the relay held longer than this many minutes while the environment was offline. Null runs every request."
+              "description": "Skip requests held offline over this many minutes. Omit to run all."
             },
             {
               "type": "null"
@@ -53949,7 +55305,7 @@
                   ]
                 }
               },
-              "description": "Replay key template (7 days), coalesce key template, and fixed window in seconds (default 120)."
+              "description": "Replay and coalesce key templates. Window in seconds, default 120."
             },
             {
               "type": "null"
@@ -53960,7 +55316,7 @@
           "oneOf": [
             {
               "type": "array",
-              "description": "Run only when every filter matches the request; other requests are logged as filtered. Up to 16. Omit to keep the stored filters; pass [] to clear them.",
+              "description": "All must match. Max 16. Omitted: keep stored. [] clears.",
               "items": {
                 "$ref": "#/definitions/ScheduledTaskWebhookFilter"
               }
@@ -53974,7 +55330,7 @@
       "required": [
         "type"
       ],
-      "description": "Run on each request to the task's webhook URL. The prompt may use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}} and {{request}} placeholders."
+      "description": "Run per webhook request. Prompt can use {{body.path}}, {{headers.name}}, {{query.name}}, {{body}}, {{request}}."
     },
     "ServerConfigIssueKeybindingsMalformedConfig": {
       "type": "object",
@@ -55833,6 +57189,16 @@
             }
           ]
         },
+        "idleCompaction": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OrchestrationV2IdleCompaction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workflowScript": {
           "oneOf": [
             {
@@ -55848,6 +57214,12 @@
         },
         "text": {
           "type": "string"
+        },
+        "textOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         },
         "context": {
           "oneOf": [
@@ -56049,6 +57421,12 @@
         },
         "text": {
           "type": "string"
+        },
+        "textOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         },
         "attachments": {
           "oneOf": [
@@ -57291,6 +58669,16 @@
               "type": "null"
             }
           ]
+        },
+        "monitor": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -57867,6 +59255,26 @@
             }
           ]
         },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fullAccessOverride": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ProviderApprovalFullAccessOverride"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "appName": {
           "oneOf": [
             {
@@ -58076,6 +59484,12 @@
           "items": {
             "$ref": "#/definitions/OrchestrationV2CheckpointFileSummary"
           }
+        },
+        "filesOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         }
       },
       "required": [
@@ -59820,6 +61234,19 @@
             }
           ]
         },
+        "delivery": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "file"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "secretStatus": {
           "$ref": "#/definitions/OrchestrationV2SecretRequestStatus"
         }
@@ -60046,6 +61473,18 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "promptOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        },
+        "resultOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
           ]
         }
       },
@@ -60389,6 +61828,16 @@
         },
         "providerSessionId": {
           "type": "string"
+        },
+        "supportsFeedback": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -60813,6 +62262,16 @@
             }
           ]
         },
+        "idleCompaction": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OrchestrationV2IdleCompaction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workflowScript": {
           "oneOf": [
             {
@@ -60828,6 +62287,12 @@
         },
         "text": {
           "type": "string"
+        },
+        "textOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         },
         "context": {
           "oneOf": [
@@ -61029,6 +62494,12 @@
         },
         "text": {
           "type": "string"
+        },
+        "textOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         },
         "attachments": {
           "oneOf": [
@@ -62271,6 +63742,16 @@
               "type": "null"
             }
           ]
+        },
+        "monitor": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -62847,6 +64328,26 @@
             }
           ]
         },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fullAccessOverride": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ProviderApprovalFullAccessOverride"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "appName": {
           "oneOf": [
             {
@@ -63056,6 +64557,12 @@
           "items": {
             "$ref": "#/definitions/OrchestrationV2CheckpointFileSummary"
           }
+        },
+        "filesOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         }
       },
       "required": [
@@ -64800,6 +66307,19 @@
             }
           ]
         },
+        "delivery": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "file"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "secretStatus": {
           "$ref": "#/definitions/OrchestrationV2SecretRequestStatus"
         }
@@ -65026,6 +66546,18 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "promptOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        },
+        "resultOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
           ]
         }
       },
@@ -65653,6 +67185,16 @@
             }
           ]
         },
+        "idleCompaction": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OrchestrationV2IdleCompaction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workflowScript": {
           "oneOf": [
             {
@@ -65668,6 +67210,12 @@
         },
         "text": {
           "type": "string"
+        },
+        "textOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         },
         "context": {
           "oneOf": [
@@ -65869,6 +67417,12 @@
         },
         "text": {
           "type": "string"
+        },
+        "textOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         },
         "attachments": {
           "oneOf": [
@@ -67111,6 +68665,16 @@
               "type": "null"
             }
           ]
+        },
+        "monitor": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -67687,6 +69251,26 @@
             }
           ]
         },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fullAccessOverride": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ProviderApprovalFullAccessOverride"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "appName": {
           "oneOf": [
             {
@@ -67896,6 +69480,12 @@
           "items": {
             "$ref": "#/definitions/OrchestrationV2CheckpointFileSummary"
           }
+        },
+        "filesOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         }
       },
       "required": [
@@ -69640,6 +71230,19 @@
             }
           ]
         },
+        "delivery": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "file"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "secretStatus": {
           "$ref": "#/definitions/OrchestrationV2SecretRequestStatus"
         }
@@ -69866,6 +71469,18 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "promptOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        },
+        "resultOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
           ]
         }
       },
@@ -70493,6 +72108,16 @@
             }
           ]
         },
+        "idleCompaction": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/OrchestrationV2IdleCompaction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "workflowScript": {
           "oneOf": [
             {
@@ -70508,6 +72133,12 @@
         },
         "text": {
           "type": "string"
+        },
+        "textOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         },
         "context": {
           "oneOf": [
@@ -70709,6 +72340,12 @@
         },
         "text": {
           "type": "string"
+        },
+        "textOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         },
         "attachments": {
           "oneOf": [
@@ -71951,6 +73588,16 @@
               "type": "null"
             }
           ]
+        },
+        "monitor": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -72527,6 +74174,26 @@
             }
           ]
         },
+        "reason": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fullAccessOverride": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/ProviderApprovalFullAccessOverride"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "appName": {
           "oneOf": [
             {
@@ -72736,6 +74403,12 @@
           "items": {
             "$ref": "#/definitions/OrchestrationV2CheckpointFileSummary"
           }
+        },
+        "filesOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
         }
       },
       "required": [
@@ -74480,6 +76153,19 @@
             }
           ]
         },
+        "delivery": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "file"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "secretStatus": {
           "$ref": "#/definitions/OrchestrationV2SecretRequestStatus"
         }
@@ -74706,6 +76392,18 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "promptOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
+          ]
+        },
+        "resultOmitted": {
+          "type": "boolean",
+          "enum": [
+            true
           ]
         }
       },
@@ -77452,6 +79150,68 @@
       "required": [
         "mode",
         "rules"
+      ]
+    },
+    "PullRequestReviewCommentDraftStartPositionAdded": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "added"
+          ]
+        },
+        "newLine": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "newLine"
+      ]
+    },
+    "PullRequestReviewCommentDraftStartPositionDeleted": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "deleted"
+          ]
+        },
+        "oldLine": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "oldLine"
+      ]
+    },
+    "PullRequestReviewCommentDraftStartPositionContext": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "context"
+          ]
+        },
+        "oldLine": {
+          "type": "integer"
+        },
+        "newLine": {
+          "type": "integer"
+        },
+        "side": {
+          "$ref": "#/definitions/PullRequestDiffSide"
+        }
+      },
+      "required": [
+        "kind",
+        "oldLine",
+        "newLine",
+        "side"
       ]
     },
     "PullRequestReviewGuideResultRunRunning": {
