@@ -7,6 +7,7 @@ mod agent_review_store;
 mod agent_threads;
 mod app_settings;
 mod data_dir;
+mod hidden_actions;
 mod home;
 mod inbox;
 mod keymap;
@@ -24,6 +25,7 @@ mod thread_backend;
 mod title_bar;
 mod window;
 mod worktree_git;
+mod zed_services;
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
@@ -95,6 +97,7 @@ struct Args {
 }
 
 fn main() {
+    zed_services::scrub_env();
     #[cfg(unix)]
     util::prevent_root_execution();
 
@@ -292,7 +295,7 @@ fn init_app_state(
         ReqwestClient::proxy_and_user_agent(proxy_url, &user_agent)
             .context("starting the HTTP client")?
     };
-    cx.set_http_client(Arc::new(http));
+    cx.set_http_client(Arc::new(zed_services::ZedHostGuard::new(Arc::new(http))));
     <dyn Fs>::set_global(fs.clone(), cx);
 
     GitHostingProviderRegistry::set_global(Arc::new(GitHostingProviderRegistry::new()), cx);
@@ -309,8 +312,8 @@ fn init_app_state(
     // support them.
     //
     // `Project` and `Workspace` still require a `Client`. mustr never signs it
-    // in or connects it, and telemetry is off, so its zed.dev base URL is never
-    // used.
+    // in or connects it, and telemetry is off. Its base URL is the unroutable
+    // `server_url` from mustr's defaults, and `ZedHostGuard` refuses Zed hosts.
     let client = Client::production(cx);
     cx.set_http_client(client.http_client());
 
@@ -396,6 +399,7 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     git_ui::init(cx);
     inspector_ui::init(app_state.clone(), cx);
     which_key::init(cx);
+    hidden_actions::init(cx);
     app_settings::observe_app_settings(cx);
     title_bar::init(cx);
     status_bar::init(cx);

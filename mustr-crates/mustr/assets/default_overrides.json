@@ -7,8 +7,25 @@
     "diagnostics": false,
     "metrics": false
   },
-  // mustr doesn't use Zed's hosted AI, agent panel, or edit predictions.
+  // mustr's agent features come from T3 Code, so Zed's AI is off: the agent
+  // panel and its threads, external agents, the inline assistant, edit
+  // predictions, Copilot, MCP servers, and Zed's threads sidebar
+  // (mustr-docs/ZED-SERVICES.md). `disable_ai` turns off most of it, and user
+  // and project settings can't turn it back on. The settings below are off too,
+  // for Zed code that reads them without checking `disable_ai`.
   "disable_ai": true,
+  "agent": {
+    // The threads sidebar reads this directly.
+    "enabled": false
+  },
+  "edit_predictions": {
+    "provider": "none"
+  },
+  "show_edit_predictions": false,
+  // mustr never contacts Zed's servers (mustr-docs/ZED-SERVICES.md). Zed's
+  // `Client` and the links derived from it use this URL; `.invalid` never
+  // resolves, and mustr's HTTP client refuses it before any DNS lookup.
+  "server_url": "https://zed.invalid",
   // mustr doesn't use Zed's updater, which would download Zed releases.
   "auto_update": false,
   // mustr makes no requests to zed.dev, so it doesn't use Zed's extension

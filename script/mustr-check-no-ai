@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# mustr-check-no-ai: fail if mustr depends on Zed's AI or Zed's hosted services.
+#
+# mustr's own agent features come from T3 Code (thread_chat, review). Zed's AI
+# (agent panel, external agents, inline assistant, edit predictions, Copilot,
+# language model providers) and Zed's services (sign-in, collab, auto-update,
+# crash upload, feedback, the CLI) are purged: see mustr-docs/ZED-SERVICES.md.
+#
+# Checks, using `cargo tree` (offline, no build):
+#   1. No mustr crate (mustr-crates/*) depends directly on a Zed AI or service
+#      crate (normal, build, or dev dependencies).
+#   2. The Zed AI and service crates that Zed's core crates pull into the
+#      `mustr` binary are exactly the known, inert ones in KNOWN_TRANSITIVE.
+#      A new one fails the check: confirm it's never initialized or reachable,
+#      add it to mustr-docs/ZED-SERVICES.md, then add it here.
+#
+# Usage: script/mustr-check-no-ai [--repo PATH]
+# Exit codes: 0 clean, 1 a check failed, 2 usage or cargo error.
+set -euo pipefail
+export LC_ALL=C
+
+REPO=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo) REPO="$2"; shift 2 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+REPO="${REPO:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)}"
+cd "$REPO"
+
+# Zed crates that are AI features. A regex, so crates Zed adds upstream with
+# these prefixes are caught too.
+AI_CRATES='^(acp_[a-z_]+|agent|agent_[a-z_]+|ai_onboarding|anthropic|assistant[a-z_]*|bedrock|cloud_llm_client|codestral|copilot[a-z_]*|deepseek|edit_prediction[a-z_]*|eval_[a-z_]+|google_ai|language_model[a-z_]*|language_models[a-z_]*|lmstudio|mistral|ollama|open_ai|open_router|openai_[a-z_]+|opencode|prompt_store|rules_library|supermaven[a-z_]*|vercel|web_search[a-z_]*|x_ai[a-z_]*|zeta[a-z_]*|context_server)$'
+
+# Zed crates that are Zed's hosted services, or that only make sense with them.
+SERVICE_CRATES='^(auto_update[a-z_]*|call|channel|cli|cloud_api_[a-z_]+|collab[a-z_]*|crashes|extension_host|extensions_ui|feedback|hang_telemetry|install_cli|livekit[a-z_]*|notifications|onboarding|recent_projects|remote_server|telemetry|telemetry_events|title_bar|zed_credentials_provider)$'
+
+# Pulled in by Zed crates mustr needs, and inert in mustr. Each row of
+# mustr-docs/ZED-SERVICES.md says why and how that's verified.
+KNOWN_TRANSITIVE="
+agent_settings
+agent_skills
+auto_update
+channel
+cloud_api_client
+cloud_api_types
+cloud_llm_client
+context_server
+edit_prediction_types
+language_model
+language_model_core
+notifications
+prompt_store
+telemetry
+telemetry_events
+zed_credentials_provider
+zeta_prompt
+"
+
+# Direct dependencies of one package, one name per line.
+direct_deps() {
+  cargo tree --offline -p "$1" --depth 1 -e normal,build,dev --prefix none 2>/dev/null \
+    | tail -n +2 | sed -E 's/ v[0-9][^ ]*.*//' | sort -u
+}
+
+flagged() {
+  grep -E "$AI_CRATES|$SERVICE_CRATES" || true
+}
+
+status=0
+
+mustr_crates=$(for manifest in mustr-crates/*/Cargo.toml; do
+  sed -nE 's/^name = "([^"]+)"/\1/p' "$manifest" | head -1
+done)
+[ -n "$mustr_crates" ] || { echo "no mustr crates under mustr-crates/" >&2; exit 2; }
+
+for crate in $mustr_crates; do
+  deps=$(direct_deps "$crate") || { echo "cargo tree failed for $crate" >&2; exit 2; }
+  [ -n "$deps" ] || { echo "cargo tree listed no dependencies for $crate" >&2; exit 2; }
+  bad=$(printf '%s\n' "$deps" | flagged)
+  if [ -n "$bad" ]; then
+    echo "FAIL: $crate depends directly on Zed AI or service crates:" $bad
+    status=1
+  fi
+done
+
+graph=$(cargo tree --offline -p mustr -e normal,build --prefix none 2>/dev/null \
+  | sed -E 's/ v[0-9][^ ]*.*//' | sort -u) || { echo "cargo tree failed for mustr" >&2; exit 2; }
+in_graph=$(printf '%s\n' "$graph" | flagged)
+known=$(printf '%s\n' $KNOWN_TRANSITIVE | sort -u)
+new=$(comm -23 <(printf '%s\n' "$in_graph" | sort -u) <(printf '%s\n' "$known"))
+if [ -n "$new" ]; then
+  echo "FAIL: mustr's dependency graph now includes these Zed AI or service crates:" $new
+  echo "      Confirm each is never initialized or reachable, document it in"
+  echo "      mustr-docs/ZED-SERVICES.md, and add it to KNOWN_TRANSITIVE in $0."
+  status=1
+fi
+gone=$(comm -13 <(printf '%s\n' "$in_graph" | sort -u) <(printf '%s\n' "$known"))
+if [ -n "$gone" ]; then
+  echo "note: no longer in mustr's graph (remove from KNOWN_TRANSITIVE and ZED-SERVICES.md):" $gone
+fi
+
+if [ "$status" -eq 0 ]; then
+  echo "ok: no mustr crate depends on Zed AI or service crates;" \
+    "$(printf '%s\n' "$in_graph" | grep -c .) known inert ones come in through Zed's core crates."
+fi
+exit "$status"

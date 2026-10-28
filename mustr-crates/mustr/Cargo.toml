@@ -20,6 +20,7 @@ assets.workspace = true
 clap.workspace = true
 client.workspace = true
 command_palette.workspace = true
+command_palette_hooks.workspace = true
 db.workspace = true
 diagnostics.workspace = true
 dirs.workspace = true
@@ -84,6 +85,7 @@ zlog_settings.workspace = true
 [dev-dependencies]
 editor = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
+http_client = { workspace = true, features = ["test-support"] }
 language = { workspace = true, features = ["test-support"] }
 project = { workspace = true, features = ["test-support"] }
 # `project`'s test support turns on `remote`'s mock transport, which `remote_connection`

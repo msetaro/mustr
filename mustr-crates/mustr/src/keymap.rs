@@ -1,6 +1,5 @@
 use futures::{StreamExt as _, channel::mpsc, select_biased};
 use gpui::{Action as _, App, AppContext as _, DismissEvent, KeyBinding};
-use project::DisableAiSettings;
 use settings::{
     BaseKeymap, DEFAULT_KEYMAP_PATH, KeybindSource, KeymapFile, KeymapFileLoadResult,
     SPECIFIC_OVERRIDES_KEYMAP_PATH, Settings as _, SettingsStore, VIM_KEYMAP_PATH,
@@ -24,23 +23,19 @@ pub fn handle_keymap_file_changes(
     let mut old_base_keymap = *BaseKeymap::get_global(cx);
     let mut old_vim_enabled = VimModeSetting::get_global(cx).0;
     let mut old_helix_enabled = HelixModeSetting::get_global(cx).0;
-    let mut old_disable_ai = DisableAiSettings::get_global(cx).disable_ai;
 
     cx.observe_global::<SettingsStore>(move |cx| {
         let new_base_keymap = *BaseKeymap::get_global(cx);
         let new_vim_enabled = VimModeSetting::get_global(cx).0;
         let new_helix_enabled = HelixModeSetting::get_global(cx).0;
-        let new_disable_ai = DisableAiSettings::get_global(cx).disable_ai;
 
         if new_base_keymap != old_base_keymap
             || new_vim_enabled != old_vim_enabled
             || new_helix_enabled != old_helix_enabled
-            || new_disable_ai != old_disable_ai
         {
             old_base_keymap = new_base_keymap;
             old_vim_enabled = new_vim_enabled;
             old_helix_enabled = new_helix_enabled;
-            old_disable_ai = new_disable_ai;
             base_keymap_tx.unbounded_send(()).ok();
         }
     })
@@ -140,7 +135,7 @@ fn reload_keymaps(cx: &mut App, mut user_key_bindings: Vec<KeyBinding>) {
     for key_binding in &mut user_key_bindings {
         key_binding.set_meta(KeybindSource::User.meta());
     }
-    cx.bind_keys(filter_disabled_ai_bindings(user_key_bindings, cx));
+    cx.bind_keys(drop_hidden_actions(user_key_bindings));
     // Menus show each action's key binding, so rebuild them with the new bindings.
     cx.set_menus(crate::window::app_menus());
 }
@@ -198,34 +193,119 @@ fn bind_builtin_keymap(asset_path: &str, source: KeybindSource, cx: &mut App) {
     for key_binding in &mut key_bindings {
         key_binding.set_meta(source.meta());
     }
-    cx.bind_keys(filter_disabled_ai_bindings(key_bindings, cx));
+    cx.bind_keys(drop_hidden_actions(key_bindings));
 }
 
-// Copied from crates/zed/src/zed.rs (`AI_ACTION_NAMESPACES`, `is_ai_keybinding`,
-// `filter_disabled_ai_bindings`). Dropping these lets lower-precedence editor
-// bindings fire instead of being shadowed by AI actions that do nothing.
-const AI_ACTION_NAMESPACES: &[&str] = &[
-    "acp::",
-    "agent::",
-    "assistant::",
-    "edit_prediction::",
-    "inline_assistant::",
-    "zeta::",
-];
-
-fn is_ai_keybinding(binding: &KeyBinding) -> bool {
-    let name = binding.action().name();
-    AI_ACTION_NAMESPACES
-        .iter()
-        .any(|namespace| name.starts_with(namespace))
-}
-
-fn filter_disabled_ai_bindings(bindings: Vec<KeyBinding>, cx: &App) -> Vec<KeyBinding> {
-    if !DisableAiSettings::get_global(cx).disable_ai {
-        return bindings;
-    }
+/// Drops bindings to Zed's AI and service actions (`hidden_actions`), in Zed's keymaps and the
+/// user's. Those actions do nothing in mustr, or would reach for Zed features mustr leaves out,
+/// and dropping them lets lower-precedence bindings for the same keys work. Zed drops its AI
+/// bindings only while `disable_ai` is on (`filter_disabled_ai_bindings` in
+/// crates/zed/src/zed.rs); mustr always does.
+fn drop_hidden_actions(bindings: Vec<KeyBinding>) -> Vec<KeyBinding> {
     bindings
         .into_iter()
-        .filter(|binding| !is_ai_keybinding(binding))
+        .filter(|binding| !crate::hidden_actions::is_hidden(binding.action().name()))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hidden_actions::{is_hidden, tests::looks_like_ai_or_a_zed_service};
+    use gpui::{TestAppContext, UpdateGlobal as _};
+    use settings::BaseKeymapContent;
+
+    fn bound_actions(cx: &App) -> Vec<String> {
+        cx.key_bindings()
+            .borrow()
+            .bindings()
+            .map(|binding| binding.action().name().to_string())
+            .collect()
+    }
+
+    /// mustr's keymap (Zed's built-in keymaps, then mustr's own bindings) binds no Zed AI or
+    /// service action, with any base keymap, in vim mode or not.
+    #[gpui::test]
+    fn the_keymap_binds_no_ai_or_service_actions(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            crate::app_settings::apply_default_overrides(cx).unwrap();
+            // Zed's default keymap does bind AI actions, so there's something to drop.
+            let zed_keymap = util::asset_str::<settings::SettingsAssets>(DEFAULT_KEYMAP_PATH);
+            for action in ["agent::ToggleFocus", "editor::ShowEditPrediction"] {
+                assert!(
+                    zed_keymap.contains(action),
+                    "Zed's keymap no longer binds {action}"
+                );
+            }
+
+            for base_keymap in [
+                BaseKeymapContent::Zed,
+                BaseKeymapContent::VSCode,
+                BaseKeymapContent::JetBrains,
+                BaseKeymapContent::SublimeText,
+                BaseKeymapContent::Atom,
+                BaseKeymapContent::TextMate,
+                BaseKeymapContent::Emacs,
+                BaseKeymapContent::Cursor,
+            ] {
+                for vim_mode in [false, true] {
+                    SettingsStore::update_global(cx, |store, cx| {
+                        store.update_user_settings(cx, |settings| {
+                            settings.base_keymap = Some(base_keymap);
+                            settings.vim_mode = Some(vim_mode);
+                        });
+                    });
+                    cx.clear_key_bindings();
+                    load_default_keymap(cx);
+                    let bound = bound_actions(cx);
+                    assert!(
+                        bound.len() > 500,
+                        "{base_keymap:?}: only {} bindings",
+                        bound.len()
+                    );
+                    for name in ["thread_chat::SendMessage", "review::AddComment"] {
+                        assert!(
+                            bound.iter().any(|bound| bound == name),
+                            "{name} isn't bound"
+                        );
+                    }
+                    let ai_or_services: Vec<_> = bound
+                        .iter()
+                        .filter(|name| is_hidden(name) || looks_like_ai_or_a_zed_service(name))
+                        .collect();
+                    assert!(
+                        ai_or_services.is_empty(),
+                        "{base_keymap:?} (vim mode {vim_mode}) binds {ai_or_services:?}"
+                    );
+                }
+            }
+        });
+    }
+
+    /// The user's own bindings to hidden actions are dropped too, and the rest are kept.
+    #[gpui::test]
+    fn user_bindings_to_ai_actions_are_dropped(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            crate::app_settings::apply_default_overrides(cx).unwrap();
+            let user_keymap = r#"[{"bindings": {
+                "ctrl-alt-1": "agent::ToggleFocus",
+                "ctrl-alt-2": "editor::ShowEditPrediction",
+                "ctrl-alt-3": "client::SignIn",
+                "ctrl-alt-4": "editor::Copy"
+            }}]"#;
+            let KeymapFileLoadResult::Success { key_bindings } = KeymapFile::load(user_keymap, cx)
+            else {
+                panic!("the user keymap didn't load");
+            };
+            let kept: Vec<_> = drop_hidden_actions(key_bindings)
+                .iter()
+                .map(|binding| binding.action().name())
+                .collect();
+            assert_eq!(kept, ["editor::Copy"]);
+        });
+    }
 }
