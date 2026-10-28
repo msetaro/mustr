@@ -1191,3 +1191,39 @@ async fn secret_requests_are_answered_with_a_masked_input(cx: &mut TestAppContex
     assert_eq!(input.read_with(cx, |editor, cx| editor.text(cx)), "");
     assert!(backend.commands().is_empty());
 }
+
+// Live command output.
+
+#[gpui::test]
+async fn running_commands_stream_their_output(cx: &mut TestAppContext) {
+    let backend = FakeBackend::with_thread(running_thread(), 20);
+    backend.raw_stream_items.lock().extend([
+        json!({ "kind": "replace", "text": "Compiling webhooks\n", "truncated": true, "running": true }),
+        json!({ "kind": "append", "text": "test result: ok\n", "truncated": false, "running": false }),
+    ]);
+    let (view, cx) = open_view(backend.clone(), Some(THREAD), cx);
+    view.update(cx, |view, cx| view.toggle_tool("i7".into(), cx));
+    cx.run_until_parked();
+
+    assert_eq!(
+        *backend.raw_calls.lock(),
+        [RawCall {
+            tag: "orchestration.subscribeCommandOutput".into(),
+            payload: json!({ "threadId": THREAD, "itemId": "i7" }),
+            access: Access::Read,
+        }]
+    );
+    view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.composer_state.live_outputs.get("i7"),
+            Some(&crate::composer::LiveOutput {
+                text: "Compiling webhooks\ntest result: ok\n".into(),
+                truncated: true,
+                running: false,
+            })
+        );
+        assert!(view.composer_state.output_streams.is_empty());
+    });
+    // A running command's output isn't fetched whole while it streams.
+    assert!(backend.turn_items.lock().is_empty());
+}

@@ -4,9 +4,12 @@
 
 use crate::{
     attachments::{AssetKey, AssetState},
+    backend::{Access, ThreadBackendExt as _},
+    composer::LiveOutput,
     model::{ItemKind, ItemStatus, MessageImage, Row, TimelineItem, ToolKind, canonical_item},
     thread_view::{CONTENT_MAX_WIDTH, Loadable, ThreadView},
 };
+use futures::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, FontWeight, Hsla, IntoElement, ObjectFit,
     ParentElement as _, Pixels, SharedString, Styled as _, StyledImage as _, TextStyleRefinement,
@@ -14,7 +17,10 @@ use gpui::{
 };
 use markdown::{Markdown, MarkdownElement, MarkdownStyle};
 use mustr_ui::{ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens};
-use t3_api::types::OrchestrationV2GetTurnItemInput;
+use t3_api::{
+    rpc,
+    types::{OrchestrationV2GetTurnItemInput, OrchestrationV2SubscribeCommandOutputInput},
+};
 use ui::{
     Color, Icon, IconName, IconSize, Indicator, Label, LabelCommon as _, LabelSize, prelude::*,
 };
@@ -138,8 +144,103 @@ impl ThreadView {
         cx.notify();
     }
 
-    /// Expands a tool call, fetching its output if T3 left it out.
+    /// The row that shows an item.
+    fn row_of_item(&self, item_id: &str) -> Option<usize> {
+        let state = self.thread_state()?;
+        let index = state.items().iter().position(|item| item.id == item_id)?;
+        self.rows.iter().position(|row| match row {
+            Row::Item(item) => *item == index,
+            Row::Work(items) => items.contains(&index),
+        })
+    }
+
+    /// Follows a running command's output while it's expanded
+    /// (`orchestration.subscribeCommandOutput`, as T3's `CommandOutputPanel` does), then loads
+    /// the whole output once it ends.
+    fn follow_command_output(&mut self, item_id: String, cx: &mut Context<Self>) {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return;
+        };
+        let stream = self
+            .backend
+            .stream::<rpc::OrchestrationSubscribeCommandOutput>(
+                OrchestrationV2SubscribeCommandOutputInput {
+                    item_id: item_id.clone(),
+                    thread_id,
+                },
+                Access::Read,
+            );
+        let mut stream = match stream {
+            Ok(stream) => stream,
+            Err(error) => {
+                log::warn!("couldn't follow the command's output: {error:#}");
+                return;
+            }
+        };
+        self.composer_state
+            .live_outputs
+            .insert(item_id.clone(), LiveOutput::default());
+        let key = item_id.clone();
+        let task = cx.spawn(async move |this, cx| {
+            while let Some(frame) = stream.next().await {
+                let frame = match frame {
+                    Ok(frame) => frame,
+                    Err(error) => {
+                        log::warn!("the command's output stream failed: {error:#}");
+                        break;
+                    }
+                };
+                let running = frame.running;
+                let updated = this.update(cx, |this, cx| {
+                    if let Some(output) = this.composer_state.live_outputs.get_mut(&item_id) {
+                        output.apply(&frame);
+                    }
+                    if let Some(row) = this.row_of_item(&item_id) {
+                        this.list_state.remeasure_items(row..row + 1);
+                    }
+                    cx.notify();
+                });
+                if updated.is_err() || !running {
+                    break;
+                }
+            }
+            this.update(cx, |this, cx| {
+                this.composer_state.output_streams.remove(&item_id);
+                if let Some(output) = this.composer_state.live_outputs.get_mut(&item_id) {
+                    output.running = false;
+                }
+                cx.notify();
+            })
+            .ok();
+        });
+        self.composer_state.output_streams.insert(key, task);
+    }
+
+    /// Expands a tool call, fetching its output if T3 left it out, or following it while the
+    /// command runs.
     pub(crate) fn toggle_tool(&mut self, item_id: String, cx: &mut Context<Self>) {
+        let running_command = matches!(
+            self.thread_state()
+                .and_then(|state| state.items().iter().find(|item| item.id == item_id)),
+            Some(TimelineItem {
+                kind: ItemKind::Tool {
+                    tool: ToolKind::Command,
+                    ..
+                },
+                status,
+                ..
+            }) if status.is_in_progress()
+        );
+        if running_command {
+            let expanding = !self.expanded.contains(&item_id);
+            self.toggle_expanded(item_id.clone(), cx);
+            if expanding {
+                self.follow_command_output(item_id, cx);
+            } else {
+                self.composer_state.output_streams.remove(&item_id);
+            }
+            return;
+        }
         let needs_output = matches!(
             self.thread_state()
                 .and_then(|state| state.items().iter().find(|item| item.id == item_id))
@@ -1184,7 +1285,21 @@ impl ThreadView {
                     ..
                 } => {
                     let loading = self.loading_outputs.contains(&item.id);
-                    let text = [input.clone(), output.clone()]
+                    // A running command's streamed output, until T3 has the whole of it.
+                    let live = self
+                        .composer_state
+                        .live_outputs
+                        .get(&item.id)
+                        .filter(|_| item.status.is_in_progress() || output.is_none())
+                        .map(|live| {
+                            if live.truncated {
+                                format!("Earlier output not shown.\n{}", live.text)
+                            } else {
+                                live.text.clone()
+                            }
+                        });
+                    let output = live.or_else(|| output.clone());
+                    let text = [input.clone(), output]
                         .into_iter()
                         .flatten()
                         .collect::<Vec<_>>()

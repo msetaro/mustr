@@ -55,7 +55,32 @@ pub struct ComposerState {
     pub(crate) secret_inputs: collections::HashMap<String, Entity<Editor>>,
     /// Secret requests being answered, by item id.
     pub(crate) answering_secrets: collections::HashSet<String>,
+    /// Running commands' output as it streams, by item id.
+    pub(crate) live_outputs: collections::HashMap<String, LiveOutput>,
+    pub(crate) output_streams: collections::HashMap<String, gpui::Task<()>>,
     _save_draft: Option<gpui::Task<()>>,
+}
+
+/// A running command's output so far (`state/commandOutput.ts` in T3).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LiveOutput {
+    pub text: String,
+    /// T3 dropped the start of a long output.
+    pub truncated: bool,
+    pub running: bool,
+}
+
+impl LiveOutput {
+    /// Applies a frame: `replace` starts over, `append` adds to the end.
+    pub fn apply(&mut self, frame: &t3_api::types::OrchestrationV2CommandOutputFrame) {
+        use t3_api::types::OrchestrationV2CommandOutputFrameKind as Kind;
+        if frame.kind == Kind::Replace {
+            self.text.clear();
+        }
+        self.text.push_str(&frame.text);
+        self.truncated |= frame.truncated;
+        self.running = frame.running;
+    }
 }
 
 /// Unsent text, by thread, kept while mustr runs and in its database across restarts
