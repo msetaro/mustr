@@ -31,6 +31,8 @@ use t3_api::{
         OrchestrationV2CommandThreadStopType, OrchestrationV2CommandThreadUserInputDismiss,
         OrchestrationV2CommandThreadUserInputDismissType, OrchestrationV2CreationSource,
         OrchestrationV2ThreadLaunchInput, OrchestrationV2ThreadLaunchInputInitialMessage,
+        OrchestrationV2ThreadLaunchWorkspaceStrategyExistingWorktree,
+        OrchestrationV2ThreadLaunchWorkspaceStrategyExistingWorktreeType,
         OrchestrationV2ThreadLaunchWorkspaceStrategyRoot,
         OrchestrationV2ThreadLaunchWorkspaceStrategyRootType,
         OrchestrationV2ThreadLaunchWorkspaceStrategyWorktree,
@@ -237,11 +239,19 @@ pub fn cancel_queued(
 /// Where a new thread's agent works.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Workspace {
-    /// In the project's own checkout.
-    ProjectRoot,
-    /// In a new worktree that T3 creates from `base_ref` (fetched from the remote first, as
-    /// T3's `newWorktreesStartFromOrigin` default does).
-    NewWorktree { base_ref: String },
+    /// In the project's own checkout, on `branch` when it's known.
+    ProjectRoot { branch: Option<String> },
+    /// In a new worktree that T3 creates from `base_ref`, fetched from its remote first when
+    /// `start_from_origin` (T3's `newWorktreesStartFromOrigin`).
+    NewWorktree {
+        base_ref: String,
+        start_from_origin: bool,
+    },
+    /// In a worktree that already exists, such as another thread's.
+    ExistingWorktree {
+        worktree_path: String,
+        branch: Option<String>,
+    },
 }
 
 /// What the new-thread form collects.
@@ -250,6 +260,7 @@ pub struct NewThread {
     pub project_id: String,
     pub model_selection: ModelSelection,
     pub runtime_mode: RuntimeMode,
+    pub interaction_mode: ProviderInteractionMode,
     pub workspace: Workspace,
     pub text: String,
 }
@@ -280,22 +291,33 @@ impl Default for LaunchIds {
 /// first message.
 pub fn launch(new_thread: NewThread, ids: LaunchIds) -> OrchestrationV2ThreadLaunchInput {
     let workspace_strategy = match new_thread.workspace {
-        Workspace::ProjectRoot => OrchestrationV2ThreadLaunchWorkspaceStrategy::Root(
+        Workspace::ProjectRoot { branch } => OrchestrationV2ThreadLaunchWorkspaceStrategy::Root(
             OrchestrationV2ThreadLaunchWorkspaceStrategyRoot {
-                branch: None,
+                branch,
                 type_: OrchestrationV2ThreadLaunchWorkspaceStrategyRootType::Root,
             },
         ),
-        Workspace::NewWorktree { base_ref } => {
-            OrchestrationV2ThreadLaunchWorkspaceStrategy::Worktree(
-                OrchestrationV2ThreadLaunchWorkspaceStrategyWorktree {
-                    base_ref,
-                    branch: None,
-                    start_from_origin: Some(true),
-                    type_: OrchestrationV2ThreadLaunchWorkspaceStrategyWorktreeType::Worktree,
-                },
-            )
-        }
+        Workspace::NewWorktree {
+            base_ref,
+            start_from_origin,
+        } => OrchestrationV2ThreadLaunchWorkspaceStrategy::Worktree(
+            OrchestrationV2ThreadLaunchWorkspaceStrategyWorktree {
+                base_ref,
+                branch: None,
+                start_from_origin: Some(start_from_origin),
+                type_: OrchestrationV2ThreadLaunchWorkspaceStrategyWorktreeType::Worktree,
+            },
+        ),
+        Workspace::ExistingWorktree {
+            worktree_path,
+            branch,
+        } => OrchestrationV2ThreadLaunchWorkspaceStrategy::ExistingWorktree(
+            OrchestrationV2ThreadLaunchWorkspaceStrategyExistingWorktree {
+                branch,
+                type_: OrchestrationV2ThreadLaunchWorkspaceStrategyExistingWorktreeType::ExistingWorktree,
+                worktree_path,
+            },
+        ),
     };
     OrchestrationV2ThreadLaunchInput {
         command_id: ids.command.command_id,
@@ -307,7 +329,7 @@ pub fn launch(new_thread: NewThread, ids: LaunchIds) -> OrchestrationV2ThreadLau
             message_id: Some(ids.command.message_id),
             text: new_thread.text.clone(),
         }),
-        interaction_mode: ProviderInteractionMode::Default,
+        interaction_mode: new_thread.interaction_mode,
         model_selection: new_thread.model_selection,
         project_id: new_thread.project_id,
         reuse_existing_thread: None,
@@ -501,6 +523,7 @@ mod tests {
                 provider: None,
             },
             runtime_mode: RuntimeMode::ApprovalRequired,
+            interaction_mode: ProviderInteractionMode::Default,
             workspace,
             text: "  Add retries to the webhook dispatcher\nwith backoff".into(),
         }
@@ -518,6 +541,7 @@ mod tests {
         let input = launch(
             new_thread(Workspace::NewWorktree {
                 base_ref: "main".into(),
+                start_from_origin: true,
             }),
             launch_ids(),
         );
@@ -541,10 +565,51 @@ mod tests {
                 }
             })
         );
-        let input = launch(new_thread(Workspace::ProjectRoot), launch_ids());
+        let input = launch(
+            new_thread(Workspace::ProjectRoot { branch: None }),
+            launch_ids(),
+        );
         assert_eq!(
             serde_json::to_value(&input.workspace_strategy).unwrap(),
             json!({ "type": "root" })
+        );
+    }
+
+    #[test]
+    fn new_threads_start_on_a_branch_or_in_an_existing_worktree() {
+        let strategy = |workspace| {
+            serde_json::to_value(launch(new_thread(workspace), launch_ids()).workspace_strategy)
+                .unwrap()
+        };
+        assert_eq!(
+            strategy(Workspace::ProjectRoot {
+                branch: Some("feature/retries".into())
+            }),
+            json!({ "type": "root", "branch": "feature/retries" })
+        );
+        assert_eq!(
+            strategy(Workspace::ExistingWorktree {
+                worktree_path: "/src/api-worktrees/retries".into(),
+                branch: Some("t3/retries".into()),
+            }),
+            json!({
+                "type": "existing_worktree",
+                "worktreePath": "/src/api-worktrees/retries",
+                "branch": "t3/retries"
+            })
+        );
+        assert_eq!(
+            strategy(Workspace::NewWorktree {
+                base_ref: "origin/release".into(),
+                start_from_origin: false,
+            }),
+            json!({ "type": "worktree", "baseRef": "origin/release", "startFromOrigin": false })
+        );
+        let mut planned = new_thread(Workspace::ProjectRoot { branch: None });
+        planned.interaction_mode = ProviderInteractionMode::Plan;
+        assert_eq!(
+            serde_json::to_value(launch(planned, launch_ids()).interaction_mode).unwrap(),
+            json!("plan")
         );
     }
 

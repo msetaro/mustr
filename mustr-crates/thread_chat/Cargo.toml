@@ -23,6 +23,7 @@ language.workspace = true
 log.workspace = true
 markdown.workspace = true
 mustr_ui = { path = "../mustr_ui" }
+picker.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

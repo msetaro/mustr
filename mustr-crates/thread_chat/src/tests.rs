@@ -1167,9 +1167,11 @@ async fn new_threads_launch_with_the_form_choices(cx: &mut TestAppContext) {
             "generateTitle": true,
             // The default model of the first agent that's installed.
             "modelSelection": { "instanceId": "claudeAgent", "model": "claude-sonnet" },
-            "runtimeMode": "approval-required",
+            // This backend has no settings for new threads, so T3's own defaults apply
+            // (`thread_settings_tests.rs` covers the settings).
+            "runtimeMode": "full-access",
             "interactionMode": "default",
-            "workspaceStrategy": { "type": "worktree", "baseRef": "main", "startFromOrigin": true },
+            "workspaceStrategy": { "type": "root" },
             "initialMessage": { "text": "Add retries to the webhook dispatcher", "attachments": [] }
         })
     );
