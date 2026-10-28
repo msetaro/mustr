@@ -499,15 +499,6 @@ impl T3Session {
         Ok(crate::inbox::recent_threads(snapshot, limit))
     }
 
-    /// Calls one of T3's RPCs. T3's typed errors become their readable detail.
-    pub async fn request(&self, tag: &str, payload: Value) -> Result<Value> {
-        self.rpc
-            .request(tag, payload)
-            .await
-            .map_err(|error| anyhow!(error.error_detail().unwrap_or_else(|| error.to_string())))
-            .with_context(|| format!("calling {tag}"))
-    }
-
     pub async fn pull_request_files(
         &self,
         pull_request: &PullRequestRef,
@@ -651,6 +642,22 @@ pub struct T3Connection {
     generation: usize,
     connect_task: Option<Task<()>>,
     driver_task: Option<Task<()>>,
+    current_rpc: CurrentRpc,
+}
+
+/// The RPC connection of whichever session is current, for work that outlives a reconnect (such
+/// as a review open across one). Empty while disconnected.
+#[derive(Clone, Default)]
+pub struct CurrentRpc(Arc<parking_lot::Mutex<Option<RpcConnection>>>);
+
+impl CurrentRpc {
+    pub fn get(&self) -> Option<RpcConnection> {
+        self.0.lock().clone()
+    }
+
+    fn set(&self, rpc: Option<RpcConnection>) {
+        *self.0.lock() = rpc;
+    }
 }
 
 struct GlobalT3Connection(Entity<T3Connection>);
@@ -683,6 +690,7 @@ impl T3Connection {
             generation: 0,
             connect_task: None,
             driver_task: None,
+            current_rpc: CurrentRpc::default(),
         }
     }
 
@@ -696,6 +704,10 @@ impl T3Connection {
 
     pub fn generation(&self) -> usize {
         self.generation
+    }
+
+    pub fn current_rpc(&self) -> CurrentRpc {
+        self.current_rpc.clone()
     }
 
     pub fn session(&self) -> Option<Arc<T3Session>> {
@@ -713,6 +725,7 @@ impl T3Connection {
     fn connect(&mut self, pairing_credential: Option<String>, cx: &mut Context<Self>) {
         self.generation += 1;
         let generation = self.generation;
+        self.current_rpc.set(None);
         if let Some(session) = self.session.take() {
             session.rpc.close();
         }
@@ -751,6 +764,7 @@ impl T3Connection {
                                 .clone()
                                 .map(Into::into),
                         };
+                        this.current_rpc.set(Some(session.rpc.clone()));
                         this.session = Some(session);
                         status
                     }
@@ -787,6 +801,7 @@ impl T3Connection {
                 };
                 log::warn!("T3 connection ended: {reason}");
                 this.session = None;
+                this.current_rpc.set(None);
                 this.status =
                     ConnectionStatus::Failed(format!("Disconnected from T3: {reason}").into());
                 cx.notify();

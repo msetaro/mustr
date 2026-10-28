@@ -30,6 +30,12 @@ actions!(
 );
 
 const ROW_HEIGHT: Pixels = px(24.);
+
+/// A file's viewed checkbox, and whether it can be clicked.
+struct ViewedToggle {
+    enabled: bool,
+    review: WeakEntity<ReviewView>,
+}
 const INDENT: Pixels = px(12.);
 const DEFAULT_WIDTH: Pixels = px(280.);
 
@@ -116,6 +122,13 @@ impl FileTreePanel {
         let Some(review) = self.review() else {
             return Vec::new();
         };
+        let (can_mark_viewed, viewed_busy) = {
+            let review = review.read(cx);
+            let busy = (0..review.file_tree().file_count())
+                .filter(|file| review.is_marking_viewed(*file))
+                .collect::<Vec<_>>();
+            (review.can_mark_viewed(), busy)
+        };
         let (tracks_viewed, rows) = {
             let tree = review.read(cx).file_tree();
             let rows = tree
@@ -139,9 +152,14 @@ impl FileTreePanel {
                 (FileTreeRow::Directory { name, depth }, _) => {
                     render_directory(index, name, depth).into_any_element()
                 }
-                (FileTreeRow::File { file, name, depth }, Some(entry)) => self
-                    .render_file(index, file, &entry, name, depth, tracks_viewed, cx)
-                    .into_any_element(),
+                (FileTreeRow::File { file, name, depth }, Some(entry)) => {
+                    let viewed = tracks_viewed.then(|| ViewedToggle {
+                        enabled: can_mark_viewed && !viewed_busy.contains(&file),
+                        review: review.downgrade(),
+                    });
+                    self.render_file(index, file, &entry, name, depth, viewed, cx)
+                        .into_any_element()
+                }
                 (FileTreeRow::File { .. }, None) => div().into_any_element(),
             })
             .collect()
@@ -155,7 +173,7 @@ impl FileTreePanel {
         entry: &FileTreeFile,
         name: SharedString,
         depth: usize,
-        tracks_viewed: bool,
+        viewed: Option<ViewedToggle>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = cx.theme().colors();
@@ -195,12 +213,24 @@ impl FileTreePanel {
                     )
             })
             .tooltip(Tooltip::text(tooltip))
-            .when(tracks_viewed, |this| {
-                // Display only: marking files viewed needs `source-control:write`.
-                this.child(
-                    Checkbox::new(("review-file-viewed", row), viewed_state)
-                        .visualization_only(true),
-                )
+            .when_some(viewed, |this, viewed| {
+                let checkbox = Checkbox::new(("review-file-viewed", row), viewed_state);
+                this.child(if viewed.enabled {
+                    let review = viewed.review;
+                    checkbox
+                        .tooltip(Tooltip::text(if entry.viewed == FileViewedState::Viewed {
+                            "Mark as not viewed"
+                        } else {
+                            "Mark as viewed"
+                        }))
+                        .on_click(move |_, _, cx| {
+                            review
+                                .update(cx, |review, cx| review.toggle_viewed(file, cx))
+                                .ok();
+                        })
+                } else {
+                    checkbox.visualization_only(true)
+                })
             })
             .child(
                 div().flex_1().min_w_0().child(
@@ -321,12 +351,17 @@ impl Render for FileTreePanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors();
         let review = self.review();
-        let (summary, row_count) = match &review {
+        let (summary, row_count, viewed_error) = match &review {
             Some(review) => {
-                let tree = review.read(cx).file_tree();
-                (Some(tree.summary()), tree.rows().len())
+                let review = review.read(cx);
+                let tree = review.file_tree();
+                (
+                    Some(tree.summary()),
+                    tree.rows().len(),
+                    review.viewed_error().cloned(),
+                )
             }
-            None => (None, 0),
+            None => (None, 0, None),
         };
 
         v_flex()
@@ -356,6 +391,26 @@ impl Render for FileTreePanel {
                         )
                     }),
             )
+            .when_some(viewed_error, |this, error| {
+                this.child(
+                    h_flex()
+                        .px_3()
+                        .py_1()
+                        .gap_1()
+                        .border_b(tokens::BORDER_WIDTH)
+                        .border_color(colors.border_variant)
+                        .child(
+                            Icon::new(IconName::Warning)
+                                .size(IconSize::XSmall)
+                                .color(Color::Error),
+                        )
+                        .child(
+                            Label::new(error)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Error),
+                        ),
+                )
+            })
             .map(|this| {
                 if review.is_some() {
                     this.child(

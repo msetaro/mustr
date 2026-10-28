@@ -10,6 +10,8 @@ mod nav_panel;
 mod navigation;
 mod pull_request_review;
 mod status_bar;
+mod review_backend;
+mod review_drafts;
 mod t3_connection;
 mod themes;
 mod title_bar;
