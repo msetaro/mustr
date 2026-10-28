@@ -4,8 +4,10 @@
 //! Everything goes through T3's orchestration API behind [`ThreadBackend`], which the app sets
 //! with [`set_backend`]. Other parts of mustr drive threads through [`send_message`] (for
 //! example, the review's "Send to agent") and open them with [`open_thread`]. [`ThreadShells`]
-//! keeps T3's shell, every thread and project, for the whole app.
+//! keeps T3's shell, every thread and project, for the whole app. The parts of mustr that drive
+//! threads trigger each other through the actions in [`actions`], such as [`OpenThreadTerminal`].
 
+pub mod actions;
 pub mod backend;
 pub mod commands;
 mod composer;
@@ -22,6 +24,10 @@ mod timeline;
 #[cfg(test)]
 mod tests;
 
+pub use actions::{
+    NewThreadInWorktree, OpenInEditor, OpenThreadTerminal, RemoveThreadWorktree,
+    ReviewThreadChanges,
+};
 pub use backend::{
     Access, AttachmentUpload, GlobalThreadBackend, ReadOnlyBackend, ThreadBackend,
     ThreadBackendExt, backend, set_backend,

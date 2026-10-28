@@ -1453,3 +1453,57 @@ async fn a_read_only_backend_refuses_raw_writes_and_uploads(_cx: &mut TestAppCon
         );
     }
 }
+
+// Actions between packages.
+
+#[gpui::test]
+fn cross_package_actions_build_by_name(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        for (name, fields) in [
+            (
+                "thread_chat::OpenThreadTerminal",
+                json!({ "thread_id": THREAD }),
+            ),
+            (
+                "thread_chat::ReviewThreadChanges",
+                json!({ "thread_id": THREAD }),
+            ),
+            ("thread_chat::OpenInEditor", json!({ "thread_id": THREAD })),
+            (
+                "thread_chat::RemoveThreadWorktree",
+                json!({ "thread_id": THREAD }),
+            ),
+            (
+                "thread_chat::NewThreadInWorktree",
+                json!({
+                    "project_id": "project-1",
+                    "worktree_path": "/tmp/worktrees/retry-backoff",
+                    "branch": "t3/retry-backoff"
+                }),
+            ),
+            (
+                "thread_chat::NewThreadInWorktree",
+                json!({ "project_id": "project-1" }),
+            ),
+        ] {
+            let action = cx
+                .build_action(name, Some(fields))
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(action.name(), name);
+        }
+        let action = cx
+            .build_action(
+                "thread_chat::NewThreadInWorktree",
+                Some(json!({ "project_id": "project-1", "branch": "main" })),
+            )
+            .unwrap();
+        assert_eq!(
+            action.as_any().downcast_ref::<crate::NewThreadInWorktree>(),
+            Some(&crate::NewThreadInWorktree {
+                project_id: "project-1".into(),
+                worktree_path: None,
+                branch: Some("main".into()),
+            })
+        );
+    });
+}
