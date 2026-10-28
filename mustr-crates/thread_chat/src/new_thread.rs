@@ -28,7 +28,7 @@ use gpui::{
     ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window,
     div, px, rems,
 };
-use mustr_ui::{Card, SegmentedControl};
+use mustr_ui::{Card, SegmentedControl, tokens::scaled};
 use picker::{Picker, PickerDelegate};
 use std::sync::Arc;
 use t3_api::{
@@ -890,7 +890,7 @@ fn field(label: &'static str, control: impl IntoElement) -> impl IntoElement {
         .gap_3()
         .child(
             div()
-                .w(px(88.))
+                .w(scaled(px(88.)))
                 .flex_none()
                 .child(Label::new(label).size(LabelSize::Small).color(Color::Muted)),
         )
@@ -955,8 +955,8 @@ impl Render for NewThreadForm {
         let summary = self.summary();
         Card::new()
             .gap_3()
-            .px(px(14.))
-            .py(px(12.))
+            .px(scaled(px(14.)))
+            .py(scaled(px(12.)))
             .child(
                 v_flex()
                     .gap_0p5()

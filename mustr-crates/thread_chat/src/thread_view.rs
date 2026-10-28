@@ -23,7 +23,7 @@ use gpui::{
 };
 use language::LanguageRegistry;
 use markdown::Markdown;
-use mustr_ui::palette;
+use mustr_ui::{palette, tokens::scaled};
 use std::sync::Arc;
 use t3_api::types::OrchestrationV2SubscribeThreadInput;
 use ui::{Color, Label, LabelCommon as _, LabelSize, prelude::*};
@@ -465,7 +465,7 @@ impl Render for ThreadView {
                 .child(
                     div()
                         .w_full()
-                        .max_w(px(CONTENT_MAX_WIDTH))
+                        .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                         .child(form.clone()),
                 )
                 .into_any_element(),

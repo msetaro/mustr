@@ -24,7 +24,7 @@ use gpui::{
     Styled as _, Task, Window, img,
 };
 use image::{DynamicImage, ImageDecoder as _, ImageReader, imageops::FilterType};
-use mustr_ui::{palette, tokens};
+use mustr_ui::{palette, tokens, tokens::scaled};
 use std::{
     io::Cursor,
     path::{Path, PathBuf},
@@ -1012,14 +1012,14 @@ impl Render for ImagePreview {
                 img(self.image.clone())
                     .max_w(viewport.width * 0.92)
                     .max_h(viewport.height * 0.84)
-                    .rounded(tokens::CORNER_RADIUS),
+                    .rounded(scaled(tokens::CORNER_RADIUS)),
             )
             .child(
                 h_flex()
                     .gap_2()
                     .px_2()
                     .py_0p5()
-                    .rounded(tokens::CONTROL_RADIUS)
+                    .rounded(scaled(tokens::CONTROL_RADIUS))
                     .border(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
                     .bg(palette.surface.hsla())

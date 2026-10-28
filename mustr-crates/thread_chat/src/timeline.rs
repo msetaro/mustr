@@ -12,11 +12,13 @@ use crate::{
 use futures::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, FontWeight, Hsla, IntoElement, ObjectFit,
-    ParentElement as _, Pixels, SharedString, Styled as _, StyledImage as _, TextStyleRefinement,
+    ParentElement as _, Rems, SharedString, Styled as _, StyledImage as _, TextStyleRefinement,
     Window, div, img, px, relative,
 };
 use markdown::{Markdown, MarkdownElement, MarkdownStyle};
-use mustr_ui::{ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens};
+use mustr_ui::{
+    ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens, tokens::scaled,
+};
 use t3_api::{
     rpc,
     types::{OrchestrationV2GetTurnItemInput, OrchestrationV2SubscribeCommandOutputInput},
@@ -46,7 +48,7 @@ struct Thumbnail {
     key: AssetKey,
     name: SharedString,
     selector: String,
-    size: (Pixels, Pixels),
+    size: (Rems, Rems),
     fit: ObjectFit,
 }
 
@@ -457,15 +459,15 @@ fn work_label(item: &TimelineItem) -> String {
 fn avatar(letter: &str, background: Hsla) -> impl IntoElement {
     div()
         .flex_none()
-        .size(px(18.))
-        .mt(px(2.))
+        .size(scaled(px(18.)))
+        .mt(scaled(px(2.)))
         .rounded_full()
         .bg(background)
         .flex()
         .items_center()
         .justify_center()
         .text_color(gpui::white())
-        .text_size(px(9.5))
+        .text_size(tokens::text_size(px(9.5)))
         .font_weight(FontWeight::BOLD)
         .child(letter.to_string())
 }
@@ -527,8 +529,8 @@ impl ThreadView {
             .child(
                 div()
                     .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH))
-                    .py(px(6.))
+                    .max_w(scaled(px(CONTENT_MAX_WIDTH)))
+                    .py(scaled(px(6.)))
                     .debug_selector(|| selector)
                     .child(content),
             )
@@ -573,9 +575,9 @@ impl ThreadView {
                             .flex_1()
                             .min_w_0()
                             .gap_1p5()
-                            .px(px(10.))
-                            .py(px(6.))
-                            .rounded(tokens::CORNER_RADIUS)
+                            .px(scaled(px(10.)))
+                            .py(scaled(px(6.)))
+                            .rounded(scaled(tokens::CORNER_RADIUS))
                             .bg(palette.surface_2.hsla())
                             .when(!text.trim().is_empty(), |this| {
                                 this.child(self.render_markdown(&item.id, false, window, cx))
@@ -603,8 +605,8 @@ impl ThreadView {
                             .when(*streaming, |this| {
                                 this.child(
                                     div()
-                                        .w(px(6.))
-                                        .h(px(12.))
+                                        .w(scaled(px(6.)))
+                                        .h(scaled(px(12.)))
                                         .bg(palette.text.hsla())
                                         .opacity(0.7),
                                 )
@@ -756,7 +758,7 @@ impl ThreadView {
                             div()
                                 .px_2()
                                 .py_1()
-                                .rounded(tokens::CONTROL_RADIUS)
+                                .rounded(scaled(tokens::CONTROL_RADIUS))
                                 .bg(palette.background.hsla())
                                 .child(Label::new(prompt).size(LabelSize::Small).buffer_font(cx)),
                         )
@@ -915,7 +917,7 @@ impl ThreadView {
                             .min_w_0()
                             .px_2()
                             .py_1()
-                            .rounded(tokens::CONTROL_RADIUS)
+                            .rounded(scaled(tokens::CONTROL_RADIUS))
                             .border(tokens::BORDER_WIDTH)
                             .border_color(palette.border.hsla())
                             .bg(palette.background.hsla())
@@ -1077,7 +1079,7 @@ impl ThreadView {
         h_flex()
             .flex_wrap()
             .gap_2()
-            .max_w(px(MESSAGE_IMAGE_WIDTH * 2. + 8.))
+            .max_w(scaled(px(MESSAGE_IMAGE_WIDTH * 2. + 8.)))
             .children(images.iter().enumerate().map(|(index, image)| {
                 let key = AssetKey::Attachment {
                     attachment_id: image.attachment_id.clone(),
@@ -1088,7 +1090,10 @@ impl ThreadView {
                         key,
                         name: image.name.clone().into(),
                         selector: format!("thread-message-image-{item_id}-{index}"),
-                        size: (px(MESSAGE_IMAGE_WIDTH), px(MESSAGE_IMAGE_HEIGHT)),
+                        size: (
+                            scaled(px(MESSAGE_IMAGE_WIDTH)),
+                            scaled(px(MESSAGE_IMAGE_HEIGHT)),
+                        ),
                         fit: ObjectFit::Cover,
                     },
                     cx,
@@ -1115,7 +1120,7 @@ impl ThreadView {
             .flex_none()
             .w(width)
             .h(height)
-            .rounded(tokens::CONTROL_RADIUS)
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .overflow_hidden()
             .border(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
@@ -1217,7 +1222,7 @@ impl ThreadView {
         let body = if expanded {
             v_flex()
                 .gap_0p5()
-                .pl(px(14.))
+                .pl(scaled(px(14.)))
                 .children(
                     items
                         .iter()
@@ -1232,12 +1237,12 @@ impl ThreadView {
             let hidden = chips.len().saturating_sub(COLLAPSED_CHIPS);
             h_flex()
                 .flex_wrap()
-                .gap(px(6.))
-                .pl(px(14.))
+                .gap(scaled(px(6.)))
+                .pl(scaled(px(14.)))
                 .children(chips.iter().take(COLLAPSED_CHIPS).map(|item| {
                     div()
-                        .px(px(7.))
-                        .py(px(1.))
+                        .px(scaled(px(7.)))
+                        .py(scaled(px(1.)))
                         .rounded_full()
                         .border_1()
                         .border_dashed()
@@ -1319,7 +1324,10 @@ impl ThreadView {
                                     },
                                     name: format!("Screenshot {}", index + 1).into(),
                                     selector: format!("thread-tool-image-{item_id}-{index}"),
-                                    size: (px(TOOL_IMAGE_WIDTH), px(TOOL_IMAGE_HEIGHT)),
+                                    size: (
+                                        scaled(px(TOOL_IMAGE_WIDTH)),
+                                        scaled(px(TOOL_IMAGE_HEIGHT)),
+                                    ),
                                     fit: ObjectFit::Contain,
                                 },
                                 cx,
@@ -1328,13 +1336,13 @@ impl ThreadView {
                         .collect::<Vec<_>>();
                     Some(
                         v_flex()
-                            .ml(px(20.))
+                            .ml(scaled(px(20.)))
                             .gap_1()
                             .child(
                                 div()
                                     .px_2()
                                     .py_1()
-                                    .rounded(tokens::CONTROL_RADIUS)
+                                    .rounded(scaled(tokens::CONTROL_RADIUS))
                                     .bg(palette.background.hsla())
                                     .border_1()
                                     .border_color(palette.border.hsla())
@@ -1357,7 +1365,7 @@ impl ThreadView {
                 }
                 ItemKind::FileChange { changes, diff, .. } => Some(
                     v_flex()
-                        .ml(px(20.))
+                        .ml(scaled(px(20.)))
                         .gap_0p5()
                         .children(changes.iter().map(|change| {
                             Label::new(format!("{} {}", change.operation, change.path))
@@ -1370,7 +1378,7 @@ impl ThreadView {
                                 div()
                                     .px_2()
                                     .py_1()
-                                    .rounded(tokens::CONTROL_RADIUS)
+                                    .rounded(scaled(tokens::CONTROL_RADIUS))
                                     .bg(palette.background.hsla())
                                     .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
                                     .font_buffer(cx)
@@ -1381,7 +1389,7 @@ impl ThreadView {
                 ),
                 ItemKind::Reasoning { .. } => Some(
                     div()
-                        .ml(px(20.))
+                        .ml(scaled(px(20.)))
                         .child(self.render_markdown(&item.id, true, window, cx))
                         .into_any_element(),
                 ),

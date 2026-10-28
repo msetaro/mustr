@@ -11,7 +11,7 @@ use gpui::{
     AnyElement, App, Context, FontWeight, Hsla, IntoElement, ParentElement as _, Styled as _,
     WeakEntity, px,
 };
-use mustr_ui::{Pill, palette, tokens};
+use mustr_ui::{Pill, palette, tokens, tokens::scaled};
 use ui::{
     Color, ContextMenu, ContextMenuEntry, IconButton, IconName, IconSize, Label, LabelCommon as _,
     LabelSize, PopoverMenu, Tooltip, prelude::*,
@@ -38,7 +38,7 @@ impl ThreadView {
                     .w_full()
                     .gap_3()
                     .px_4()
-                    .py(px(8.))
+                    .py(scaled(px(8.)))
                     .border_b(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
                     .bg(palette.surface.hsla())
@@ -245,7 +245,7 @@ fn render_usage(usage: ContextUsage, cx: &App) -> impl IntoElement {
                 } else {
                     palette.accent.hsla()
                 },
-                px(96.),
+                scaled(px(96.)),
                 cx,
             ))
         })

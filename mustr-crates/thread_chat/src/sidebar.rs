@@ -24,7 +24,7 @@ use gpui::{
     MouseDownEvent, ParentElement as _, Pixels, Point, Render, SharedString, Styled as _,
     Subscription, Task, WeakEntity, Window, actions, anchored, deferred, div, list, px,
 };
-use mustr_ui::{Chip, Pill, palette, tokens};
+use mustr_ui::{Chip, Pill, palette, tokens, tokens::scaled};
 use std::{cmp::Reverse, time::Duration};
 use t3_api::types::{
     OrchestrationV2AppThreadLineageRelationshipToParent, OrchestrationV2ThreadShell,
@@ -944,7 +944,7 @@ impl ThreadsSidebar {
         h_flex()
             .id(SharedString::from(format!("section-{}", section.label())))
             .w_full()
-            .h(px(26.))
+            .h(scaled(px(26.)))
             .px_2()
             .pt_1()
             .gap_1()
@@ -1015,10 +1015,10 @@ impl ThreadsSidebar {
             .id(("thread", index))
             .group(group.clone())
             .w_full()
-            .h(ROW_HEIGHT)
+            .h(scaled(ROW_HEIGHT))
             .px_2()
             .py_1()
-            .rounded(tokens::CONTROL_RADIUS)
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .cursor_pointer()
             .when(active, |this| this.bg(palette.accent_soft.hsla()))
             .hover(|style| style.bg(palette.surface_2.hsla()))
@@ -1080,7 +1080,7 @@ impl ThreadsSidebar {
                     .child(
                         h_flex()
                             .gap_1p5()
-                            .pl(px(12.))
+                            .pl(scaled(px(12.)))
                             .child(
                                 div().flex_1().min_w_0().child(
                                     Label::new(details)
@@ -1234,7 +1234,7 @@ impl Render for ThreadsSidebar {
                     .gap_1()
                     .pl_3()
                     .pr_2()
-                    .py(px(6.))
+                    .py(scaled(px(6.)))
                     .child(
                         Label::new("Agent threads")
                             .size(LabelSize::Small)
@@ -1274,7 +1274,7 @@ impl Render for ThreadsSidebar {
                     .px_2()
                     .py_1()
                     .gap_1p5()
-                    .rounded(tokens::CONTROL_RADIUS)
+                    .rounded(scaled(tokens::CONTROL_RADIUS))
                     .border(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
                     .bg(palette.background.hsla())

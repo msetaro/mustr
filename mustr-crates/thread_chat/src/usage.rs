@@ -22,9 +22,10 @@ use anyhow::Result;
 use futures::StreamExt as _;
 use gpui::{
     AnyElement, App, AppContext as _, AsyncApp, Context, Entity, FontWeight, Global, Hsla,
-    IntoElement, ParentElement as _, Styled as _, Task, WeakEntity, actions, div, px, relative,
+    IntoElement, ParentElement as _, Rems, Styled as _, Task, WeakEntity, actions, div, px,
+    relative,
 };
-use mustr_ui::{ButtonStyle, Card, TextButton, palette, tokens};
+use mustr_ui::{ButtonStyle, Card, TextButton, palette, tokens, tokens::scaled};
 use std::sync::Arc;
 use t3_api::{
     rpc,
@@ -741,7 +742,7 @@ impl ThreadView {
                 .child(
                     v_flex()
                         .w_full()
-                        .max_w(px(crate::thread_view::CONTENT_MAX_WIDTH))
+                        .max_w(scaled(px(crate::thread_view::CONTENT_MAX_WIDTH)))
                         .gap_1p5()
                         .children(banners),
                 )
@@ -993,7 +994,7 @@ impl ThreadView {
                         .gap_3()
                         .child(
                             div()
-                                .w(px(120.))
+                                .w(scaled(px(120.)))
                                 .flex_none()
                                 .child(Label::new(window.label).size(LabelSize::Small).truncate()),
                         )
@@ -1004,7 +1005,7 @@ impl ThreadView {
                             } else {
                                 palette.accent.hsla()
                             },
-                            px(160.),
+                            scaled(px(160.)),
                             cx,
                         ))
                         .child(
@@ -1068,7 +1069,7 @@ impl ThreadView {
                             } else {
                                 palette.text_muted.hsla()
                             },
-                            px(48.),
+                            scaled(px(48.)),
                             cx,
                         ))
                 }))
@@ -1081,7 +1082,7 @@ impl ThreadView {
                 .flex_none()
                 .px_1p5()
                 .py_0p5()
-                .rounded(tokens::CONTROL_RADIUS)
+                .rounded(scaled(tokens::CONTROL_RADIUS))
                 .cursor_pointer()
                 .when(open, |this| this.bg(palette.surface_2.hsla()))
                 .hover(|this| this.bg(palette.surface_2.hsla()))
@@ -1108,16 +1109,11 @@ fn short_window_label(label: &str) -> String {
 }
 
 /// A thin bar filled to `fraction`, like the context meter's.
-pub(crate) fn meter_bar(
-    fraction: f32,
-    color: Hsla,
-    width: gpui::Pixels,
-    cx: &App,
-) -> impl IntoElement {
+pub(crate) fn meter_bar(fraction: f32, color: Hsla, width: Rems, cx: &App) -> impl IntoElement {
     let palette = palette(cx);
     div()
         .w(width)
-        .h(px(3.))
+        .h(scaled(px(3.)))
         .flex_none()
         .rounded_full()
         .bg(palette.surface_2.hsla())
@@ -1146,7 +1142,9 @@ impl IntoSelected for AnyElement {
 
 /// A banner's card: tinted by `color`, as the timeline's warning cards are.
 fn banner_card(color: Hsla) -> Card {
-    Card::new().py(px(6.)).border_color(color.opacity(0.55))
+    Card::new()
+        .py(scaled(px(6.)))
+        .border_color(color.opacity(0.55))
 }
 
 // The palette's action, on the thread the workspace shows.
