@@ -2,23 +2,29 @@ use crate::{
     agent_review::{AgentReviewTarget, open_agent_review},
     agent_review_store::{ReviewedMarks, agent_reviews_dir},
     agent_threads::{AgentThread, agent_threads, agent_work_candidates},
-    inbox::{self, PullRequestEntry, PullRequestList, ThreadRow, ThreadStatus},
+    inbox::{self, ProjectRow, PullRequestEntry, PullRequestList, ThreadRow, ThreadStatus},
     nav_panel::NavPanel,
     pull_request_review,
     review_backend::{self, DryRunRpc, T3ReviewBackend},
     review_drafts::{self, DraftStore},
-    t3_connection::{self, ConnectionStatus, T3Connection, T3Session},
+    t3_connection::{self, ConnectionStatus, EngineKind, EngineSetup, T3Connection, T3Session},
+    t3_engine::T3Mode,
     worktree_git::LocalGit,
 };
 use anyhow::{Context as _, anyhow};
 use editor::Editor;
 use futures::StreamExt as _;
 use gpui::{
-    App, Entity, EventEmitter, FocusHandle, Focusable, Global, Subscription, Task, WeakEntity,
+    App, Entity, EventEmitter, FocusHandle, Focusable, Global, PathPromptOptions, Subscription,
+    Task, WeakEntity,
 };
 use mustr_ui::{MustrIcon, Pill, SegmentedControl, tokens};
 use review::{ReviewContents, ReviewHeader, ReviewScope, ReviewView};
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+use t3_client::t3_api::{rpc, tagged, types};
 use ui::{Button, ButtonStyle, DiffStat, Divider, Indicator, prelude::*};
 use workspace::{
     Toast, Workspace,
@@ -36,6 +42,8 @@ const CONTENT_MAX_WIDTH: f32 = 880.;
 /// Startup options that change what the home view does on its own.
 #[derive(Clone, Debug, Default)]
 pub struct HomeOptions {
+    /// Adds this folder as a project once connected. For smoke tests.
+    pub add_project: Option<PathBuf>,
     /// Opens the first open pull request once the list loads. For smoke tests.
     pub open_first_pull_request: bool,
     /// Opens a review of this agent thread once the threads load. For smoke tests.
@@ -97,6 +105,7 @@ pub struct AgentWork {
 
 /// What the shell snapshot gives the home view.
 struct ThreadLists {
+    projects: Vec<ProjectRow>,
     all: Vec<AgentThread>,
     recent: Vec<ThreadRow>,
     work: Vec<AgentWork>,
@@ -115,6 +124,12 @@ pub struct HomeView {
     pull_requests: Loadable<PullRequestList>,
     threads: Loadable<Vec<ThreadRow>>,
     agent_work: Loadable<Vec<AgentWork>>,
+    projects: Loadable<Vec<ProjectRow>>,
+    adding_project: Option<Task<()>>,
+    project_error: Option<SharedString>,
+    add_project_on_load: Option<PathBuf>,
+    /// Why no agent can run yet (from T3's provider status), if none can.
+    agents_notice: Option<SharedString>,
     /// Every thread of the last shell snapshot, for opening one by id.
     all_threads: Vec<AgentThread>,
     filter: InboxFilter,
@@ -153,6 +168,11 @@ impl HomeView {
             pull_requests: Loadable::NotLoaded,
             threads: Loadable::NotLoaded,
             agent_work: Loadable::NotLoaded,
+            projects: Loadable::NotLoaded,
+            adding_project: None,
+            project_error: None,
+            add_project_on_load: options.add_project,
+            agents_notice: None,
             all_threads: Vec::new(),
             filter: InboxFilter::default(),
             opening: None,
@@ -182,7 +202,37 @@ impl HomeView {
         self.pull_requests = Loadable::Loading;
         self.threads = Loadable::Loading;
         self.agent_work = Loadable::Loading;
+        self.projects = Loadable::Loading;
+        self.agents_notice = None;
         self.opening = None;
+
+        let agents = cx.spawn_in(window, {
+            let session = session.clone();
+            async move |this, cx| {
+                let result = cx
+                    .background_spawn(async move {
+                        // Refreshing runs T3's provider checks; right after the engine starts,
+                        // its config says every provider is unchecked.
+                        session
+                            .rpc()
+                            .call::<rpc::ServerRefreshProviders>(Default::default())
+                            .await
+                            .map(|update| update.providers)
+                            .map_err(|error| anyhow!(error.to_string()))
+                    })
+                    .await;
+                this.update(cx, |this, cx| {
+                    match result {
+                        Ok(providers) => {
+                            this.agents_notice = agents_notice(&providers).map(Into::into)
+                        }
+                        Err(error) => log::warn!("couldn't check T3's agents: {error:#}"),
+                    }
+                    cx.notify();
+                })
+                .ok();
+            }
+        });
 
         let pull_requests = cx.spawn_in(window, {
             let session = session.clone();
@@ -218,6 +268,7 @@ impl HomeView {
             this.update_in(cx, |this, window, cx| {
                 match result {
                     Ok(lists) => {
+                        this.projects = Loadable::Loaded(lists.projects);
                         this.threads = Loadable::Loaded(lists.recent);
                         this.agent_work = Loadable::Loaded(lists.work);
                         this.all_threads = lists.all;
@@ -225,9 +276,13 @@ impl HomeView {
                     Err(error) => {
                         log::error!("couldn't load agent threads: {error:#}");
                         let error: SharedString = format!("{error:#}").into();
+                        this.projects = Loadable::Failed(error.clone());
                         this.threads = Loadable::Failed(error.clone());
                         this.agent_work = Loadable::Failed(error);
                     }
+                }
+                if let Some(path) = this.add_project_on_load.take() {
+                    this.add_project(path, window, cx);
                 }
                 if let Some((thread_id, scope)) = this.review_thread.take() {
                     match this
@@ -246,7 +301,7 @@ impl HomeView {
             .ok();
         });
 
-        self._load_tasks = vec![pull_requests, threads];
+        self._load_tasks = vec![pull_requests, threads, agents];
     }
 
     fn open_pull_request(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -446,32 +501,110 @@ impl HomeView {
             .server_url()
             .map(|url| url.as_str().trim_end_matches('/').to_string())
             .unwrap_or_default();
+        let mode = connection.effective_mode();
+        let pinned = t3_client::pinned_server_version();
         let (color, title, detail): (Color, SharedString, Option<SharedString>) =
             match connection.status() {
                 ConnectionStatus::Connected {
                     environment,
                     server_version,
-                } => (
-                    Color::Success,
-                    format!("Connected to {environment}").into(),
-                    Some(match server_version {
-                        Some(version) => format!("T3 Code {version} at {server}").into(),
-                        None => format!("T3 Code at {server}").into(),
-                    }),
-                ),
-                ConnectionStatus::Connecting(step) => (
-                    Color::Muted,
-                    "Connecting to T3 Code…".into(),
-                    Some(format!("{step} · {server}").into()),
-                ),
+                    engine,
+                } => {
+                    let version = server_version.as_ref().map_or_else(
+                        || "T3 Code".to_string(),
+                        |version| format!("T3 Code {version}"),
+                    );
+                    match engine {
+                        EngineKind::Embedded => (
+                            Color::Success,
+                            "Agents engine running".into(),
+                            Some(format!("mustr's own engine · {version} · {server}").into()),
+                        ),
+                        EngineKind::Installed => (
+                            Color::Success,
+                            format!("Connected to T3 Code on {environment}").into(),
+                            Some(format!("{version} at {server}").into()),
+                        ),
+                        EngineKind::External => (
+                            Color::Success,
+                            format!("Connected to {environment}").into(),
+                            Some(format!("{version} at {server}").into()),
+                        ),
+                    }
+                }
+                ConnectionStatus::Connecting(step) => match mode {
+                    T3Mode::Embedded => (
+                        Color::Muted,
+                        "Starting agents engine…".into(),
+                        Some(step.clone()),
+                    ),
+                    T3Mode::Installed => (
+                        Color::Muted,
+                        "Connecting to T3 Code…".into(),
+                        Some(step.clone()),
+                    ),
+                    T3Mode::External => (
+                        Color::Muted,
+                        "Connecting to T3 Code…".into(),
+                        Some(format!("{step} · {server}").into()),
+                    ),
+                },
                 ConnectionStatus::NeedsPairing(reason) => (
                     Color::Warning,
                     "Pair mustr with T3 Code".into(),
                     Some(reason.clone()),
                 ),
+                ConnectionStatus::NeedsSetup(EngineSetup::NotInstalled { unsupported: None }) => (
+                    Color::Warning,
+                    "Set up the agents engine".into(),
+                    Some(
+                        format!(
+                            "mustr runs agents on T3 Code's engine, which isn't on this computer \
+                             yet. mustr can install T3 Code {pinned} (about 100 MB) the way T3 \
+                             Code's own installer does, and run it in the background."
+                        )
+                        .into(),
+                    ),
+                ),
+                ConnectionStatus::NeedsSetup(EngineSetup::NotInstalled {
+                    unsupported: Some(reason),
+                }) => (
+                    Color::Error,
+                    "The agents engine isn't available here".into(),
+                    Some(reason.clone()),
+                ),
+                ConnectionStatus::NeedsSetup(EngineSetup::NotRunning { service_supported }) => (
+                    Color::Warning,
+                    "T3 Code isn't running".into(),
+                    Some(if *service_supported {
+                        "T3 Code is installed, but nothing is running it. mustr can set it up to \
+                         run in the background (t3 service install)."
+                            .into()
+                    } else {
+                        "T3 Code is installed, but it isn't running, and it has no background \
+                         service on this platform. Start it with `t3`, or use mustr's own engine."
+                            .into()
+                    }),
+                ),
+                ConnectionStatus::NeedsSetup(EngineSetup::Incompatible {
+                    message,
+                    can_update,
+                }) => (
+                    Color::Warning,
+                    "This T3 Code doesn't work with this mustr".into(),
+                    Some(if *can_update {
+                        format!("{message} Updating it to {pinned} (t3 update) fixes this.").into()
+                    } else {
+                        message.clone()
+                    }),
+                ),
                 ConnectionStatus::Failed(error) => (
                     Color::Error,
-                    "Couldn't connect to T3 Code".into(),
+                    if mode == T3Mode::Embedded {
+                        "The agents engine stopped".into()
+                    } else {
+                        "Couldn't connect to T3 Code".into()
+                    },
                     Some(error.clone()),
                 ),
             };
@@ -482,13 +615,63 @@ impl HomeView {
             .and_then(|session| session.write_blocked_reason());
         let needs_pairing =
             matches!(connection.status(), ConnectionStatus::NeedsPairing(_)) || read_only.is_some();
-        let can_retry = !matches!(connection.status(), ConnectionStatus::Connecting(_))
-            && connection.server_url().is_some();
-        let retry_label = if connection.status().is_connected() {
+        let status = connection.status();
+        let can_retry = !matches!(status, ConnectionStatus::Connecting(_))
+            && !matches!(
+                status,
+                ConnectionStatus::NeedsSetup(EngineSetup::NotInstalled { unsupported: None })
+            );
+        let retry_label = if status.is_connected() {
             "Reconnect"
         } else {
             "Try again"
         };
+        let primary: Option<(
+            &'static str,
+            &'static str,
+            fn(&mut T3Connection, &mut Context<T3Connection>),
+        )> = match status {
+            ConnectionStatus::NeedsSetup(EngineSetup::NotInstalled { unsupported: None }) => {
+                Some((
+                    "install-engine",
+                    "Install the agents engine",
+                    T3Connection::install_engine,
+                ))
+            }
+            ConnectionStatus::NeedsSetup(EngineSetup::NotRunning {
+                service_supported: true,
+            }) => Some((
+                "run-in-background",
+                "Run T3 Code in the background",
+                T3Connection::run_in_background,
+            )),
+            ConnectionStatus::NeedsSetup(EngineSetup::Incompatible {
+                can_update: true, ..
+            }) => Some((
+                "update-t3",
+                "Update T3 Code",
+                T3Connection::update_installed,
+            )),
+            _ => None,
+        };
+        // The installed T3 Code can't be used right now: mustr's own engine still can.
+        let offer_embedded = connection.mode() == T3Mode::Installed
+            && !connection.is_fallback()
+            && matches!(
+                status,
+                ConnectionStatus::NeedsSetup(_)
+                    | ConnectionStatus::Failed(_)
+                    | ConnectionStatus::NeedsPairing(_)
+            );
+        let fallback_note = connection.is_fallback().then_some(
+            "Using mustr's own engine for this session, because your T3 Code couldn't be used. \
+             Your T3 Code's projects and threads aren't shown here.",
+        );
+        let log_note = matches!(status, ConnectionStatus::Failed(_))
+            .then(|| connection.engine_log_file(cx))
+            .flatten()
+            .filter(|_| mode == T3Mode::Embedded)
+            .map(|log| format!("The engine's log is {}.", log.display()));
 
         card(cx)
             .gap_2()
@@ -514,6 +697,40 @@ impl HomeView {
                         .color(Color::Muted),
                 )
             })
+            .when_some(log_note, |this, note| {
+                this.child(Label::new(note).size(LabelSize::Small).color(Color::Muted))
+            })
+            .when_some(fallback_note, |this, note| {
+                this.child(
+                    Label::new(note)
+                        .size(LabelSize::Small)
+                        .color(Color::Warning),
+                )
+            })
+            .when(primary.is_some() || offer_embedded, |this| {
+                this.child(
+                    h_flex()
+                        .gap_2()
+                        .when_some(primary, |this, (id, label, action)| {
+                            this.child(Button::new(id, label).style(ButtonStyle::Filled).on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    this.connection.update(cx, action)
+                                }),
+                            ))
+                        })
+                        .when(offer_embedded, |this| {
+                            this.child(
+                                Button::new("use-embedded", "Use mustr's own engine")
+                                    .style(ButtonStyle::Subtle)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.connection.update(cx, |connection, cx| {
+                                            connection.use_embedded(cx)
+                                        })
+                                    })),
+                            )
+                        }),
+                )
+            })
             .when_some(read_only, |this, read_only| {
                 this.child(
                     Label::new(read_only)
@@ -522,6 +739,200 @@ impl HomeView {
                 )
             })
             .when(needs_pairing, |this| this.child(self.render_pairing(cx)))
+    }
+
+    fn choose_project_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Add project".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let chosen = match paths.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                Ok(Ok(None)) | Err(_) => None,
+                Ok(Err(error)) => {
+                    this.update(cx, |this, cx| {
+                        this.project_error =
+                            Some(format!("Couldn't open a folder picker: {error:#}").into());
+                        cx.notify();
+                    })
+                    .ok();
+                    None
+                }
+            };
+            if let Some(path) = chosen {
+                this.update_in(cx, |this, window, cx| this.add_project(path, window, cx))
+                    .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// Adds a local folder as a T3 project (`projects.mutate` with `project.create`), then
+    /// reloads the lists.
+    fn add_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.project_error = None;
+        let Some(session) = self.connection.read(cx).session() else {
+            self.project_error = Some("mustr isn't connected to an agents engine".into());
+            cx.notify();
+            return;
+        };
+        // The embedded engine is mustr's own, so the dry-run switch (which protects the user's
+        // real T3 Code) doesn't block projects there.
+        if review_backend::dry_run_requested() && session.kind() != EngineKind::Embedded {
+            self.project_error = Some(
+                format!(
+                    "{} is set, so mustr didn't add {}",
+                    review_backend::DRY_RUN_ENV,
+                    path.display()
+                )
+                .into(),
+            );
+            cx.notify();
+            return;
+        }
+        if let Some(reason) = session.operate_blocked_reason() {
+            self.project_error = Some(reason.into());
+            cx.notify();
+            return;
+        }
+        let existing = match &self.projects {
+            Loadable::Loaded(projects) => projects.clone(),
+            _ => Vec::new(),
+        };
+        self.adding_project = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_spawn({
+                    let session = session.clone();
+                    async move { create_project(&session, &path, &existing).await }
+                })
+                .await;
+            this.update_in(cx, |this, window, cx| {
+                this.adding_project = None;
+                match result {
+                    Ok(title) => {
+                        log::info!("added the project {title}");
+                        if let Some(session) = this.connection.read(cx).session() {
+                            this.load(session, window, cx);
+                        }
+                    }
+                    Err(error) => {
+                        log::error!("couldn't add the project: {error:#}");
+                        this.project_error = Some(format!("{error:#}").into());
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    fn render_projects(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let adding = self.adding_project.is_some();
+        let can_add = self.connection.read(cx).session().is_some() && !adding;
+        let mut body = v_flex();
+        match &self.projects {
+            Loadable::NotLoaded => {}
+            Loadable::Loading => body = body.child(muted_line("Loading projects…")),
+            Loadable::Failed(error) => body = body.child(error_line(error.clone())),
+            Loadable::Loaded(projects) if projects.is_empty() => {
+                body = body.child(muted_line(
+                    "No projects yet. Add a folder on this computer, such as a git repository, to \
+                     start agent threads in it.",
+                ))
+            }
+            Loadable::Loaded(projects) => {
+                body = body.children(projects.iter().map(|project| {
+                    h_flex()
+                        .w_full()
+                        .gap_3()
+                        .px_2()
+                        .py_1p5()
+                        .child(
+                            Icon::new(IconName::Folder)
+                                .size(IconSize::Small)
+                                .color(Color::Muted),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .child(Label::new(project.title.clone()).truncate())
+                                .when_some(project.workspace_root.clone(), |this, root| {
+                                    this.child(
+                                        Label::new(root)
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted)
+                                            .truncate(),
+                                    )
+                                }),
+                        )
+                }))
+            }
+        }
+        let count = match &self.projects {
+            Loadable::Loaded(projects) => Some(projects.len()),
+            _ => None,
+        };
+        card(cx)
+            .gap_1()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .px_2()
+                    .pb_1()
+                    .child(Label::new("Projects").weight(gpui::FontWeight::SEMIBOLD))
+                    .when_some(count, |this, count| {
+                        this.child(
+                            Label::new(count.to_string())
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        )
+                    })
+                    .child(div().flex_1())
+                    .child(
+                        Button::new(
+                            "add-project",
+                            if adding {
+                                "Adding…"
+                            } else {
+                                "Add project…"
+                            },
+                        )
+                        .style(ButtonStyle::Subtle)
+                        .label_size(LabelSize::Small)
+                        .disabled(!can_add)
+                        .on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.choose_project_folder(window, cx)
+                            }),
+                        ),
+                    ),
+            )
+            .child(Divider::horizontal())
+            .child(body)
+            .when_some(self.project_error.clone(), |this, error| {
+                this.child(error_line(error))
+            })
+    }
+
+    fn render_agents_notice(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let notice = self.agents_notice.clone()?;
+        Some(
+            card(cx).child(
+                h_flex()
+                    .gap_2()
+                    .child(Indicator::dot().color(Color::Warning))
+                    .child(
+                        Label::new(notice)
+                            .size(LabelSize::Small)
+                            .color(Color::Muted),
+                    ),
+            ),
+        )
     }
 
     fn render_pairing(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -880,6 +1291,7 @@ impl HomeView {
 /// whose worktree is gone from a T3 on this machine has nothing left to diff.
 async fn load_threads(session: &T3Session) -> anyhow::Result<ThreadLists> {
     let snapshot = session.shell_snapshot().await?;
+    let projects = inbox::projects(&snapshot);
     let all = agent_threads(&snapshot);
     let recent = inbox::recent_threads(&snapshot, RECENT_THREADS);
     let reviewed = ReviewedMarks::new(&agent_reviews_dir()).load();
@@ -927,7 +1339,114 @@ async fn load_threads(session: &T3Session) -> anyhow::Result<ThreadLists> {
     .filter_map(futures::future::ready)
     .collect::<Vec<_>>()
     .await;
-    Ok(ThreadLists { all, recent, work })
+    Ok(ThreadLists {
+        projects,
+        all,
+        recent,
+        work,
+    })
+}
+
+/// Asks T3 to make `path` a project, as T3's "Add project" does (`buildProjectCreateCommand`
+/// in T3's client runtime). Returns the project's title.
+async fn create_project(
+    session: &T3Session,
+    path: &Path,
+    existing: &[ProjectRow],
+) -> anyhow::Result<String> {
+    let path = path
+        .canonicalize()
+        .with_context(|| format!("{} isn't a folder mustr can read", path.display()))?;
+    if !path.is_dir() {
+        return Err(anyhow!("{} isn't a folder", path.display()));
+    }
+    let workspace_root = path
+        .to_str()
+        .with_context(|| format!("{} isn't a valid UTF-8 path", path.display()))?
+        .to_string();
+    if let Some(project) = existing
+        .iter()
+        .find(|project| project.workspace_root.as_deref() == Some(workspace_root.as_str()))
+    {
+        return Err(anyhow!(
+            "{workspace_root} is already the project {}",
+            project.title
+        ));
+    }
+    let title = path.file_name().map_or_else(
+        || workspace_root.clone(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let mutation = project_create_mutation(&workspace_root, &title);
+    let project = session
+        .rpc()
+        .call::<rpc::ProjectsMutate>(mutation)
+        .await
+        .map_err(|error| anyhow!(error.error_detail().unwrap_or_else(|| error.to_string())))
+        .with_context(|| format!("adding {workspace_root}"))?;
+    Ok(project.title)
+}
+
+fn project_create_mutation(workspace_root: &str, title: &str) -> tagged::ProjectMutation {
+    tagged::ProjectMutation::ProjectCreate(types::ProjectMutationProjectCreate {
+        command_id: uuid::Uuid::new_v4().to_string(),
+        project_id: uuid::Uuid::new_v4().to_string(),
+        title: title.to_string(),
+        workspace_root: workspace_root.to_string(),
+        // The folder was picked, so it exists; never create one.
+        create_workspace_root_if_missing: Some(false),
+        default_model_selection: None,
+        scripts: None,
+        type_: types::ProjectMutationProjectCreateType::ProjectCreate,
+    })
+}
+
+/// Why no agent can run yet, from T3's provider status, or `None` when one can. Agents are the
+/// coding CLIs T3 drives (Claude Code, Codex, …), each installed and signed in on its own.
+fn agents_notice(providers: &[types::ServerProvider]) -> Option<String> {
+    use types::{ServerProviderAuthStatus, ServerProviderState};
+    let enabled = providers
+        .iter()
+        .filter(|provider| provider.enabled)
+        .collect::<Vec<_>>();
+    if enabled.is_empty() {
+        return Some("No agents are turned on in T3 Code's settings.".to_string());
+    }
+    let usable = |provider: &types::ServerProvider| {
+        provider.installed
+            && matches!(
+                provider.status,
+                ServerProviderState::Ready | ServerProviderState::Warning
+            )
+            && provider.auth.status != ServerProviderAuthStatus::Unauthenticated
+    };
+    if enabled.iter().any(|provider| usable(provider)) {
+        return None;
+    }
+    let problems = enabled
+        .iter()
+        .map(|provider| {
+            let name = provider
+                .display_name
+                .clone()
+                .unwrap_or_else(|| provider.driver.clone());
+            if !provider.installed {
+                format!("{name} isn't installed")
+            } else if provider.auth.status == ServerProviderAuthStatus::Unauthenticated {
+                format!("{name} isn't signed in")
+            } else {
+                match provider.message.as_deref() {
+                    Some(message) => format!("{name}: {}", message.trim_end_matches('.')),
+                    None => format!("{name} isn't ready"),
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    Some(format!(
+        "No agent can run yet: {}. Install an agent's CLI on this computer and sign in to it, \
+         then choose Reconnect.",
+        problems.join("; ")
+    ))
 }
 
 fn status_color(status: &ThreadStatus) -> Color {
@@ -1104,14 +1623,107 @@ impl Render for HomeView {
                                     ),
                             )
                             .child(self.render_connection(cx))
+                            .when(show_lists, |this| {
+                                this.children(self.render_agents_notice(cx))
+                            })
                             .when_some(self.open_error.clone(), |this, error| {
                                 this.child(card(cx).child(error_line(error)))
                             })
                             .when(show_lists, |this| {
                                 this.child(self.render_inbox(cx))
+                                    .child(self.render_projects(cx))
                                     .child(self.render_threads(cx))
                             }),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn adding_a_project_sends_t3s_project_create() {
+        let mutation = project_create_mutation("/src/hello", "hello");
+        let mut payload = serde_json::to_value(&mutation).unwrap();
+        // Fresh ids each time.
+        for id in ["commandId", "projectId"] {
+            let value = payload[id].take();
+            assert!(
+                uuid::Uuid::parse_str(value.as_str().unwrap()).is_ok(),
+                "{id}: {value}"
+            );
+        }
+        assert_eq!(
+            payload,
+            json!({
+                "type": "project.create",
+                "commandId": null,
+                "projectId": null,
+                "title": "hello",
+                "workspaceRoot": "/src/hello",
+                "createWorkspaceRootIfMissing": false,
+            })
+        );
+    }
+
+    fn provider(driver: &str, value: serde_json::Value) -> types::ServerProvider {
+        let mut provider = json!({
+            "auth": { "status": "unknown" },
+            "checkedAt": "2026-10-28T00:00:00Z",
+            "driver": driver,
+            "enabled": true,
+            "installed": true,
+            "instanceId": driver,
+            "models": [],
+            "status": "ready",
+            "version": null,
+        });
+        util::merge_json_value_into(value, &mut provider);
+        serde_json::from_value(provider).unwrap()
+    }
+
+    #[test]
+    fn the_agents_notice_appears_only_when_no_agent_can_run() {
+        let claude = |value| provider("claudeAgent", value);
+        let codex = |value| provider("codex", value);
+        assert_eq!(agents_notice(&[claude(json!({})), codex(json!({}))]), None);
+        // One agent that can run is enough.
+        assert_eq!(
+            agents_notice(&[
+                claude(json!({ "installed": false, "status": "error" })),
+                codex(json!({ "status": "warning", "auth": { "status": "authenticated" } })),
+            ]),
+            None
+        );
+        let notice = agents_notice(&[
+            claude(json!({ "installed": false, "status": "error", "displayName": "Claude Code" })),
+            codex(json!({ "auth": { "status": "unauthenticated" }, "displayName": "Codex" })),
+            provider("cursor", json!({ "enabled": false })),
+        ])
+        .unwrap();
+        assert!(
+            notice.starts_with(
+                "No agent can run yet: Claude Code isn't installed; Codex isn't signed in."
+            ),
+            "{notice}"
+        );
+        assert!(!notice.contains("cursor"));
+        assert_eq!(
+            agents_notice(&[provider("cursor", json!({ "enabled": false }))]).unwrap(),
+            "No agents are turned on in T3 Code's settings."
+        );
+        // Otherwise T3's own explanation, under the driver's name when T3 gives no other.
+        let notice = agents_notice(&[claude(json!({
+            "status": "error",
+            "message": "Claude Code 1.0 is too old.",
+        }))])
+        .unwrap();
+        assert!(
+            notice.contains("yet: claudeAgent: Claude Code 1.0 is too old. Install"),
+            "{notice}"
+        );
     }
 }

@@ -1,6 +1,6 @@
 # Agent guide for mustr
 
-mustr is a review-first desktop app built as a soft fork of [Zed](https://github.com/zed-industries/zed). It is a client of an unmodified [T3 Code](https://github.com/pingdotgg/t3code) server, which owns agents, pull request data, and worktrees. mustr owns the UI. The plan is in `mustr-docs/PLAN.md`.
+mustr is a review-first desktop app built as a soft fork of [Zed](https://github.com/zed-industries/zed). It runs on an unmodified [T3 Code](https://github.com/pingdotgg/t3code) server (the user's own, or mustr's hidden copy), which owns agents, pull request data, and worktrees. mustr owns the UI. The plan is in `mustr-docs/PLAN.md`.
 
 ## The one rule: don't edit Zed
 
@@ -28,14 +28,35 @@ Ignore the rest of `.rules`, which is for Zed's own repository: the README banne
 
 - `mustr-crates/t3_client` talks to T3 over HTTP and WebSocket. `mustr-crates/t3_client/T3_VERSION` pins the T3 version and orchestration protocol, which must match the server exactly.
 - `mustr-crates/t3_api` holds T3's wire types, generated from T3's contracts by `mustr-crates/t3_api/codegen/regen.sh` (see its README). Never hand-edit `src/generated/` or `schema/`. Call RPCs and endpoints through the typed tables: `connection.call::<t3_api::rpc::X>(…)`, `connection.stream::<…>`, and `t3_client::call_endpoint::<t3_api::http::Y>(…)`.
-- Live tests are ignored by default. When you run one against a real T3 server, mint a pairing token with only `--scope orchestration:read`, and revoke the session afterwards (`t3 auth session list`, `t3 auth session revoke`).
-- Never request `access:write` or `relay:*` scopes, and never print tokens.
-- The app pairs on its own when a local `t3` CLI exists, asking for `orchestration:read`, `orchestration:operate` (driving agent threads), and `source-control:write` (`SCOPES` in `mustr-crates/mustr/src/t3_connection.rs`), and keeps its token in the OS keychain. For test runs, set `MUSTR_CREDENTIALS_FILE=<tmp>/credentials.json` so test tokens go to that file instead of the user's keychain, and pass `--user-data-dir <tmp>/data`. `--t3-server <url>` picks the server (default `http://127.0.0.1:3773`). Hidden flags for smoke tests:
+- Live tests are ignored by default. Run them against a T3 server in a temporary home (below), not the user's. Grant only `--scope orchestration:read`, and never print tokens.
+- Never request `access:write` or `relay:*` scopes.
+- **Engine modes** (`"t3": {"mode": …}` in mustr's settings, `--t3-mode`, or `MUSTR_T3_MODE`). The code is in `mustr-crates/mustr/src/t3_engine.rs`; `mustr-docs/PLAN.md` §4 describes the design.
+  - `installed`, the default: the user's own T3 Code, in `$T3CODE_HOME` or `~/.t3`.
+    - mustr pairs through its `t3` CLI, asking for `orchestration:read`, `orchestration:operate` (driving agent threads), and `source-control:write` (`SCOPES` in `mustr-crates/mustr/src/t3_connection.rs`). It keeps the token in the OS keychain.
+    - It starts an installed but stopped service once (`t3 service restart`).
+    - From the home view it offers to install T3 Code, to set up its service (`t3 service install`), or to update it (`t3 update`).
+  - `embedded`: mustr's own engine, in `<data dir>/t3-runtime/<V>` and `<data dir>/t3-home`, on a free loopback port. Its log is `<data dir>/logs/t3-engine.log`.
+    - There's no pairing: it signs in with the desktop bootstrap token (`t3_runtime::engine`).
+    - It's also the fallback when the installed T3 Code can't be used ("Use mustr's own engine").
+  - `external`: `--t3-server <url>` (or `MUSTR_T3_SERVER`, or `"t3": {"url"}`) connects to that server, paired by pasting a credential.
+- `mustr-crates/t3_runtime` gets and runs T3 releases: it picks the asset, checks `SHA256SUMS`, installs with T3's installer layout, and manages the engine process, the user's install, and its service.
+  - Its `real_engine` test is ignored by default. It downloads the pinned release (about 100 MB) into a temp dir, starts it, and signs in: `cargo test -p t3_runtime --test real_engine -- --ignored --nocapture`.
+  - `MUSTR_T3_TEST_VERSIONS_DIR=<dir>` keeps the download between runs. `MUSTR_T3_RELEASE_BASE_URL` points downloads at a mirror.
+- **The user's T3 Code is off limits in tests.** It's usually installed with its service running. Against the real `~/.t3`, never run `t3 update`, `t3 service install|restart|uninstall|stop`, T3's installer, or pairing, and never bind port 3773. For test runs:
+  - Pass `--user-data-dir <tmp>/data`, and set `MUSTR_CREDENTIALS_FILE=<tmp>/credentials.json` so tokens go to that file instead of the user's keychain.
+  - Unset T3's variables (`T3CODE_HOME`, `T3_SERVICE_LAUNCHER_CONTEXT`, `T3_BOOT_SERVICE_UNIT`, `T3CODE_TAILSCALE_SERVE`, `T3CODE_TAILSCALE_SERVE_PORT`). A shell inside T3's service inherits them, and they point mustr at the real home.
+  - Embedded mode is isolated by `--user-data-dir` alone.
+  - Installed mode needs `HOME=<tmp>/home`, so `~/.t3` and `~/.local/bin` are temporary. It also needs `MUSTR_DRY_RUN_SERVICE=1`: systemd and launchd are per user, so a temporary HOME doesn't isolate `t3 service …`. With it set, `t3 service …` and `t3 update` fail locally and show the command they would run.
+  - To test "T3 Code is running", start `<tmp>/home/.t3/runtime/versions/<V>/t3 serve --base-dir <tmp>/home/.t3 --host 127.0.0.1 --port <free port>` with that HOME.
+  - Afterwards, check that no process runs from `<tmp>`. Also check that the real service's PIDs, the owner of port 3773, `~/.config/systemd/user/t3code.service`, and `~/.t3/runtime` haven't changed.
+- Dev builds load assets from the checkout, so start `target/debug/mustr` with the worktree as the working directory.
+- Hidden flags for smoke tests:
   - `--open-first-pr` opens the first open pull request once the list loads.
   - `--review-thread <thread id>` (with `--thread-scope changes|turn:N`) opens a review of an agent thread's work.
   - `--open-thread <thread id>` opens an agent thread's chat.
   - `--new-thread` opens the new-thread form.
-- Set `MUSTR_DRY_RUN_WRITES=1` so mustr can't write to a real pull request or agent: comments, reviews, resolving, and viewed marks on pull requests, Send to agent, and agent messages, approvals, stopping, and new threads all fail locally; reads still work. `MUSTR_IGNORE_LOCAL_WORKTREES=1` builds agent reviews from T3's diffs alone, as when T3 runs on another machine. Revoke the `mustr` sessions afterwards.
+  - `--add-project <path>` adds a folder as a project once connected. Don't click Add project under Xvfb: its folder picker asks the session's desktop portal, which starts `xdg-desktop-portal` on the user's session bus and shows nothing.
+- Set `MUSTR_DRY_RUN_WRITES=1` so mustr can't write to a real pull request or agent. Comments, reviews, resolving, and viewed marks on pull requests, Send to agent, and agent messages, approvals, stopping, new threads, and new projects all fail locally; reads still work. New projects on the embedded engine are allowed, since that engine is mustr's own. `MUSTR_IGNORE_LOCAL_WORKTREES=1` builds agent reviews from T3's diffs alone, as when T3 runs on another machine. Revoke the `mustr` sessions afterwards.
 - Agent threads write to the user's real agents, which run their own CLIs on their subscription. Never send a message to a real agent thread from a test. Live checks only read (open threads and reviews, expand tool calls, open the new-thread form) with `MUSTR_DRY_RUN_WRITES=1`. Verify writes with the recording backends in `thread_chat`'s and `mustr`'s tests, which assert the exact payloads.
 - Other parts of mustr drive threads through `thread_chat`: `thread_chat::send_message(thread_id, text, cx)` sends a user message (T3 starts a run, or steers or queues it when the agent is busy), and `thread_chat::open_thread(thread_id, title, workspace, window, cx)` opens or activates a thread's view. Both go through the installed `ThreadBackend`, so they honor the dry-run switch and the pairing's scopes.
 - Never open a window on the user's display. Run the app under Xvfb with `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`. Start `xfwm4 --compositor=on` on that display too: without a compositor, GPUI falls back to server-side decorations and mustr's title bar draws no window controls. `ffmpeg -f x11grab` captures the screen.

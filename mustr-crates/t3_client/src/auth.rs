@@ -16,6 +16,16 @@ pub const ORCHESTRATION_PROTOCOL_VERSION: u32 = 2;
 pub const ORCHESTRATION_PROTOCOL_HEADER: &str = "x-t3-orchestration-protocol";
 
 const ORCHESTRATION_PROTOCOL_QUERY_PARAM: &str = "orchestrationProtocol";
+
+/// The T3 release mustr is built and tested against (`t3_server_version` in `T3_VERSION`). mustr
+/// installs and runs exactly this version when it manages T3's engine itself.
+pub fn pinned_server_version() -> &'static str {
+    include_str!("../T3_VERSION")
+        .lines()
+        .find_map(|line| line.strip_prefix("t3_server_version")?.strip_prefix('='))
+        .map(str::trim)
+        .unwrap_or_default()
+}
 const WEBSOCKET_TICKET_QUERY_PARAM: &str = "wsTicket";
 
 /// The scopes mustr asks for. mustr never requests `access:write` or `relay:*`.
@@ -305,6 +315,16 @@ mod tests {
             source["t3Commit"]
         );
         Ok(())
+    }
+
+    #[test]
+    fn the_pinned_server_version_is_semver() {
+        let version = pinned_server_version();
+        assert!(
+            version.split('.').count() == 3
+                && version.split('.').all(|part| part.parse::<u32>().is_ok()),
+            "T3_VERSION pins {version:?}"
+        );
     }
 
     #[test]
