@@ -13,6 +13,13 @@ workspace = true
 name = "mustr"
 path = "src/main.rs"
 
+[features]
+default = ["runtime_shaders"]
+# Compiles GPUI's Metal shaders when mustr starts instead of when it's built, so building on macOS
+# needs only Apple's Command Line Tools, not Xcode's Metal toolchain (`mustr-docs/MACOS.md`).
+# Zed's Nix build does the same (nix/build.nix). It changes nothing on other platforms.
+runtime_shaders = ["gpui_platform/runtime_shaders"]
+
 [dependencies]
 anyhow.workspace = true
 askpass.workspace = true
