@@ -414,6 +414,23 @@ impl Updater {
         &self.status
     }
 
+    /// Whether it checks on its own (`"updates": {"enabled"}`).
+    pub fn automatic(&self) -> bool {
+        self.automatic
+    }
+
+    /// Turns the automatic checks on or off, at once and in the settings file, for the Settings
+    /// page. Check for Updates still checks either way.
+    pub fn set_automatic(&mut self, automatic: bool, cx: &mut Context<Self>) {
+        self.automatic = automatic;
+        crate::app_settings::update_mustr_setting(
+            &["updates", "enabled"],
+            Some(serde_json::Value::Bool(automatic)),
+            cx,
+        );
+        cx.notify();
+    }
+
     fn poll(cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(FIRST_CHECK_DELAY).await;

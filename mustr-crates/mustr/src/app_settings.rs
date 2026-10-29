@@ -1,6 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use fs::Fs;
-use gpui::{Action as _, App, AppContext as _, DismissEvent, UpdateGlobal as _};
+use futures::{StreamExt as _, channel::mpsc};
+use gpui::{
+    Action as _, App, AppContext as _, DismissEvent, Global, SharedString, UpdateGlobal as _,
+};
+use serde_json::Value;
 use settings::{InvalidSettingsError, Settings, SettingsFile, SettingsStore};
 use std::{io::Write as _, path::Path, sync::Arc};
 use theme::ActiveTheme as _;
@@ -18,8 +22,9 @@ const DEFAULT_OVERRIDES: &str = include_str!("../assets/default_overrides.json")
 
 /// What a new settings file holds. Zed's settings writer garbles the first setting it adds to
 /// an empty object after a comment, or after a comment containing `://`, so the comments are
-/// inside the braces. mustr has no settings docs of its own and doesn't link to Zed's site.
-pub const INITIAL_SETTINGS: &str = "{\n  // mustr settings\n  //\n  // mustr uses Zed's settings format and most of Zed's editor settings.\n}\n";
+/// inside the braces. The user changes settings in mustr's Settings page, never here; the file is
+/// where the page keeps them.
+pub const INITIAL_SETTINGS: &str = "{\n  // mustr's settings, as mustr's Settings page saves them (in Zed's settings\n  // format). Change them there.\n}\n";
 
 /// Writes [`INITIAL_SETTINGS`] if there's no settings file yet. When something saves a setting
 /// (the diff style, the theme selector), Zed's `SettingsStore::update_settings_file` starts a
@@ -78,6 +83,9 @@ fn notify_settings_errors(result: settings::SettingsParseResult, is_user: bool, 
         settings::ParseStatus::Unchanged => return,
         settings::ParseStatus::Success => {
             dismiss_app_notification(&parse_error_id, cx);
+            if is_user {
+                ConfigFileErrors::set_settings(None, cx);
+            }
             false
         }
         settings::ParseStatus::Failed { error } => {
@@ -88,9 +96,12 @@ fn notify_settings_errors(result: settings::SettingsParseResult, is_user: bool, 
             {
                 false
             } else {
+                if is_user {
+                    ConfigFileErrors::set_settings(Some(format!("{error:#}").into()), cx);
+                }
                 show_settings_notification(
                     parse_error_id,
-                    format!("Invalid user settings file\n{error}"),
+                    format!("mustr couldn't read its settings\n{error}"),
                     cx,
                 );
                 true
@@ -116,18 +127,161 @@ fn notify_settings_errors(result: settings::SettingsParseResult, is_user: bool, 
     }
 }
 
+/// A toast about the settings file, whose button opens the Settings page, which shows the error
+/// and offers to start from mustr's defaults. mustr never opens the file itself.
 fn show_settings_notification(id: NotificationId, message: String, cx: &mut App) {
     show_app_notification(id, cx, move |cx| {
         cx.new(|cx| {
             MessageNotification::new(message.clone(), cx)
-                .primary_message("Open Settings File")
+                .primary_message("Open Settings")
                 .primary_icon(IconName::Settings)
                 .primary_on_click(|window, cx| {
-                    window.dispatch_action(zed_actions::OpenSettingsFile.boxed_clone(), cx);
+                    window.dispatch_action(crate::window::OpenSettings.boxed_clone(), cx);
                     cx.emit(DismissEvent);
                 })
         })
     });
+}
+
+/// Why mustr couldn't read the user's settings file or key bindings file, if it couldn't. The
+/// Settings page shows these, where Zed would open the file.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ConfigFileErrors {
+    pub settings: Option<SharedString>,
+    pub keymap: Option<SharedString>,
+}
+
+impl Global for ConfigFileErrors {}
+
+impl ConfigFileErrors {
+    pub fn get(cx: &App) -> Self {
+        cx.try_global::<Self>().cloned().unwrap_or_default()
+    }
+
+    pub fn set_settings(error: Option<SharedString>, cx: &mut App) {
+        if Self::get(cx).settings != error {
+            cx.default_global::<Self>().settings = error;
+        }
+    }
+
+    pub fn set_keymap(error: Option<SharedString>, cx: &mut App) {
+        if Self::get(cx).keymap != error {
+            cx.default_global::<Self>().keymap = error;
+        }
+    }
+}
+
+/// Moves a file mustr can't read aside, as `<name>.bak` next to it, and starts a new one with
+/// `initial`, for the Settings page's "Start from the defaults". Returns the backup's path.
+pub fn set_aside(path: &Path, initial: &str) -> Result<std::path::PathBuf> {
+    let file_name = path
+        .file_name()
+        .context("the file has no name")?
+        .to_string_lossy()
+        .into_owned();
+    let backup = path.with_file_name(format!("{file_name}.bak"));
+    std::fs::rename(path, &backup)
+        .with_context(|| format!("moving {} to {}", path.display(), backup.display()))?;
+    std::fs::write(path, initial).with_context(|| format!("writing {}", path.display()))?;
+    Ok(backup)
+}
+
+/// `text` (a settings file, JSON with comments) with `value` at `path`, or without `path` when
+/// `value` is `None`, keeping the rest of the text (comments, order, other settings) as it was.
+/// Refuses text that isn't valid, so a file mustr can't read is never overwritten.
+pub fn set_value_in_settings_text(
+    text: &str,
+    path: &[&str],
+    value: Option<&Value>,
+) -> Result<String> {
+    let text = if text.trim().is_empty() {
+        INITIAL_SETTINGS
+    } else {
+        text
+    };
+    let old: Value = settings::parse_json_with_comments(text)?;
+    let existing = path
+        .iter()
+        .try_fold(&old, |value, key| value.get(*key))
+        .cloned();
+    if existing.as_ref() == value {
+        return Ok(text.to_string());
+    }
+    if value.is_none() && settings::find_value_range_in_json_text(text, path).is_none() {
+        return Ok(text.to_string());
+    }
+    let tab_size = settings::infer_json_indent_size(text);
+    let (range, replacement) =
+        settings::replace_value_in_json_text(text, path, tab_size, value, None);
+    let mut new_text = text.to_string();
+    new_text.replace_range(range, &replacement);
+    let new: Value = settings::parse_json_with_comments(&new_text)
+        .context("changing the setting would leave the settings file unreadable")?;
+    let saved = path.iter().try_fold(&new, |value, key| value.get(*key));
+    anyhow::ensure!(
+        saved == value,
+        "the settings file didn't take {}",
+        path.join(".")
+    );
+    Ok(new_text)
+}
+
+/// A change to one of mustr's own settings in the settings file.
+struct MustrSettingEdit {
+    path: &'static [&'static str],
+    value: Option<Value>,
+}
+
+struct MustrSettingsWriter(mpsc::UnboundedSender<MustrSettingEdit>);
+
+impl Global for MustrSettingsWriter {}
+
+/// Saves one of mustr's own settings (`"notifications"`, `"updates"`, `"t3"`) in the settings
+/// file, or removes it when `value` is `None`. Zed's settings types don't have these, so Zed's
+/// writer can't change them. Changes are written one at a time, each after the Zed settings
+/// changes asked for before it, and keep the rest of the file as it was.
+pub fn update_mustr_setting(path: &'static [&'static str], value: Option<Value>, cx: &mut App) {
+    if !cx.has_global::<MustrSettingsWriter>() {
+        let (sender, mut edits) = mpsc::unbounded::<MustrSettingEdit>();
+        cx.set_global(MustrSettingsWriter(sender));
+        cx.spawn(async move |cx| {
+            while let Some(edit) = edits.next().await {
+                let fs = cx.update(|cx| <dyn Fs>::global(cx));
+                // Zed's writes asked for before this one land first.
+                let zed_writes = cx.update(|cx| {
+                    cx.global::<SettingsStore>()
+                        .update_settings_file_with_completion(fs.clone(), |_, _| {})
+                });
+                zed_writes.await.ok();
+                let path = paths::settings_file();
+                let result = async {
+                    let text = match fs.load(path).await {
+                        Ok(text) => text,
+                        Err(_) if !fs.is_file(path).await => INITIAL_SETTINGS.to_string(),
+                        Err(error) => return Err(error),
+                    };
+                    let new_text =
+                        set_value_in_settings_text(&text, edit.path, edit.value.as_ref())?;
+                    if new_text != text {
+                        fs.atomic_write(path.clone(), new_text).await?;
+                    }
+                    anyhow::Ok(())
+                }
+                .await;
+                if let Err(error) = result {
+                    log::error!(
+                        "couldn't save {} in the settings: {error:#}",
+                        edit.path.join(".")
+                    );
+                }
+            }
+        })
+        .detach();
+    }
+    cx.global::<MustrSettingsWriter>()
+        .0
+        .unbounded_send(MustrSettingEdit { path, value })
+        .ok();
 }
 
 /// Applies settings that live on the app or its windows rather than on a view,
@@ -357,7 +511,7 @@ mod tests {
         let parsed: Value = settings::parse_json_with_comments(&new_text).unwrap();
         assert_eq!(parsed, serde_json::json!({"diff_view_style": "unified"}));
         assert!(
-            new_text.contains("  // mustr uses Zed's settings format"),
+            new_text.contains("  // mustr's settings, as mustr's Settings page saves them"),
             "{new_text}"
         );
     }

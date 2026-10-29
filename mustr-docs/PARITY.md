@@ -47,7 +47,9 @@ engine. Every P0 and P1 row is done, and 33 of the 38 P2 rows (the counts are at
   accounts, ACP agents), source control accounts, project settings, the usage dashboard, and
   saved servers switched from the title bar.
 - **The app:** notifications and the Dock badge, the command palette's thread and project
-  actions, zoom, macOS menus, and a self-updating app bundle (`mustr-docs/RELEASING.md`).
+  actions, zoom, macOS menus, and a self-updating app bundle (`mustr-docs/RELEASING.md`). Since
+  0.1.1, one Settings page (`mustr/src/settings_page.rs`) holds every setting, T3's included, and
+  the keyboard shortcuts; mustr never sends the user to `settings.json` or `keymap.json`.
 
 mustr sends 38 of T3's 55 orchestration command types (most of the rest are the server's own) and
 calls about 90 of its RPCs, with the scopes listed at the end of §2. It works against T3 0.1.1,
@@ -253,14 +255,14 @@ zoomed to twice that (26). §3 lists what's left after v0.1.0.
 
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
-| Thread and composer keys | Model `mod+shift+m`, effort `mod+shift+e`, access `mod+shift+a`, workspace `mod+shift+x`, branch `mod+shift+g`; previous and next thread `mod+shift+[` and `]`; diff `mod+d`; open in editor `mod+o` (`packages/shared/src/keybindings.ts`) | Local; `server.upsertKeybinding` for T3's own store | Done: send, queue, steer, model, effort, access, settle, search (`mod+alt+k`), terminal (`mod+j`) (`thread_chat/src/thread_chat.rs` `key_bindings`, `mustr/src/terminal_panel.rs`); diff (`mod+d`), open in editor (`mod+o`) and branch (`mod+shift+g`) (`mustr/src/thread_toolbar.rs`); workspace (`mod+shift+x`), previous and next thread (`mod+shift+[` and `]`) and the previous worktree (`mod+shift+l`) (`thread_chat/src/sidebar.rs`); find (`mod+f`, `find_bar.rs`) and undo (`mod+z`, `organize.rs`) | — | P1: mustr uses Zed's `keymap.json`, so no sync with T3 |
+| Thread and composer keys | Model `mod+shift+m`, effort `mod+shift+e`, access `mod+shift+a`, workspace `mod+shift+x`, branch `mod+shift+g`; previous and next thread `mod+shift+[` and `]`; diff `mod+d`; open in editor `mod+o` (`packages/shared/src/keybindings.ts`) | Local; `server.upsertKeybinding` for T3's own store | Done: send, queue, steer, model, effort, access, settle, search (`mod+alt+k`), terminal (`mod+j`) (`thread_chat/src/thread_chat.rs` `key_bindings`, `mustr/src/terminal_panel.rs`); diff (`mod+d`), open in editor (`mod+o`) and branch (`mod+shift+g`) (`mustr/src/thread_toolbar.rs`); workspace (`mod+shift+x`), previous and next thread (`mod+shift+[` and `]`) and the previous worktree (`mod+shift+l`) (`thread_chat/src/sidebar.rs`); find (`mod+f`, `find_bar.rs`) and undo (`mod+z`, `organize.rs`) | — | P1: mustr's keys are Zed's keymap, changed in Settings › Keyboard shortcuts (`settings_page/key_bindings.rs`), so no sync with T3's |
 | Command palette | Thread actions, new thread in…, settle, usage | — | Done: thread actions (settle, archive, pin, rename, compact, restart, usage), terminals, worktrees and schedules are in Zed's palette, and Review changes, Open in, the branch picker, Commit push and PR, and Link PR on the open thread (`thread_toolbar.rs`). T3's "New thread in <project>" for each project (the open thread's first), New thread without a project, Find in thread, Copy thread ID, Delete thread, Thread details, Clone repository and Connect outside agent too (`thread_chat/src/palette.rs`, through mustr's palette interceptor in `mustr/src/hidden_actions.rs`) | — | P1 |
-| T3 settings | Thread defaults, auto-settle rules, follow-up behavior, branch naming (`settings/SettingsPanels.tsx`) | `server.getSettings` (or `server.getConfig`), `server.updateSettings` (`settings:write`) | Done (`mustr/src/t3_settings.rs`): new threads' model, permissions, workspace and remote start; auto-settle; branch naming. Follow-up behavior is a setting of T3's app, so mustr keeps its own (`thread_settings.rs`) | — | P1 |
+| T3 settings | Thread defaults, auto-settle rules, follow-up behavior, branch naming (`settings/SettingsPanels.tsx`) | `server.getSettings` (or `server.getConfig`), `server.updateSettings` (`settings:write`) | Done (`mustr/src/t3_settings.rs`, in the Settings page's Agents and threads, `settings_page.rs`): new threads' model, permissions, workspace and remote start; auto-settle; branch naming; writing; source control accounts and worktree cleanup, under "T3 Code on <server>". Follow-up behavior is a setting of T3's app, so mustr keeps its own (`thread_settings.rs`), beside it | — | P1 |
 | Install and sign in to agents | Install CLIs, log in (`settings/ProviderSetupSection.tsx`, `settings/ProviderAuthTerminal.tsx`, `onboarding/`) | `provider.install.*`, `provider.auth.*` (`providers:manage`) | Done (`mustr/src/agent_setup.rs`): install, update and remove T3's own Codex and Antigravity, sign in and out (browser, device code, terminal, credentials), T3's install and sign-in commands for agents on their own CLI, "Let T3 Code install Codex", Turn on, Check again. The sign-in terminal is Zed's terminal (`mustr/src/auth_terminal.rs`): T3's PTY output by offset, keys, pastes and its size sent back in order | — | P1: CLI logins live on disk and are shared |
 | Usage limits | 5-hour and weekly windows per account (`chat/ComposerUsageLimits.tsx`, `components/usage/UsageLimits.tsx`) | Provider status in `server.getConfig` and `subscribeServerConfig`, `server.refreshProviders`; `provider.consumeResetCredit` | Done (`thread_chat/src/usage.rs`): the header's windows and a usage panel with reset times | — | P1 |
 | Usage dashboard | Tokens, cost, model breakdown, `mod+u` (`components/usage/UsagePage.tsx`) | `server.getUsageSummary` (`diagnostics:read`) | Done (`mustr/src/usage_page.rs`): the rail's Usage, the palette and `mod+u`; cost or tokens for 24 hours (by hour) or 7, 30 or 90 days, each agent's share, a chart, token totals and kinds, a breakdown by model or day, and Limits. No price overrides or several environments | — | P2 |
 | Provider instances, ACP agents | Several accounts per provider; ACP registry (`settings/AddProviderInstanceDialog.tsx`) | `server.updateSettings`, `server.*AcpRegistry*` | Done (`mustr/src/agent_accounts.rs`, `agent_setup.rs`): Add an agent… adds another Codex or Claude Code account (its own label, T3's id and home folder) or an agent from the ACP registry (search, prepare, add), and Remove takes them away. No renaming, accent colors, environment variables, or ACP session import | — | P2 |
-| Appearance, themes | `settings/AppearanceSettingsPanel.tsx` | — | n/a | — | Skip: Zed themes and mustr's theme |
+| Appearance, themes | `settings/AppearanceSettingsPanel.tsx` | — | n/a: mustr's own Settings › General picks mustr's dark, light or colorblind-safe theme, or the system's (`settings_page/general.rs`) | — | Skip: Zed themes and mustr's theme |
 | Diagnostics, storage, telemetry | `settings/DiagnosticsSettings.tsx`, `settings/StorageSettings.tsx` | `server.getProcessDiagnostics`, `server.runStorageCleanup` | Missing | M | Skip: maintenance; use T3's CLI |
 
 ### 2.18 Sharing and mobile
@@ -349,8 +351,8 @@ the release checks found. Nothing here blocks daily use; T3's own app or CLI cov
 
 From the integrated smoke test on 2026-10-29 (mustr's engine, and the user's T3 read-only):
 - **Zoom:** Zed's own command palette is 34 rems wide, so at 26 it's wider than a half-screen
-  window and clipped at both sides (Zed's file). Setting `ui_font_size` alone in the settings file
-  leaves code and terminals at `buffer_font_size`; the zoom keys change both.
+  window and clipped at both sides (Zed's file). Settings › General's Zoom changes the UI and code
+  together, as the zoom keys do; its Code size changes code alone.
 - **Restricted Mode in reviews** (done; the user's call: trust a worktree if its project is
   trusted): a T3 worktree on this machine inherits Zed's trust from its project's checkout
   (`mustr/src/worktree_trust.rs`). When Zed trusts the checkout (or a folder holding it), the
@@ -365,8 +367,8 @@ From the integrated smoke test on 2026-10-29 (mustr's engine, and the user's T3 
   retry", which goes to the log), the trust dialog's `.zed/settings.json` (where project settings
   live, kept on purpose), `${appName}` in a window title format the user writes, and the theme
   picker's View Theme Docs, which opens Zed's docs. mustr says Zed on purpose where it means Zed:
-  Open in Zed (the editor), the About panel's credits, and "uses Zed's format" in the settings
-  and key binding files.
+  Open in Zed (the editor), the About panel's credits, and "Zed's settings format" in the settings
+  and key bindings files, which the Settings page writes.
 
 Fixed before v0.1.0: tooltips that covered the menu their button opened, Zed's name in the
 Restricted Mode tooltip, the command palette's "zed: …" entries and the empty pane's Welcome to

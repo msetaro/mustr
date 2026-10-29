@@ -11,12 +11,14 @@
 //! window, a toast in the focused window for any other thread, and an OS notification when no
 //! mustr window has focus. Clicking the OS notification focuses mustr and opens the thread.
 //!
-//! Which events notify, and whether they play a sound, is set in mustr's settings file:
+//! Which events notify, whether they play a sound, and whether the Dock shows the count are set
+//! in the Settings page's Agents and threads ([`set_settings`]), which keeps them in mustr's
+//! settings file:
 //!
 //! ```json
 //! "notifications": {
 //!   "completed": true, "needs_approval": true, "needs_input": true,
-//!   "failed": false, "usage_limit": false, "sound": false
+//!   "failed": false, "usage_limit": false, "sound": false, "dock_badge": true
 //! }
 //! ```
 //!
@@ -122,6 +124,8 @@ pub struct NotificationSettings {
     pub usage_limit: bool,
     /// Whether notifications play a sound (on macOS).
     pub sound: bool,
+    /// Whether the Dock's icon shows how many threads wait on the user (on macOS).
+    pub dock_badge: bool,
 }
 
 impl Default for NotificationSettings {
@@ -133,6 +137,7 @@ impl Default for NotificationSettings {
             failed: false,
             usage_limit: false,
             sound: false,
+            dock_badge: true,
         }
     }
 }
@@ -164,8 +169,41 @@ impl NotificationSettings {
         }
     }
 
-    fn get(cx: &App) -> Self {
+    pub fn get(cx: &App) -> Self {
         cx.try_global::<Self>().copied().unwrap_or_default()
+    }
+}
+
+/// Changes the notification settings, at once and in the settings file, for the Settings page.
+pub fn set_settings(settings: NotificationSettings, cx: &mut App) {
+    let old = NotificationSettings::get(cx);
+    apply_settings(settings, cx);
+    let (Ok(serde_json::Value::Object(old)), Ok(serde_json::Value::Object(new))) =
+        (serde_json::to_value(old), serde_json::to_value(settings))
+    else {
+        return;
+    };
+    for (key, value) in new {
+        if old.get(&key) != Some(&value) {
+            let path: &'static [&'static str] = match key.as_str() {
+                "completed" => &["notifications", "completed"],
+                "needs_approval" => &["notifications", "needs_approval"],
+                "needs_input" => &["notifications", "needs_input"],
+                "failed" => &["notifications", "failed"],
+                "usage_limit" => &["notifications", "usage_limit"],
+                "sound" => &["notifications", "sound"],
+                "dock_badge" => &["notifications", "dock_badge"],
+                _ => continue,
+            };
+            crate::app_settings::update_mustr_setting(path, Some(value), cx);
+        }
+    }
+}
+
+fn apply_settings(settings: NotificationSettings, cx: &mut App) {
+    cx.set_global(settings);
+    if let Some(notifier) = Notifier::try_global(cx) {
+        notifier.update(cx, |notifier, cx| notifier.refresh_badge(cx));
     }
 }
 
@@ -181,7 +219,7 @@ fn watch_settings(cx: &mut App) {
         let _watcher = watcher;
         while let Some(text) = contents.next().await {
             match NotificationSettings::from_settings_text(&text) {
-                Ok(settings) => cx.update(|cx| cx.set_global(settings)),
+                Ok(settings) => cx.update(|cx| apply_settings(settings, cx)),
                 Err(error) => log::error!("couldn't read the notification settings: {error:#}"),
             }
         }
@@ -757,7 +795,7 @@ impl Notifier {
     fn deliver(&mut self, events: Vec<Event>, waiting: Vec<Waiting>, cx: &mut Context<Self>) {
         if waiting != self.waiting {
             self.waiting = waiting;
-            self.set_badge(self.waiting.len());
+            self.refresh_badge(cx);
             cx.notify();
         }
         let settings = NotificationSettings::get(cx);
@@ -807,6 +845,16 @@ impl Notifier {
         for tag in self.delivered.drain(..) {
             cx.dismiss_system_notification(&tag);
         }
+    }
+
+    /// Shows the count of waiting threads on the Dock, unless the settings turn it off.
+    fn refresh_badge(&mut self, cx: &App) {
+        let shown = if NotificationSettings::get(cx).dock_badge {
+            self.waiting.len()
+        } else {
+            0
+        };
+        self.set_badge(shown);
     }
 
     fn set_badge(&mut self, count: usize) {

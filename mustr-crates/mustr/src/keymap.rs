@@ -1,5 +1,5 @@
 use futures::{StreamExt as _, channel::mpsc, select_biased};
-use gpui::{Action as _, App, AppContext as _, DismissEvent, KeyBinding};
+use gpui::{Action as _, App, AppContext as _, DismissEvent, Global, KeyBinding};
 use settings::{
     BaseKeymap, DEFAULT_KEYMAP_PATH, KeybindSource, KeymapFile, KeymapFileLoadResult,
     SPECIFIC_OVERRIDES_KEYMAP_PATH, Settings as _, SettingsStore, VIM_KEYMAP_PATH,
@@ -10,6 +10,17 @@ use workspace::notifications::{
     NotificationId, dismiss_app_notification, show_app_notification,
     simple_message_notification::MessageNotification,
 };
+
+/// What a new key bindings file holds. The user changes key bindings in the Settings page's
+/// Keyboard shortcuts, never here; the file is where the page keeps them.
+pub const INITIAL_KEYMAP: &str = "// mustr's key bindings, as mustr's Settings page saves them (in Zed's keymap\n// format). Change them there.\n[\n]\n";
+
+/// Counts the times the key bindings were loaded, so views that list them (the Settings page's
+/// Keyboard shortcuts) know when to read them again.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KeymapVersion(pub usize);
+
+impl Global for KeymapVersion {}
 
 // Copied from crates/zed/src/zed.rs (`handle_keymap_file_changes`), without the
 // keymap-migration banner and the keymap editor refresh.
@@ -92,6 +103,7 @@ pub fn handle_keymap_file_changes(
                 KeymapFileLoadResult::Success { key_bindings } => {
                     reload_keymaps(cx, key_bindings);
                     dismiss_app_notification(&notification_id, cx);
+                    crate::app_settings::ConfigFileErrors::set_keymap(None, cx);
                 }
                 KeymapFileLoadResult::SomeFailedToLoad {
                     key_bindings,
@@ -104,7 +116,10 @@ pub fn handle_keymap_file_changes(
                 }
                 KeymapFileLoadResult::JsonParseFailure { error } => show_keymap_error(
                     notification_id.clone(),
-                    format!("JSON parse error in keymap file. Bindings not reloaded.\n\n{error}"),
+                    format!(
+                        "mustr couldn't read your key bindings, so it kept the ones it had.\n\n\
+                         {error}"
+                    ),
                     cx,
                 ),
             });
@@ -113,14 +128,17 @@ pub fn handle_keymap_file_changes(
     .detach();
 }
 
+/// A toast about the key bindings file, whose button opens the Settings page's Keyboard
+/// shortcuts, which show the error. mustr never opens the file itself.
 fn show_keymap_error(notification_id: NotificationId, message: String, cx: &mut App) {
+    crate::app_settings::ConfigFileErrors::set_keymap(Some(message.clone().into()), cx);
     show_app_notification(notification_id, cx, move |cx| {
         cx.new(|cx| {
             MessageNotification::new(message.clone(), cx)
-                .primary_message("Open Keymap File")
+                .primary_message("Open Keyboard Shortcuts")
                 .primary_icon(IconName::Settings)
                 .primary_on_click(|window, cx| {
-                    window.dispatch_action(zed_actions::OpenKeymapFile.boxed_clone(), cx);
+                    window.dispatch_action(crate::window::OpenKeyBindings.boxed_clone(), cx);
                     cx.emit(DismissEvent);
                 })
         })
@@ -138,6 +156,11 @@ fn reload_keymaps(cx: &mut App, mut user_key_bindings: Vec<KeyBinding>) {
     cx.bind_keys(drop_hidden_actions(user_key_bindings));
     // Menus show each action's key binding, so rebuild them with the new bindings.
     cx.set_menus(crate::window::app_menus());
+    let version = cx
+        .try_global::<KeymapVersion>()
+        .copied()
+        .unwrap_or_default();
+    cx.set_global(KeymapVersion(version.0 + 1));
 }
 
 // Copied from crates/zed/src/zed.rs (`load_default_keymap`).

@@ -1,31 +1,39 @@
-//! T3 Code's settings for agent threads (`mustr-docs/PARITY.md` §2.17, "T3 settings"), as T3's
-//! settings panels have them (`settings/ProjectDefaultsSettings.tsx`, the Follow-ups and
-//! Auto-settle sections of `SettingsPanels.tsx`, and `BranchNamingSettings.tsx`):
+//! T3 Code's settings for agent threads (`mustr-docs/PARITY.md` §2.17, "T3 settings"), the
+//! "T3 Code" part of the Settings page's Agents and threads (`settings_page.rs`), as T3's settings
+//! panels have them (`settings/ProjectDefaultsSettings.tsx`, the Auto-settle section of
+//! `SettingsPanels.tsx`, `BranchNamingSettings.tsx`, and `SourceControlSettings.tsx`):
 //! - **New threads:** the permission mode, where a thread works (the project's checkout or a new
 //!   worktree), whether new worktrees start from the remote, and the model.
-//! - **Follow-ups:** whether Enter queues a message or steers the agent while it works. T3 keeps
-//!   this one in its own app rather than on its server, so mustr keeps its own
-//!   ([`FollowUpBehavior`]).
 //! - **Auto-settle:** when a thread's pull request merges, after days without activity, and
 //!   whether threads with a pull request are kept.
 //! - **Branch naming:** a fixed prefix, a prefix the model picks, or a name from instructions.
+//! - **Writing**, and the source control accounts on T3's machine (`source_control.rs`).
+//!
+//! T3's follow-up behavior is a setting of T3's app rather than its server, so mustr keeps its own
+//! ([`thread_chat::thread_settings::FollowUpBehavior`]), with mustr's other thread settings.
 //!
 //! The settings come from `server.getSettings`, or from `server.getConfig` on servers that dropped
 //! it, and then from T3's `settingsUpdated` events ([`ServerConfigs`]). A change is sent as a
 //! patch of what changed with `server.updateSettings` at `settings:write`, so dry runs and
-//! pairings without that scope refuse it; on a server without the call, the page is read-only.
+//! pairings without that scope refuse it; on a server without the call, they're read-only.
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
-use crate::{nav_panel::register_rail_entry, source_control::SourceControlAccounts};
+use crate::{
+    settings_page::{
+        self, Section,
+        rows::{self, Group, SettingRow},
+    },
+    source_control::SourceControlAccounts,
+};
 use anyhow::{Context as _, Result};
 use editor::{Editor, EditorEvent};
 use futures::{FutureExt as _, future::BoxFuture};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Task, Window, div, px,
+    AnyElement, App, AppContext as _, Context, Entity, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, Window,
+    div, px,
 };
 use mustr_ui::{ButtonStyle, Card, SegmentedControl, TextButton, palette, tokens, tokens::scaled};
 use serde_json::{Value, json};
@@ -40,20 +48,16 @@ use t3_client::{
 use thread_chat::{
     Access, ServerConfigs, ThreadBackend,
     thread_settings::{
-        DEFAULT_RUNTIME_MODE, FollowUpBehavior, RUNTIME_MODES, agent_choices, load_server_settings,
+        DEFAULT_RUNTIME_MODE, RUNTIME_MODES, agent_choices, load_server_settings,
         runtime_mode_description, runtime_mode_label,
     },
 };
 use ui::{
-    Color, ContextMenu, DropdownMenu, DropdownStyle, Headline, HeadlineSize, Icon, IconName,
-    IconPosition, Label, LabelCommon as _, LabelSize, Switch, ToggleState, Tooltip, prelude::*,
+    Color, ContextMenu, DropdownMenu, DropdownStyle, Headline, HeadlineSize, IconPosition, Label,
+    LabelCommon as _, LabelSize, Switch, ToggleState, Tooltip, prelude::*,
 };
-use workspace::{
-    Workspace,
-    item::{Item, ItemEvent},
-};
+use workspace::Workspace;
 
-const CONTENT_MAX_WIDTH: f32 = 880.;
 /// T3's default for settling inactive threads (`DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS`).
 const AUTO_SETTLE_DEFAULT_DAYS: u32 = 3;
 /// The waits offered for settling inactive threads, within T3's 1 to 90 days.
@@ -64,43 +68,21 @@ const DEFAULT_BRANCH_PREFIX: &str = "t3";
 gpui::actions!(
     mustr,
     [
-        /// Opens T3 Code's settings for agent threads: new-thread defaults, follow-ups,
-        /// auto-settle, and branch naming.
+        /// Opens T3 Code's settings for agent threads, in mustr's Settings: new-thread defaults,
+        /// auto-settle, branch naming, and writing.
         OpenT3Settings,
     ]
 );
 
-/// Adds the page's rail entry and action. Call once at startup, before windows open.
+/// Opens the Settings page's Agents and threads for [`OpenT3Settings`]. Call once at startup,
+/// before windows open.
 pub fn init(cx: &mut App) {
-    register_rail_entry(
-        "t3-settings",
-        Icon::new(IconName::Server),
-        "T3 Code settings",
-        OpenT3Settings,
-        |item| item.downcast::<T3SettingsView>().is_some(),
-        cx,
-    );
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, _: &OpenT3Settings, window, cx| {
-            show(workspace, window, cx)
+            settings_page::show(workspace, Section::Agents, None, window, cx)
         });
     })
     .detach();
-}
-
-/// Activates the settings page, or opens it.
-pub fn show(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
-    let existing = workspace
-        .panes()
-        .iter()
-        .find_map(|pane| pane.read(cx).items_of_type::<T3SettingsView>().next());
-    if let Some(existing) = existing {
-        workspace.activate_item(&existing, true, true, window, cx);
-        return;
-    }
-    let backend = thread_chat::backend(cx);
-    let view = cx.new(|cx| T3SettingsView::new(backend, window, cx));
-    workspace.add_item_to_active_pane(Box::new(view), None, true, window, cx);
 }
 
 // The settings, as the page shows them: T3's value, or T3's default where it sends none.
@@ -213,7 +195,6 @@ impl<T> Loadable<T> {
 type Patch = (&'static str, Value);
 
 pub struct T3SettingsView {
-    focus_handle: FocusHandle,
     backend: Option<Arc<dyn ThreadBackend>>,
     configs: Entity<ServerConfigs>,
     settings: Loadable<ServerSettings>,
@@ -290,7 +271,6 @@ impl T3SettingsView {
             }),
         ];
         let mut this = Self {
-            focus_handle: cx.focus_handle(),
             backend,
             configs,
             settings: Loadable::Loading,
@@ -698,12 +678,12 @@ impl T3SettingsView {
             .into_any_element()
     }
 
-    fn render_new_threads(
+    fn new_threads(
         &self,
         settings: &ServerSettings,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Group {
         let mode = runtime_mode(settings);
         let modes = RUNTIME_MODES
             .iter()
@@ -812,11 +792,10 @@ impl T3SettingsView {
         }
         let model = self.dropdown("t3-settings-model", label, models, selected, window, cx);
 
-        section(
+        Group::new(
             "New threads",
-            None,
             vec![
-                row(
+                SettingRow::new(
                     "t3-settings-row-model",
                     "Model",
                     if selection.is_none() {
@@ -826,10 +805,9 @@ impl T3SettingsView {
                         "The model new threads start with. Projects can choose their own."
                     },
                     model,
-                    true,
-                    cx,
-                ),
-                row(
+                )
+                .keywords("default agent provider claude codex"),
+                SettingRow::new(
                     "t3-settings-row-runtime-mode",
                     "Permissions",
                     format!(
@@ -837,83 +815,37 @@ impl T3SettingsView {
                         runtime_mode_description(&mode)
                     ),
                     permission,
-                    false,
-                    cx,
-                ),
-                row(
+                )
+                .keywords("access runtime mode approvals supervised full auto"),
+                SettingRow::new(
                     "t3-settings-row-workspace",
                     "Workspace",
                     "Where new threads work: the project's checkout, or a new worktree. Projects \
                      and their t3.json can choose their own.",
                     workspace,
-                    false,
-                    cx,
-                ),
-                row(
+                )
+                .keywords("worktree checkout local"),
+                SettingRow::new(
                     "t3-settings-row-from-origin",
                     "Start worktrees from the remote",
                     "New worktrees start from the base branch on the remote, not your local copy.",
                     origin,
-                    false,
-                    cx,
-                ),
+                )
+                .keywords("origin base branch"),
             ],
         )
     }
 
-    fn render_follow_ups(&self, cx: &mut Context<Self>) -> AnyElement {
-        let behavior = FollowUpBehavior::get(cx);
-        let control = self.segmented(
-            "t3-settings-follow-ups",
-            &["Queue", "Steer"],
-            match behavior {
-                FollowUpBehavior::Queue => 0,
-                FollowUpBehavior::Steer => 1,
-            },
-            |_, index, cx| {
-                let behavior = if index == 1 {
-                    FollowUpBehavior::Steer
-                } else {
-                    FollowUpBehavior::Queue
-                };
-                behavior.set(cx);
-                cx.notify();
-            },
-            None,
-            cx,
-        );
-        let other = if cfg!(target_os = "macos") {
-            "⌘⇧Enter"
-        } else {
-            "Ctrl+Shift+Enter"
-        };
-        section(
-            "Follow-ups",
-            Some("Kept by mustr"),
-            vec![row(
-                "t3-settings-row-follow-ups",
-                "While the agent works",
-                format!(
-                    "Enter queues a message for after the run, or steers the run with it. {other} \
-                     does the other."
-                ),
-                control,
-                true,
-                cx,
-            )],
-        )
-    }
-
-    fn render_auto_settle(
+    fn auto_settle(
         &self,
         settings: &ServerSettings,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Group {
         let on_merge = settings.sidebar_auto_settle_on_merge.unwrap_or(true);
         let days = auto_settle_days(settings);
         let mut rows = vec![
-            row(
+            SettingRow::new(
                 "t3-settings-row-settle-on-merge",
                 "When the pull request merges",
                 "Settle a thread when its pull request merges. Closed pull requests still settle.",
@@ -928,10 +860,9 @@ impl T3SettingsView {
                     },
                     cx,
                 ),
-                true,
-                cx,
-            ),
-            row(
+            )
+            .keywords("auto-settle merged"),
+            SettingRow::new(
                 "t3-settings-row-settle-inactive",
                 "When inactive",
                 "Settle threads with no activity for a while.",
@@ -947,9 +878,8 @@ impl T3SettingsView {
                     },
                     cx,
                 ),
-                false,
-                cx,
-            ),
+            )
+            .keywords("auto-settle inactivity idle"),
         ];
         if let Some(days) = days {
             let mut choices = AUTO_SETTLE_DAYS.to_vec();
@@ -976,22 +906,23 @@ impl T3SettingsView {
                     )
                 })
                 .collect();
-            rows.push(row(
-                "t3-settings-row-settle-days",
-                "After",
-                "Any new activity un-settles a thread.",
-                self.dropdown(
-                    "t3-settings-settle-days",
-                    label(days),
-                    entries,
-                    choices.iter().position(|choice| *choice == days),
-                    window,
-                    cx,
-                ),
-                false,
-                cx,
-            ));
-            rows.push(row(
+            rows.push(
+                SettingRow::new(
+                    "t3-settings-row-settle-days",
+                    "After",
+                    "Any new activity un-settles a thread.",
+                    self.dropdown(
+                        "t3-settings-settle-days",
+                        label(days),
+                        entries,
+                        choices.iter().position(|choice| *choice == days),
+                        window,
+                        cx,
+                    ),
+                )
+                .keywords("auto-settle days inactive"),
+            );
+            rows.push(SettingRow::new(
                 "t3-settings-row-keep-pull-requests",
                 "Keep threads with a pull request",
                 "Inactivity doesn't settle threads with a pull request. Merging and closing \
@@ -1009,14 +940,12 @@ impl T3SettingsView {
                     },
                     cx,
                 ),
-                false,
-                cx,
             ));
         }
-        section("Auto-settle", None, rows)
+        Group::new("Auto-settle", rows)
     }
 
-    fn render_writing(&self, settings: &ServerSettings, cx: &mut Context<Self>) -> AnyElement {
+    fn writing(&self, settings: &ServerSettings, cx: &mut Context<Self>) -> Group {
         const MODES: [(&str, &str); 3] = [
             ("repo_conventions", "Repository"),
             ("conventional_commits", "Conventional"),
@@ -1057,7 +986,7 @@ impl T3SettingsView {
             cx,
         );
         let mut rows = vec![
-            row(
+            SettingRow::new(
                 "t3-settings-row-writing-mode",
                 "Commit and pull request style",
                 match style.mode.as_str() {
@@ -1066,20 +995,17 @@ impl T3SettingsView {
                     _ => "Agents follow each repository's own conventions.",
                 },
                 mode,
-                true,
-                cx,
-            ),
-            row(
+            )
+            .keywords("commit messages conventional writing"),
+            SettingRow::new(
                 "t3-settings-row-writing-templates",
                 "Use pull request templates",
                 "Agents fill in a repository's pull request template when it has one.",
                 templates,
-                false,
-                cx,
-            ),
+            )
+            .keywords("commit writing"),
         ];
         if style.mode == "custom" {
-            let palette = palette(cx);
             let typed = self.writing.read(cx).text(cx);
             let changed = typed.trim() != style.custom_instructions.trim();
             let save = self.save_button(
@@ -1089,34 +1015,20 @@ impl T3SettingsView {
                 cx,
             );
             rows.push(
-                v_flex()
-                    .w_full()
-                    .gap_1()
-                    .px_2()
-                    .py(scaled(px(9.)))
-                    .border_t(tokens::BORDER_WIDTH)
-                    .border_color(palette.border.hsla())
-                    .child(Label::new("Instructions").weight(FontWeight::MEDIUM))
-                    .child(
-                        div()
-                            .w_full()
-                            .px_2()
-                            .py_1()
-                            .rounded(scaled(tokens::CONTROL_RADIUS))
-                            .border(tokens::BORDER_WIDTH)
-                            .border_color(palette.border.hsla())
-                            .bg(palette.background.hsla())
-                            .child(self.writing.clone()),
-                    )
-                    .child(h_flex().justify_end().child(save))
-                    .into_any_element(),
+                SettingRow::below(
+                    "t3-settings-row-writing-instructions",
+                    "Instructions",
+                    "How agents write commit messages and pull requests.",
+                    v_flex()
+                        .w_full()
+                        .gap_1()
+                        .child(rows::field(&self.writing, None, cx))
+                        .child(h_flex().justify_end().child(save)),
+                )
+                .keywords("commit writing custom"),
             );
         }
-        section(
-            "Writing",
-            Some("How agents write commits and pull requests"),
-            rows,
-        )
+        Group::new("Writing", rows).note("How agents write commits and pull requests")
     }
 
     fn save_writing(&mut self, cx: &mut Context<Self>) {
@@ -1128,11 +1040,7 @@ impl T3SettingsView {
         self.write(writing_patch(&style), cx);
     }
 
-    fn render_branch_naming(
-        &self,
-        settings: &ServerSettings,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn branch_naming(&self, settings: &ServerSettings, cx: &mut Context<Self>) -> Group {
         let mode = branch_naming_mode(settings);
         let modes = [
             BranchNamingMode::Static,
@@ -1156,7 +1064,7 @@ impl T3SettingsView {
                 .or_else(|| self.saving.map(|_| "Saving".into())),
             cx,
         );
-        let mut rows = vec![row(
+        let mut rows = vec![SettingRow::new(
             "t3-settings-row-branch-naming",
             "Worktree branches",
             match mode {
@@ -1170,33 +1078,20 @@ impl T3SettingsView {
                 _ => "Named from your first message, after a fixed prefix.",
             },
             control,
-            true,
-            cx,
-        )];
-        let palette = palette(cx);
-        let field = |editor: &Entity<Editor>| {
-            div()
-                .w(scaled(px(240.)))
-                .px_2()
-                .py_1()
-                .rounded(scaled(tokens::CONTROL_RADIUS))
-                .border(tokens::BORDER_WIDTH)
-                .border_color(palette.border.hsla())
-                .bg(palette.background.hsla())
-                .child(editor.clone())
-        };
+        )
+        .keywords("branch names prefix semantic")];
         match mode {
             BranchNamingMode::Static => {
                 let changed =
                     self.prefix.read(cx).text(cx).trim() != branch_prefix(settings).trim();
-                rows.push(row(
+                rows.push(SettingRow::new(
                     "t3-settings-row-branch-prefix",
                     "Prefix",
                     "t3 or t3/ names a branch t3/add-search. Leave it empty for no prefix.",
                     h_flex()
                         .gap_1()
                         .child(
-                            field(&self.prefix)
+                            rows::field(&self.prefix, Some(240.), cx)
                                 .key_context("MustrBranchPrefix")
                                 .on_action(cx.listener(|this, _: &menu::Confirm, _, cx| {
                                     let changed = this.settings.loaded().is_some_and(|settings| {
@@ -1214,8 +1109,6 @@ impl T3SettingsView {
                             Self::save_prefix,
                             cx,
                         )),
-                    false,
-                    cx,
                 ));
             }
             BranchNamingMode::Custom => {
@@ -1225,167 +1118,159 @@ impl T3SettingsView {
                     .unwrap_or_default();
                 let changed = self.instructions.read(cx).text(cx).trim() != saved.trim();
                 rows.push(
-                    v_flex()
-                        .debug_selector(|| "t3-settings-row-branch-instructions".into())
-                        .w_full()
-                        .gap_1()
-                        .px_2()
-                        .py(scaled(px(9.)))
-                        .border_t(tokens::BORDER_WIDTH)
-                        .border_color(palette.border.hsla())
-                        .child(Label::new("Instructions").weight(FontWeight::MEDIUM))
-                        .child(muted(
-                            "Added to the naming prompt. The model returns the whole branch name; \
-                             nothing is added before or after it.",
-                        ))
-                        .child(
-                            div()
-                                .w_full()
-                                .px_2()
-                                .py_1()
-                                .rounded(scaled(tokens::CONTROL_RADIUS))
-                                .border(tokens::BORDER_WIDTH)
-                                .border_color(palette.border.hsla())
-                                .bg(palette.background.hsla())
-                                .child(self.instructions.clone()),
-                        )
-                        .child(h_flex().child(self.save_button(
-                            "t3-settings-save-instructions",
-                            changed,
-                            Self::save_instructions,
-                            cx,
-                        )))
-                        .into_any_element(),
+                    SettingRow::below(
+                        "t3-settings-row-branch-instructions",
+                        "Instructions",
+                        "Added to the naming prompt. The model returns the whole branch name; \
+                         nothing is added before or after it.",
+                        v_flex()
+                            .w_full()
+                            .gap_1()
+                            .child(rows::field(&self.instructions, None, cx))
+                            .child(h_flex().child(self.save_button(
+                                "t3-settings-save-instructions",
+                                changed,
+                                Self::save_instructions,
+                                cx,
+                            ))),
+                    )
+                    .keywords("branch names custom"),
                 );
             }
             _ => {}
         }
-        section("Branch naming", None, rows)
+        Group::new("Branch naming", rows)
     }
 }
 
-impl EventEmitter<ItemEvent> for T3SettingsView {}
-
-impl Focusable for T3SettingsView {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
-    }
-}
-
-impl Item for T3SettingsView {
-    type Event = ItemEvent;
-
-    fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
-        "T3 Code settings".into()
-    }
-
-    fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<Icon> {
-        Some(Icon::new(IconName::Server))
-    }
-
-    fn show_toolbar(&self) -> bool {
-        false
-    }
-
-    fn to_item_events(event: &Self::Event, f: &mut dyn FnMut(ItemEvent)) {
-        f(*event)
-    }
-}
-
-impl Render for T3SettingsView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = palette(cx);
-        let environment = self
-            .configs
+impl T3SettingsView {
+    /// The connected server's name, as T3 gives it.
+    pub(crate) fn environment(&self, cx: &App) -> Option<String> {
+        self.configs
             .read(cx)
             .environment()
             .map(|environment| environment.label.trim().to_string())
-            .filter(|label| !label.is_empty());
-        let header = v_flex()
-            .w_full()
-            .gap_0p5()
-            .child(Headline::new("T3 Code settings").size(HeadlineSize::Large))
-            .child(muted(match &environment {
-                Some(environment) => format!(
-                    "How T3 Code on {environment} starts, settles, and names agent threads. \
-                     T3 Code's app shares these settings."
-                ),
-                None => "How T3 Code starts, settles, and names agent threads. T3 Code's app \
-                         shares these settings."
-                    .to_string(),
-            }));
+            .filter(|label| !label.is_empty())
+    }
+
+    /// The T3 Code heading of the Settings page's Agents and threads: whose settings these are,
+    /// why they're read-only if they are, and the last write's error.
+    pub(crate) fn render_header(&self, cx: &App) -> AnyElement {
+        let palette = palette(cx);
+        let title = match self.environment(cx) {
+            Some(environment) => format!("T3 Code on {environment}"),
+            None => "T3 Code".to_string(),
+        };
         let notice = if self.write_unsupported {
-            Some("This T3 Code can't change its settings from mustr. Update it, or use T3 Code's app.".to_string())
+            Some(
+                "This T3 Code can't change its settings from mustr. Update it, or use T3 Code's \
+                 app."
+                    .to_string(),
+            )
         } else {
             self.backend
                 .as_ref()
                 .and_then(|backend| backend.blocked_reason(Access::SettingsWrite))
                 .map(|reason| format!("{reason}, so these settings are read-only here."))
         };
-        let body: Vec<AnyElement> = match &self.settings {
-            Loadable::Loading => vec![
-                Card::new()
-                    .child(muted("Loading T3 Code's settings…"))
-                    .into_any_element(),
-            ],
-            Loadable::Failed(error) => vec![
-                Card::new()
-                    .child(
-                        Label::new(error.clone())
-                            .size(LabelSize::Small)
-                            .color(Color::Error),
-                    )
-                    .into_any_element(),
-            ],
+        v_flex()
+            .debug_selector(|| "t3-settings-header".into())
+            .w_full()
+            .gap_0p5()
+            .pt_2()
+            .border_t(tokens::BORDER_WIDTH)
+            .border_color(palette.border.hsla())
+            .child(Headline::new(title).size(HeadlineSize::Small))
+            .child(muted(
+                "How T3 Code starts, settles, and names agent threads. These are T3 Code's own \
+                 settings, shared with T3 Code's app.",
+            ))
+            .when_some(notice, |this, notice| {
+                this.child(
+                    div()
+                        .debug_selector(|| "t3-settings-read-only".into())
+                        .child(muted(notice)),
+                )
+            })
+            .when_some(self.error.clone(), |this, error| {
+                this.child(
+                    div()
+                        .debug_selector(|| "t3-settings-error".into())
+                        .child(Label::new(error).size(LabelSize::Small).color(Color::Error)),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// T3's settings, by group, for the Settings page. While they load, or when they can't be
+    /// read, one group says so.
+    pub(crate) fn groups(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<Group> {
+        let status = |selector: &'static str, label: Label| {
+            vec![
+                Group::new(
+                    "",
+                    vec![
+                        SettingRow::whole(selector, "T3 Code settings", Card::new().child(label))
+                            .keywords("t3 code server"),
+                    ],
+                )
+                .bare(),
+            ]
+        };
+        match &self.settings {
+            Loadable::Loading => {
+                status("t3-settings-loading", muted("Loading T3 Code's settings…"))
+            }
+            Loadable::Failed(error) => status(
+                "t3-settings-failed",
+                Label::new(error.clone())
+                    .size(LabelSize::Small)
+                    .color(Color::Error),
+            ),
             Loadable::Loaded(settings) => {
                 let settings = settings.clone();
                 vec![
-                    self.render_new_threads(&settings, window, cx),
-                    self.render_follow_ups(cx),
-                    self.render_auto_settle(&settings, window, cx),
-                    self.render_branch_naming(&settings, cx),
-                    self.render_writing(&settings, cx),
-                    self.source_control.clone().into_any_element(),
+                    self.new_threads(&settings, window, cx),
+                    self.auto_settle(&settings, window, cx),
+                    self.branch_naming(&settings, cx),
+                    self.writing(&settings, cx),
+                    Group::new(
+                        "",
+                        vec![
+                            SettingRow::whole(
+                                "t3-settings-source-control",
+                                "Source control accounts",
+                                self.source_control.clone(),
+                            )
+                            .keywords("github gitlab forge gh glab git jj sign in login"),
+                        ],
+                    )
+                    .bare(),
                 ]
             }
-        };
-        v_flex()
-            .key_context("MustrT3Settings")
-            .track_focus(&self.focus_handle)
-            .size_full()
-            .bg(palette.background.hsla())
-            .child(
-                v_flex()
-                    .id("t3-settings-scroll")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .max_w(scaled(px(CONTENT_MAX_WIDTH)))
-                            .mx_auto()
-                            .px_6()
-                            .py_6()
-                            .gap_5()
-                            .child(header)
-                            .when_some(notice, |this, notice| {
-                                this.child(
-                                    div()
-                                        .debug_selector(|| "t3-settings-read-only".into())
-                                        .child(muted(notice)),
-                                )
-                            })
-                            .when_some(self.error.clone(), |this, error| {
-                                this.child(
-                                    div().debug_selector(|| "t3-settings-error".into()).child(
-                                        Label::new(error)
-                                            .size(LabelSize::Small)
-                                            .color(Color::Error),
-                                    ),
-                                )
-                            })
-                            .children(body),
-                    ),
-            )
+        }
+    }
+}
+
+/// On its own, as the tests draw it: the heading and every group.
+impl Render for T3SettingsView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = palette(cx);
+        let groups = self.groups(window, cx);
+        v_flex().size_full().bg(palette.background.hsla()).child(
+            v_flex()
+                .id("t3-settings-scroll")
+                .size_full()
+                .overflow_y_scroll()
+                .child(
+                    v_flex()
+                        .w_full()
+                        .px_6()
+                        .py_6()
+                        .gap_5()
+                        .child(self.render_header(cx))
+                        .children(groups.into_iter().map(|group| group.render(cx))),
+                ),
+        )
     }
 }

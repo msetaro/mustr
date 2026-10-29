@@ -106,15 +106,33 @@ const SUPERSEDED_ACTIONS: &[&str] = &[
     "terminal_panel::ToggleFocus",
     // mustr::NewThreadTerminal. mustr's terminal panel handles it, for its key binding.
     "workspace::NewTerminal",
-    // mustr::OpenSettings, mustr::OpenKeyBindings, and mustr::Quit, which the palette lists
-    // under mustr's name rather than as "zed: open settings". mustr handles Zed's too.
-    "zed::OpenSettings",
-    "zed::OpenSettingsFile",
-    "zed::OpenKeymapFile",
+    // mustr::Quit, which the palette lists under mustr's name rather than as "zed: quit". mustr
+    // handles Zed's too.
     "zed::Quit",
     // Zed's icon theme picker: its one icon theme is "Zed (Default)".
     "icon_theme_selector::Toggle",
 ];
+
+/// Zed actions that open a settings or key bindings file, or Zed's settings and keymap editors.
+/// mustr's settings are its Settings page, never a file (`settings_page.rs`), and the palette
+/// lists that page as "mustr: open settings" and "mustr: open key bindings". These are hidden from
+/// the palette and from vim's `:` commands; their key bindings stay, and mustr handles the ones
+/// Zed binds or dispatches by opening the Settings page (`window.rs`).
+const SETTINGS_FILE_ACTIONS: &[&str] = &[
+    "vim::OpenDefaultKeymap",
+    "zed::OpenDefaultKeymap",
+    "zed::OpenKeymap",
+    "zed::OpenKeymapFile",
+    "zed::OpenProjectSettings",
+    "zed::OpenSettings",
+    "zed::OpenSettingsFile",
+];
+
+/// Whether the palette and vim's commands leave out this action, which opens a settings or key
+/// bindings file.
+pub fn opens_a_settings_file(action_name: &str) -> bool {
+    SETTINGS_FILE_ACTIONS.contains(&action_name)
+}
 
 /// Whether mustr hides the action with this (canonical) name.
 pub fn is_hidden(action_name: &str) -> bool {
@@ -132,7 +150,11 @@ pub fn init(cx: &mut App) {
     // Every compiled-in action, including those that take arguments and so can't be built by
     // name.
     let action_types: Vec<TypeId> = gpui::generate_list_of_all_registered_actions()
-        .filter(|action| is_hidden(action.name) || SUPERSEDED_ACTIONS.contains(&action.name))
+        .filter(|action| {
+            is_hidden(action.name)
+                || SUPERSEDED_ACTIONS.contains(&action.name)
+                || opens_a_settings_file(action.name)
+        })
         .map(|action| action.type_id)
         .collect();
     CommandPaletteFilter::update_global(cx, |filter, _| {
@@ -194,9 +216,9 @@ fn set_interceptor(vim: Option<GlobalCommandPaletteInterceptor>, cx: &mut App) {
                 Some(results) => results.await,
                 None => CommandInterceptResult::default(),
             };
-            results
-                .results
-                .retain(|result| !is_hidden(result.action.name()));
+            results.results.retain(|result| {
+                !is_hidden(result.action.name()) && !opens_a_settings_file(result.action.name())
+            });
             results
                 .results
                 .extend(ours.into_iter().map(|result| CommandInterceptItem {
@@ -329,7 +351,7 @@ pub(crate) mod tests {
             for name in AI_ACTIONS.iter().chain(SERVICE_ACTIONS) {
                 assert!(registered.contains(name), "{name} no longer exists");
             }
-            for name in SUPERSEDED_ACTIONS {
+            for name in SUPERSEDED_ACTIONS.iter().chain(SETTINGS_FILE_ACTIONS) {
                 assert!(registered.contains(name), "{name} no longer exists");
                 let action = cx.build_action(name, None).unwrap();
                 assert!(filter.is_hidden(&*action), "the palette shows {name}");
@@ -392,6 +414,12 @@ pub(crate) mod tests {
         ] {
             assert!(listed.iter().any(|a| a == name), "the palette hides {name}");
         }
+        // Nothing in the palette opens a settings or key bindings file.
+        let files: Vec<_> = listed
+            .iter()
+            .filter(|name| opens_a_settings_file(name))
+            .collect();
+        assert!(files.is_empty(), "the palette lists {files:?}");
         let zeds: Vec<_> = listed
             .iter()
             .filter(|name| name.starts_with("zed::"))
@@ -438,7 +466,7 @@ pub(crate) mod tests {
     }
 
     #[gpui::test]
-    async fn vim_commands_dont_open_zeds_agent(cx: &mut TestAppContext) {
+    async fn vim_commands_dont_open_zeds_agent_or_files(cx: &mut TestAppContext) {
         let app_state = cx.update(|cx| {
             let app_state = workspace::AppState::test(cx);
             crate::app_settings::apply_default_overrides(cx).unwrap();
@@ -457,10 +485,14 @@ pub(crate) mod tests {
         let workspace =
             multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
 
-        // Vim maps `:AI` to Zed's agent panel.
+        // Vim maps `:AI` to Zed's agent panel, and `:map` to Zed's default keymap file.
         assert_eq!(
             intercept(":AI", &workspace, cx).await,
             ["agent::ToggleFocus"]
+        );
+        assert_eq!(
+            intercept(":map", &workspace, cx).await,
+            ["vim::OpenDefaultKeymap"]
         );
 
         // As in mustr, where vim mode turns on after `init` runs.
@@ -470,6 +502,10 @@ pub(crate) mod tests {
             set_vim_mode(true, cx);
         });
         assert_eq!(intercept(":AI", &workspace, cx).await, Vec::<String>::new());
+        assert_eq!(
+            intercept(":map", &workspace, cx).await,
+            Vec::<String>::new()
+        );
         // Vim's other commands still work.
         assert_eq!(intercept(":w", &workspace, cx).await, ["vim::VimSave"]);
     }

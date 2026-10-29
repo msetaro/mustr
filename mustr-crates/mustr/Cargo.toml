@@ -74,6 +74,7 @@ serde_json.workspace = true
 session.workspace = true
 settings.workspace = true
 shellexpand.workspace = true
+strum.workspace = true
 t3_client = { path = "../t3_client" }
 t3_runtime = { path = "../t3_runtime" }
 terminal.workspace = true

@@ -71,6 +71,8 @@ mod zoom;
 mod updates;
 // Worktree trust: T3's worktrees inherit their project's trust.
 mod worktree_trust;
+// Settings in the UI: one Settings page, with T3's settings.
+mod settings_page;
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
