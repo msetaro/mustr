@@ -23,6 +23,9 @@
   but you change them in Settings. If one of them can't be read, Settings says why and can start it
   over from mustr's defaults, keeping the old file next to it as `.bak`.
 - **A gear** for Settings on the rail, in place of the icon that looked like a sun.
+- **Clean rounded corners.** Hovering a button, a split button's ▾, or a review comment's title,
+  and the selected option of a control like Unified | Split, no longer draws square edges over the
+  rounded corners. The shortcut you're changing in Keyboard shortcuts is highlighted the same way.
 
 ## 0.1.0
 

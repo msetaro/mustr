@@ -1,8 +1,11 @@
-use crate::{components::ClickHandler, palette, tokens, tokens::Palette, tokens::scaled};
+use crate::{
+    ChildPosition, RoundedCorners as _, components::ClickHandler, corners::inner_radius, palette,
+    tokens, tokens::Palette, tokens::scaled,
+};
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Window, div, px,
+    AnyElement, App, Axis, ClickEvent, ElementId, FontWeight, Hsla, InteractiveElement as _,
+    IntoElement, MouseButton, ParentElement as _, Pixels, RenderOnce, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 use ui::{FluentBuilder as _, Tooltip, h_flex};
 
@@ -109,13 +112,14 @@ impl TextButton {
 }
 
 impl RenderOnce for TextButton {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = self.style.colors(palette(cx));
         let content = button_content(self.label, self.count, &colors);
         let tooltip = self.tooltip.filter(|_| !self.menu_open);
         button_frame(self.style, &colors)
             .child(
                 clickable_part(self.id, &colors, self.disabled, tooltip, self.on_click)
+                    .rounded_at(ChildPosition::Only, Axis::Horizontal, part_radius(window))
                     .px(scaled(px(10.)))
                     .child(content),
             )
@@ -207,7 +211,8 @@ impl SplitButton {
 }
 
 impl RenderOnce for SplitButton {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let radius = part_radius(window);
         let colors = self.style.colors(palette(cx));
         let content = button_content(self.label, self.count, &colors);
         let menu_id = ElementId::NamedChild(self.id.clone().into(), "menu".into());
@@ -220,6 +225,7 @@ impl RenderOnce for SplitButton {
             .child(
                 clickable_part(self.id, &colors, self.disabled, tooltip, self.on_click)
                     .debug_selector(|| "split-button-main".into())
+                    .rounded_at(ChildPosition::First, Axis::Horizontal, radius)
                     .pl(scaled(px(10.)))
                     .pr(scaled(px(8.)))
                     .child(content),
@@ -234,6 +240,7 @@ impl RenderOnce for SplitButton {
                     self.on_menu_click,
                 )
                 .debug_selector(|| "split-button-menu".into())
+                .rounded_at(ChildPosition::Last, Axis::Horizontal, radius)
                 .px(scaled(px(6.)))
                 .child("▾"),
             )
@@ -256,6 +263,12 @@ fn button_frame(style: ButtonStyle, colors: &ButtonColors) -> gpui::Div {
             this.font_weight(FontWeight::SEMIBOLD)
         })
         .whitespace_nowrap()
+}
+
+/// The radius of a clickable part's hover fill on the corners it shares with the frame, which
+/// GPUI doesn't clip to its rounded corners.
+fn part_radius(window: &Window) -> Pixels {
+    inner_radius(scaled(tokens::CONTROL_RADIUS).to_pixels(window.rem_size()))
 }
 
 fn button_content(
