@@ -758,7 +758,7 @@ fn display_title(title: &str, is_subagent: bool) -> Option<String> {
 
 /// Drops the `Subagent: ` prefix, and names a Codex agent path such as
 /// `/root/review_agent` by its last part (T3's `formatSubagentDisplayTitle`).
-fn format_subagent_title(title: &str) -> String {
+pub(crate) fn format_subagent_title(title: &str) -> String {
     let title = title
         .get(..9)
         .filter(|prefix| prefix.eq_ignore_ascii_case("subagent:"))

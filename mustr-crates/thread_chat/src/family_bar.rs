@@ -15,6 +15,7 @@ mod family;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use family::format_subagent_title;
 use family::{
     Activity, BackgroundWork, Family, Relationship, Relative, StopTarget, SubagentTask, Workflow,
     WorkflowMember,

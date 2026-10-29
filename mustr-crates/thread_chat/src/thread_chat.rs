@@ -100,6 +100,9 @@ pub use palette::{
     CopyThreadId, FindInThread, NewThreadInProject, NewThreadWithoutProject, PaletteResult,
     palette_results,
 };
+// Thread polish: subagent badges, the subagents drawer, and one status for a thread:
+pub mod agent_badge;
+pub use agent_badge::provider_icon;
 
 #[cfg(test)]
 mod tests;

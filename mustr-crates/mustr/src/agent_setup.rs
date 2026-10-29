@@ -663,15 +663,9 @@ fn managed_setup(provider: &ServerProvider) -> Option<&ServerProviderSetup> {
         .filter(|setup| setup.can_install || setup.can_authenticate)
 }
 
+/// An agent's icon, as the threads' subagent badges and rows show it (`thread_chat::provider_icon`).
 fn driver_icon(driver: &str) -> IconName {
-    match driver {
-        "claudeAgent" => IconName::AiClaude,
-        "codex" => IconName::AiOpenAi,
-        "antigravity" => IconName::AiGoogle,
-        "cursor" => IconName::EditorCursor,
-        "opencode" | "openCode" => IconName::AiOpenCode,
-        _ => IconName::Terminal,
-    }
+    thread_chat::provider_icon(driver).unwrap_or(IconName::Terminal)
 }
 
 // The page.
