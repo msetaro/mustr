@@ -15,10 +15,24 @@ pub enum MustrIcon {
     Inbox,
     PullRequest,
     Settings,
+    /// A dashed ring: an agent at work (T3's `CircleDashed`).
+    CircleDashed,
+    /// A dashed ring around a dot: an agent waiting (T3's `CircleDotDashed`).
+    CircleDotDashed,
+    /// An agent with no icon of its own (T3's `Bot`).
+    Bot,
 }
 
 impl MustrIcon {
-    const ALL: [Self; 4] = [Self::Agent, Self::Inbox, Self::PullRequest, Self::Settings];
+    const ALL: [Self; 7] = [
+        Self::Agent,
+        Self::Inbox,
+        Self::PullRequest,
+        Self::Settings,
+        Self::CircleDashed,
+        Self::CircleDotDashed,
+        Self::Bot,
+    ];
 
     pub fn path(self) -> &'static str {
         match self {
@@ -26,6 +40,9 @@ impl MustrIcon {
             Self::Inbox => "icons/mustr/inbox.svg",
             Self::PullRequest => "icons/mustr/pull_request.svg",
             Self::Settings => "icons/mustr/settings.svg",
+            Self::CircleDashed => "icons/mustr/circle_dashed.svg",
+            Self::CircleDotDashed => "icons/mustr/circle_dot_dashed.svg",
+            Self::Bot => "icons/mustr/bot.svg",
         }
     }
 
@@ -35,6 +52,9 @@ impl MustrIcon {
             Self::Inbox => include_str!("../assets/icons/inbox.svg"),
             Self::PullRequest => include_str!("../assets/icons/pull_request.svg"),
             Self::Settings => include_str!("../assets/icons/settings.svg"),
+            Self::CircleDashed => include_str!("../assets/icons/circle_dashed.svg"),
+            Self::CircleDotDashed => include_str!("../assets/icons/circle_dot_dashed.svg"),
+            Self::Bot => include_str!("../assets/icons/bot.svg"),
         }
     }
 
