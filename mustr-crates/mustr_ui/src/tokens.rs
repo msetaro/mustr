@@ -3,7 +3,7 @@
 //! `assets/themes/mustr/mustr.json` is written from the same values, and the
 //! tests in this crate check that the two agree.
 
-use gpui::{App, Hsla, Pixels, Rems, Rgba, px, rems};
+use gpui::{App, Hsla, Pixels, Rems, Rgba, Window, px, rems};
 use settings::Settings as _;
 use theme_settings::ThemeSettings;
 
@@ -186,4 +186,15 @@ pub fn text_size(size: Pixels) -> Rems {
 /// frame too.
 pub fn scaled_pixels(length: Pixels, cx: &App) -> Pixels {
     scaled(length).to_pixels(ThemeSettings::get_global(cx).ui_font_size(cx))
+}
+
+/// The room a modal keeps from each side of the window, at mustr's design size.
+pub const MODAL_MARGIN: Pixels = px(12.);
+
+/// A modal's width: `width`, or narrower in a window that hasn't room for it (a half-screen
+/// window at a big `ui_font_size`), keeping [`MODAL_MARGIN`] on each side.
+pub fn modal_width(width: Rems, window: &Window) -> Rems {
+    let rem_size = window.rem_size();
+    let room = window.viewport_size().width - scaled(MODAL_MARGIN).to_pixels(rem_size) * 2.;
+    rems((room / rem_size).max(0.).min(width.0))
 }

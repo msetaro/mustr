@@ -1,18 +1,20 @@
 use crate::{components::ClickHandler, palette, tokens, tokens::scaled};
 use gpui::{
     App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Window, div, px,
+    ParentElement as _, Pixels, RenderOnce, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Window, div, px,
 };
 use ui::{FluentBuilder as _, Tooltip, h_flex};
 
 /// A tab in the title bar, for an open pull request, thread, or the home view. The active tab
-/// is raised onto the window's background.
+/// is raised onto the window's background. Its label ends in an ellipsis when it's longer than
+/// the tab's widest ([`WindowTab::max_width`]).
 #[derive(IntoElement)]
 pub struct WindowTab {
     id: ElementId,
     label: SharedString,
     active: bool,
+    max_width: Option<Pixels>,
     tooltip: Option<SharedString>,
     on_click: Option<ClickHandler>,
     on_close: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -24,6 +26,7 @@ impl WindowTab {
             id: id.into(),
             label: label.into(),
             active: false,
+            max_width: None,
             tooltip: None,
             on_click: None,
             on_close: None,
@@ -32,6 +35,13 @@ impl WindowTab {
 
     pub fn active(mut self, active: bool) -> Self {
         self.active = active;
+        self
+    }
+
+    /// Narrower than its usual widest (240 at mustr's design size), for a row of tabs that would
+    /// overflow. Its label ends in an ellipsis.
+    pub fn max_width(mut self, max_width: Pixels) -> Self {
+        self.max_width = Some(max_width);
         self
     }
 
@@ -61,8 +71,11 @@ impl RenderOnce for WindowTab {
         let on_close = self.on_close.map(std::rc::Rc::new);
         h_flex()
             .id(self.id)
-            .flex_none()
-            .max_w(scaled(px(240.)))
+            .flex_shrink_1()
+            .map(|this| match self.max_width {
+                Some(max_width) => this.max_w(max_width),
+                None => this.max_w(scaled(px(240.))),
+            })
             .gap(scaled(px(8.)))
             .px(scaled(px(10.)))
             .py(scaled(px(3.)))
@@ -87,7 +100,8 @@ impl RenderOnce for WindowTab {
             })
             .child(
                 div()
-                    .min_w_0()
+                    // A few letters stay, so a squeezed tab still says what it is.
+                    .min_w(scaled(px(28.)))
                     .overflow_hidden()
                     .text_ellipsis()
                     .child(self.label),
