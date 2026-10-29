@@ -86,7 +86,7 @@ fn move_button(index: usize, offset: isize, disabled: bool) -> impl IntoElement 
         ("down", IconName::ArrowDown, "Move down")
     };
     let id = format!("settings-review-{direction}-{index}");
-    div().debug_selector(move || id.clone()).child(
+    div().debug_selector(move || id).child(
         IconButton::new(
             SharedString::from(format!("settings-review-{direction}-{index}")),
             icon,

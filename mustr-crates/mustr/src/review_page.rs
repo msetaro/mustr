@@ -725,7 +725,7 @@ impl ReviewPage {
             return;
         };
         let open = open_pull_request::open_link(
-            link.clone(),
+            link,
             self.projects.clone(),
             self.workspace.clone(),
             window,

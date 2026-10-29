@@ -231,7 +231,7 @@ pub fn count_label(count: u64) -> String {
     let digits = count.to_string();
     let mut label = String::new();
     for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index) % 3 == 0 {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
             label.push(',');
         }
         label.push(digit);
@@ -1000,7 +1000,7 @@ mod tests {
         }));
         assert_eq!(page.list.entries, expected.entries);
         assert!(
-            page.list.entries[0].is_authored_by_viewer(&page.list.viewers) == false
+            !page.list.entries[0].is_authored_by_viewer(&page.list.viewers)
                 && page.list.entries[0].viewer_review_requested
         );
     }
