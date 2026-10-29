@@ -68,6 +68,8 @@ pub use snooze::SnoozeThread;
 // WP14, agent setup and T3's settings:
 // WP15, timeline and composer:
 mod answers;
+#[cfg(debug_assertions)]
+mod debug_fixture;
 mod file_links;
 mod formatting;
 mod html_renders;

@@ -514,6 +514,10 @@ impl SearchableItem for ThreadView {
             self.find.active = None;
         }
         self.find.query = Some(query.clone());
+        #[cfg(debug_assertions)]
+        if crate::debug_fixture::active() {
+            self.find.local_only = true;
+        }
         if self.find.local_only {
             return Task::ready(local_matches(&self.findable_items(), &query));
         }

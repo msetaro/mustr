@@ -977,6 +977,9 @@ pub struct ThreadState {
     checkpoints: Vec<OrchestrationV2Checkpoint>,
     /// The agent sessions the thread holds, which "Restart agent session" detaches.
     provider_sessions: Vec<OrchestrationV2ProviderSession>,
+    /// Whether the debug fixture played on this snapshot (`debug_fixture.rs`).
+    #[cfg(debug_assertions)]
+    pub(crate) debug_fixture_applied: bool,
 }
 
 impl ThreadState {
@@ -1000,7 +1003,16 @@ impl ThreadState {
             attempts: projection.attempts,
             checkpoints: projection.checkpoints,
             provider_sessions: projection.provider_sessions,
+            #[cfg(debug_assertions)]
+            debug_fixture_applied: false,
         }
+    }
+
+    /// Applies an event of the debug fixture (`debug_fixture.rs`), without moving the sequence
+    /// the subscription resumes from.
+    #[cfg(debug_assertions)]
+    pub(crate) fn apply_fixture_event(&mut self, event: OrchestrationV2DomainEvent) -> Applied {
+        self.apply_event(event)
     }
 
     /// The thread's subagents and delegated tasks, as T3 last sent them.

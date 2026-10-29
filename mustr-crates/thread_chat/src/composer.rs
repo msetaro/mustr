@@ -48,6 +48,8 @@ const FEEDBACK_PLACEHOLDER: &str = "Send feedback to decline this request";
 const IMAGE_TILE_SIZE: f32 = 64.;
 /// A file's tile is as tall, and wide enough for its name.
 const FILE_TILE_WIDTH: f32 = 200.;
+/// The most of the window the agent's requests take above the composer before they scroll.
+const PENDING_MAX_FRACTION: f32 = 0.3;
 
 /// A queued message being dragged to another place in the queue.
 #[derive(Clone)]
@@ -2374,11 +2376,24 @@ impl ThreadView {
                     .w_full()
                     .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                     .gap_2()
-                    .children(
-                        pending
-                            .iter()
-                            .map(|pending| self.render_pending(pending, cx)),
-                    )
+                    // The agent's requests scroll rather than push the timeline and the
+                    // composer out of a small window.
+                    .when(!pending.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .id("thread-pending-requests")
+                                .w_full()
+                                .max_h(window.viewport_size().height * PENDING_MAX_FRACTION)
+                                .overflow_y_scroll()
+                                .child(
+                                    v_flex().w_full().gap_2().children(
+                                        pending
+                                            .iter()
+                                            .map(|pending| self.render_pending(pending, cx)),
+                                    ),
+                                ),
+                        )
+                    })
                     .children(self.render_goal(cx))
                     .when(!queued.is_empty(), |this| {
                         this.child(self.render_queue(queued, running, cx))

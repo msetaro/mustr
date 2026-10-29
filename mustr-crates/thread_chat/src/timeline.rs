@@ -101,6 +101,8 @@ impl ThreadView {
     /// Brings the list's rows in line with the thread, re-measuring only from the first row
     /// that changed. Streaming changes the last rows, so this stays cheap.
     pub(crate) fn sync_rows(&mut self, cx: &mut Context<Self>) {
+        #[cfg(debug_assertions)]
+        self.apply_debug_fixture();
         let Loadable::Loaded(state) = &self.state else {
             return;
         };
