@@ -43,6 +43,10 @@ mod worktrees;
 mod macos;
 // WP8, notifications:
 mod notifications;
+// WP11, terminals, worktrees and the PR flow:
+// WP12, composer and timeline:
+// WP13, thread list and navigation:
+// WP14, agent setup and T3's settings:
 // Zoom:
 mod zoom;
 // Releases and self-update:
@@ -469,6 +473,10 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     // WP9, composer mentions and slash commands: `@` searches a thread's folder on this machine
     // only when T3's folders are here.
     thread_chat::set_local_folders(worktrees::worktrees_are_local, cx);
+    // WP11, terminals, worktrees and the PR flow:
+    // WP12, composer and timeline:
+    // WP13, thread list and navigation:
+    // WP14, agent setup and T3's settings:
     // Zoom:
     zoom::init(cx);
     // Releases and self-update:

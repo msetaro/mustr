@@ -52,13 +52,19 @@ mod history_tests;
 mod mentions;
 mod slash_commands;
 pub use mentions::set_local_folders;
+// WP11, terminals, worktrees and the PR flow:
+mod worktree_setup;
+// WP12, composer and timeline:
+mod find_bar;
+// WP13, thread list and navigation:
+// WP14, agent setup and T3's settings:
 
 #[cfg(test)]
 mod tests;
 
 pub use actions::{
-    NewThreadInWorktree, OpenInEditor, OpenThreadTerminal, RemoveThreadWorktree,
-    ReviewThreadChanges,
+    AddComposerContext, ComposerContext, NewThreadInWorktree, OpenInEditor, OpenThreadTerminal,
+    RemoveThreadWorktree, ReviewThreadChanges,
 };
 pub use backend::{
     Access, AttachmentUpload, GlobalThreadBackend, ReadOnlyBackend, ThreadBackend,
@@ -96,6 +102,10 @@ pub fn init(cx: &mut App) {
     // WP10, history, agent status and usage:
     history::init(cx);
     usage::init(cx);
+    // WP11, terminals, worktrees and the PR flow:
+    // WP12, composer and timeline:
+    // WP13, thread list and navigation:
+    // WP14, agent setup and T3's settings:
 }
 
 /// mustr's key bindings for threads. The app binds them after Zed's, so users can rebind them:
@@ -127,6 +137,10 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-shift-s", SettleThread, Some("ThreadsSidebar")),
         KeyBinding::new("secondary-alt-k", SearchThreads, Some("Workspace")),
         KeyBinding::new("escape", menu::Cancel, Some("ThreadsSidebar > Editor")),
+        // WP11, terminals, worktrees and the PR flow:
+        // WP12, composer and timeline:
+        // WP13, thread list and navigation:
+        // WP14, agent setup and T3's settings:
     ]
 }
 

@@ -5,8 +5,10 @@
 //!
 //! mustr asks for exactly [`SCOPES`]: reading orchestration (pull requests, threads), driving
 //! agents (messages, approvals, new threads), writing to pull requests (comments, reviews,
-//! viewed marks), and reading files on T3's machine (the composer's `@`, for a thread whose
-//! folder isn't on this one). A stored token that lacks one of them is replaced by pairing again.
+//! viewed marks), reading files on T3's machine (the composer's `@`, for a thread whose folder
+//! isn't on this one), following and driving T3's terminals, changing T3's settings, and
+//! installing and signing in to agents. A stored token that lacks one of them is replaced by
+//! pairing again.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use futures::{AsyncReadExt as _, FutureExt as _, future::BoxFuture};
@@ -48,11 +50,15 @@ pub const SERVER_URL_ENV: &str = "MUSTR_T3_SERVER";
 pub const CREDENTIALS_FILE_ENV: &str = "MUSTR_CREDENTIALS_FILE";
 
 /// The scopes mustr asks T3 for. Never `access:*` or `relay:*`.
-pub const SCOPES: [Scope; 4] = [
+pub const SCOPES: [Scope; 8] = [
     Scope::OrchestrationRead,
     Scope::OrchestrationOperate,
     Scope::SourceControlWrite,
     Scope::FilesystemRead,
+    Scope::TerminalRead,
+    Scope::TerminalOperate,
+    Scope::SettingsWrite,
+    Scope::ProvidersManage,
 ];
 const PAIRING_LABEL: &str = "mustr";
 const PAIRING_TTL: &str = "5m";
@@ -83,6 +89,15 @@ pub fn pairing_command() -> String {
         .collect::<Vec<_>>()
         .join(" ");
     format!("t3 auth pairing create {scopes} --label {PAIRING_LABEL}")
+}
+
+/// Why mustr can't do `what` ("drive agents"): its pairing lacks `scope`.
+pub fn missing_scope_reason(scope: Scope, what: &str) -> String {
+    format!(
+        "mustr's pairing with T3 can't {what} (it lacks {}). Pair again from the home view: {}",
+        scope.as_str(),
+        pairing_command()
+    )
 }
 
 /// The scopes of [`SCOPES`] that `granted` (T3's scope names) doesn't include.
@@ -396,44 +411,18 @@ impl T3Session {
 
     /// Why pull requests can't be written to with this session, if they can't.
     pub fn write_blocked_reason(&self) -> Option<String> {
-        self.missing_scopes()
-            .contains(&Scope::SourceControlWrite)
-            .then(|| {
-                format!(
-                    "mustr's pairing with T3 can't write to pull requests (it lacks {}). Pair \
-                     again from the home view: {}",
-                    Scope::SourceControlWrite.as_str(),
-                    pairing_command()
-                )
-            })
-    }
-
-    /// Why files on T3's machine can't be searched with this session, if they can't.
-    pub fn filesystem_blocked_reason(&self) -> Option<String> {
-        self.missing_scopes()
-            .contains(&Scope::FilesystemRead)
-            .then(|| {
-                format!(
-                    "mustr's pairing with T3 can't read files on T3's machine (it lacks {}). \
-                     Pair again from the home view: {}",
-                    Scope::FilesystemRead.as_str(),
-                    pairing_command()
-                )
-            })
+        self.missing_scope_reason(Scope::SourceControlWrite, "write to pull requests")
     }
 
     /// Why agents can't be driven with this session, if they can't.
     pub fn operate_blocked_reason(&self) -> Option<String> {
+        self.missing_scope_reason(Scope::OrchestrationOperate, "drive agents")
+    }
+
+    fn missing_scope_reason(&self, scope: Scope, what: &str) -> Option<String> {
         self.missing_scopes()
-            .contains(&Scope::OrchestrationOperate)
-            .then(|| {
-                format!(
-                    "mustr's pairing with T3 can't drive agents (it lacks {}). Pair again from \
-                     the home view: {}",
-                    Scope::OrchestrationOperate.as_str(),
-                    pairing_command()
-                )
-            })
+            .contains(&scope)
+            .then(|| missing_scope_reason(scope, what))
     }
 
     pub fn rpc(&self) -> &RpcConnection {
@@ -484,16 +473,7 @@ impl T3Session {
 
     /// Why messages can't be sent to agent threads with this session, if they can't.
     pub fn agent_send_blocked_reason(&self) -> Option<String> {
-        self.missing_scopes()
-            .contains(&Scope::OrchestrationOperate)
-            .then(|| {
-                format!(
-                    "mustr's pairing with T3 can't send messages to agents (it lacks {}). Pair \
-                     again from the home view: {}",
-                    Scope::OrchestrationOperate.as_str(),
-                    pairing_command()
-                )
-            })
+        self.missing_scope_reason(Scope::OrchestrationOperate, "send messages to agents")
     }
 
     /// Whether T3 runs on this machine, so the paths it reports (such as a thread's worktree)
@@ -1939,37 +1919,59 @@ mod tests {
     }
 
     #[test]
-    fn mustr_asks_for_reading_operating_agents_pull_request_writes_and_file_reads_only() {
+    fn mustr_asks_for_its_scopes_only() {
         assert_eq!(
             SCOPES.map(Scope::as_str),
             [
                 "orchestration:read",
                 "orchestration:operate",
                 "source-control:write",
-                "filesystem:read"
+                "filesystem:read",
+                "terminal:read",
+                "terminal:operate",
+                "settings:write",
+                "providers:manage"
             ]
         );
         assert_eq!(
             pairing_command(),
             "t3 auth pairing create --scope orchestration:read --scope orchestration:operate \
-             --scope source-control:write --scope filesystem:read --label mustr"
+             --scope source-control:write --scope filesystem:read --scope terminal:read \
+             --scope terminal:operate --scope settings:write --scope providers:manage \
+             --label mustr"
         );
         assert_eq!(
             missing_scopes("orchestration:read".split_whitespace()),
             [
                 Scope::OrchestrationOperate,
                 Scope::SourceControlWrite,
-                Scope::FilesystemRead
+                Scope::FilesystemRead,
+                Scope::TerminalRead,
+                Scope::TerminalOperate,
+                Scope::SettingsWrite,
+                Scope::ProvidersManage
             ]
         );
         assert!(
             missing_scopes([
+                "providers:manage",
                 "source-control:write",
+                "terminal:operate",
                 "orchestration:read",
+                "settings:write",
                 "filesystem:read",
+                "terminal:read",
                 "orchestration:operate"
             ])
             .is_empty()
+        );
+        assert_eq!(
+            missing_scope_reason(Scope::SettingsWrite, "change T3's settings"),
+            "mustr's pairing with T3 can't change T3's settings (it lacks settings:write). Pair \
+             again from the home view: t3 auth pairing create --scope orchestration:read \
+             --scope orchestration:operate --scope source-control:write --scope filesystem:read \
+             --scope terminal:read --scope terminal:operate --scope settings:write \
+             --scope providers:manage --label mustr"
         );
     }
 
@@ -1989,7 +1991,8 @@ mod tests {
             accepted,
             scopes: scopes.map(|scopes| scopes.iter().map(|scope| scope.to_string()).collect()),
         };
-        let all = "orchestration:read orchestration:operate source-control:write filesystem:read";
+        let all = "orchestration:read orchestration:operate source-control:write filesystem:read \
+                   terminal:read terminal:operate settings:write providers:manage";
         assert_eq!(
             stored_token_use(&check(true, None), all),
             (StoredTokenUse::Use, all.to_string())
@@ -2000,6 +2003,37 @@ mod tests {
             stored_token_use(&check(true, None), without_files).0,
             StoredTokenUse::PairAgain
         );
+        // A token from before wave 3's terminals, settings, and agent setup: T3 still accepts it,
+        // so it's kept in case pairing again fails.
+        let wave_2 =
+            "orchestration:read orchestration:operate source-control:write filesystem:read";
+        assert_eq!(
+            stored_token_use(&check(true, None), wave_2),
+            (StoredTokenUse::PairAgain, wave_2.to_string())
+        );
+        assert_eq!(
+            missing_scopes(wave_2.split_whitespace()),
+            [
+                Scope::TerminalRead,
+                Scope::TerminalOperate,
+                Scope::SettingsWrite,
+                Scope::ProvidersManage
+            ]
+        );
+        // Missing any one of them is enough to pair again.
+        for scope in [
+            "terminal:read",
+            "terminal:operate",
+            "settings:write",
+            "providers:manage",
+        ] {
+            let without = all.replace(scope, "");
+            assert_eq!(
+                stored_token_use(&check(true, None), &without).0,
+                StoredTokenUse::PairAgain,
+                "a token without {scope}"
+            );
+        }
         // A token from M0, paired read-only.
         assert_eq!(
             stored_token_use(&check(true, None), "orchestration:read"),
@@ -2031,7 +2065,8 @@ mod tests {
             StoredTokenUse::PairAgain
         );
 
-        // What T3 0.1.1 answers for mustr's session: the write scope is only in `permissions`.
+        // What T3 0.1.1 answers for a session paired before wave 3: the write scope is only in
+        // `permissions`.
         let session = parse_session_check(
             br#"{"authenticated":true,"auth":{},"scopes":["orchestration:read","orchestration:operate"],"permissions":["orchestration:read","orchestration:operate","source-control:write","filesystem:read"],"sessionMethod":"bearer-access-token"}"#,
         )
@@ -2048,7 +2083,18 @@ mod tests {
                 ])
             )
         );
-        assert_eq!(stored_token_use(&session, all).0, StoredTokenUse::Use);
+        // T3's account wins over the stored scopes, so it pairs again.
+        assert_eq!(
+            stored_token_use(&session, all),
+            (StoredTokenUse::PairAgain, wave_2.to_string())
+        );
+        // What T3 0.1.3 answers for mustr's session now: `scopes` lists only the scopes older
+        // clients know (`authScopeResponse`), `permissions` the full grant.
+        let session = parse_session_check(
+            br#"{"authenticated":true,"auth":{},"scopes":["orchestration:read","orchestration:operate","terminal:operate"],"permissions":["orchestration:read","orchestration:operate","source-control:write","filesystem:read","terminal:read","terminal:operate","settings:write","providers:manage"],"sessionMethod":"bearer-access-token"}"#,
+        )
+        .unwrap();
+        assert_eq!(stored_token_use(&session, wave_2).0, StoredTokenUse::Use);
         // A server from before `permissions`.
         assert_eq!(
             parse_session_check(

@@ -292,10 +292,11 @@ mustr uses 0.1.1's data on servers without it:
 - **Skip:** 11.
 - **No priority:** 2 done rows.
 
-**Scopes:** mustr asks for `orchestration:read`, `orchestration:operate`, `source-control:write` and
-`filesystem:read` (`SCOPES` in `mustr/src/t3_connection.rs`). Wave 3 adds `terminal:read` and
-`terminal:operate` (remote terminals), `settings:write` (T3's settings) and `providers:manage`
-(installing and signing in to agents). `access:*` and `relay:*` stay out.
+**Scopes:** mustr asks for `orchestration:read`, `orchestration:operate`, `source-control:write`,
+`filesystem:read`, `terminal:read` and `terminal:operate` (remote terminals), `settings:write`
+(T3's settings) and `providers:manage` (installing and signing in to agents) (`SCOPES` in
+`mustr/src/t3_connection.rs`), each with an `Access` level (`thread_chat/src/backend.rs`).
+`access:*` and `relay:*` stay out.
 
 ## 3. Build order
 

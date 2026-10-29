@@ -12,6 +12,7 @@ use crate::{
     new_thread::{NewThreadForm, NewThreadFormEvent},
     settings_bar::ThreadSettingsBar,
     timeline::truncate,
+    worktree_setup::WorktreeSetupCard,
 };
 use collections::{HashMap, HashSet};
 use editor::Editor;
@@ -30,6 +31,7 @@ use ui::{Color, Label, LabelCommon as _, LabelSize, prelude::*};
 use workspace::{
     Workspace,
     item::{Item, ItemEvent},
+    searchable::SearchableItemHandle,
 };
 
 actions!(
@@ -81,6 +83,14 @@ pub struct ThreadView {
     pub(crate) settings_bar: Entity<ThreadSettingsBar>,
     /// Under the header.
     family_bar: Entity<ThreadFamilyBar>,
+    /// Above the timeline (`worktree_setup.rs`).
+    worktree_setup: Entity<WorktreeSetupCard>,
+    /// Find in thread's matches (`find_bar.rs`).
+    #[expect(
+        dead_code,
+        reason = "find in thread keeps its matches here once it searches (WP12)"
+    )]
+    pub(crate) find: crate::find_bar::FindState,
     pub(crate) sending: bool,
     /// Requests being answered, by id.
     pub(crate) responding: HashSet<String>,
@@ -175,7 +185,8 @@ impl ThreadView {
         list_state.set_follow_mode(FollowMode::Tail);
         let this_view = cx.weak_entity();
         let settings_bar = cx.new(|cx| ThreadSettingsBar::new(this_view.clone(), window, cx));
-        let family_bar = cx.new(|cx| ThreadFamilyBar::new(this_view, window, cx));
+        let family_bar = cx.new(|cx| ThreadFamilyBar::new(this_view.clone(), window, cx));
+        let worktree_setup = cx.new(|cx| WorktreeSetupCard::new(this_view, window, cx));
         let mut this = Self {
             focus_handle: cx.focus_handle(),
             backend: backend.clone(),
@@ -195,6 +206,8 @@ impl ThreadView {
             composer,
             settings_bar,
             family_bar,
+            worktree_setup,
+            find: Default::default(),
             sending: false,
             responding: HashSet::default(),
             answers: HashMap::default(),
@@ -447,10 +460,19 @@ impl Item for ThreadView {
     }
 
     /// So the app can add toolbar items for threads (`mustr/src/window.rs`). Zed's toolbar
-    /// draws nothing while none of its items shows, and its search bars hide for threads, so
-    /// it takes no space until an item does.
+    /// draws nothing while none of its items shows, and its buffer search bar shows only while
+    /// finding in the thread, so it takes no space until an item does.
     fn show_toolbar(&self) -> bool {
         true
+    }
+
+    /// Find in thread, with Zed's buffer search bar (`find_bar.rs`).
+    fn as_searchable(
+        &self,
+        handle: &Entity<Self>,
+        cx: &App,
+    ) -> Option<Box<dyn SearchableItemHandle>> {
+        crate::find_bar::searchable(self, handle, cx)
     }
 
     fn to_item_events(event: &Self::Event, f: &mut dyn FnMut(ItemEvent)) {
@@ -500,6 +522,7 @@ impl Render for ThreadView {
             .when(self.new_thread.is_none(), |this| {
                 this.child(self.render_header(cx))
                     .child(self.family_bar.clone())
+                    .child(self.worktree_setup.clone())
             })
             .child(
                 div()
