@@ -58,6 +58,13 @@ mod worktree_setup;
 mod find_bar;
 pub use mentions::{context_reference_and_record, message_context_of};
 // WP13, thread list and navigation:
+mod snooze;
+pub use new_thread::{ToggleWorkspacePicker, UsePreviousWorktree};
+pub use organize::{
+    CopyPullRequestLink, ShowArchivedThreads, ToggleThreadAutoSettle, UndoThreadAction, WakeThread,
+};
+pub use sidebar::{NextThread, PreviousThread, RowPullRequest};
+pub use snooze::SnoozeThread;
 // WP14, agent setup and T3's settings:
 
 #[cfg(test)]
@@ -107,6 +114,7 @@ pub fn init(cx: &mut App) {
     // WP12, composer and timeline:
     mentions::init(cx);
     // WP13, thread list and navigation:
+    snooze::init(cx);
     // WP14, agent setup and T3's settings:
 }
 
@@ -148,7 +156,36 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
             zed_actions::buffer_search::Deploy::find(),
             Some("ThreadView"),
         ),
-        // WP13, thread list and navigation:
+        // WP13, thread list and navigation: T3's `mod+shift+[` and `]` (previous and next
+        // thread, over Zed's tab switching and Fold in a thread), `mod+shift+x` (where a new
+        // thread works), `mod+shift+l` (its previous worktree, over the composer's Select All
+        // Matches on drafts), and `mod+z` (undo a settle, unpin or snooze) outside text fields.
+        // GPUI reads shift-[ as `{`.
+        KeyBinding::new("secondary-{", PreviousThread, Some("ThreadView")),
+        KeyBinding::new("secondary-}", NextThread, Some("ThreadView")),
+        KeyBinding::new("secondary-{", PreviousThread, Some("ThreadView > Editor")),
+        KeyBinding::new("secondary-}", NextThread, Some("ThreadView > Editor")),
+        KeyBinding::new("secondary-{", PreviousThread, Some("ThreadsSidebar")),
+        KeyBinding::new("secondary-}", NextThread, Some("ThreadsSidebar")),
+        KeyBinding::new(
+            "secondary-{",
+            PreviousThread,
+            Some("ThreadsSidebar > Editor"),
+        ),
+        KeyBinding::new("secondary-}", NextThread, Some("ThreadsSidebar > Editor")),
+        KeyBinding::new(
+            "secondary-shift-x",
+            ToggleWorkspacePicker,
+            Some("ThreadView"),
+        ),
+        KeyBinding::new("secondary-shift-l", UsePreviousWorktree, Some("ThreadView")),
+        KeyBinding::new(
+            "secondary-shift-l",
+            UsePreviousWorktree,
+            Some("ThreadView > Editor"),
+        ),
+        KeyBinding::new("secondary-z", UndoThreadAction, Some("ThreadView")),
+        KeyBinding::new("secondary-z", UndoThreadAction, Some("ThreadsSidebar")),
         // WP14, agent setup and T3's settings:
     ]
 }
