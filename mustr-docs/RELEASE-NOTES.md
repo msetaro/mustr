@@ -56,6 +56,9 @@ the first launch.
 **Reviewing and shipping**
 - Review a thread's whole change, its uncommitted changes, or one turn, and send comments back to
   the agent.
+- Agent worktrees inherit Restricted Mode trust from their project: trust a project once (Trust
+  Project, from the review's Restricted Mode button) and its worktrees open with language servers
+  on.
 - Commit, push and open a PR from the thread; the branch picker; open the folder in your editor.
 - Link, watch and merge PRs, Work on PR, a PR's threads, reviewers, labels, title, stacks and review
   guides, next to mustr's own PR review.

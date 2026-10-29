@@ -69,6 +69,8 @@ mod usage_page;
 mod zoom;
 // Releases and self-update:
 mod updates;
+// Worktree trust: T3's worktrees inherit their project's trust.
+mod worktree_trust;
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
@@ -544,4 +546,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     zoom::init(cx);
     // Releases and self-update:
     updates::init(cx);
+    // Worktree trust: T3's worktrees inherit their project's trust.
+    worktree_trust::init(cx);
 }
