@@ -6,6 +6,8 @@
 //! - The thread's pull request, with its state and checks (`pullRequests.summary`,
 //!   `pullRequests.checks`). Clicking it opens mustr's review of it; its menu links, unlinks,
 //!   and watches pull requests (`thread.pull-request.link`, `unlink`, `watch`).
+//! - The thread's local dev servers (`local_servers.rs`), each opening in the system browser.
+//! - **Merge back**, on a fork (`thread_handoff.rs`).
 //! - **Review changes** (handles `thread_chat::ReviewThreadChanges`), **Terminal** (dispatches
 //!   `thread_chat::OpenThreadTerminal`, which the terminal panel handles), **Open in ▾** (handles
 //!   `thread_chat::OpenInEditor`), and **Commit ▾**, with a row of a running action's steps.
@@ -22,6 +24,7 @@
 use crate::{
     agent_review,
     agent_threads::{AgentThread, agent_threads},
+    local_servers::{self, LocalServers},
     pull_request_review::{self, checks_summary},
     thread_git::{
         BranchPickerDelegate, ControlsParts, ControlsPlacement, Editors, GitProgressRow, MenuSlot,
@@ -930,6 +933,8 @@ pub struct ThreadToolbar {
     hidden: Vec<ToolbarItem>,
     /// While a merge back is being sent.
     merging: bool,
+    /// T3's local dev servers, once the toolbar shows a thread.
+    servers: Option<(Entity<LocalServers>, Subscription)>,
     _view: Option<Subscription>,
     _activation: Subscription,
 }
@@ -955,6 +960,7 @@ impl ThreadToolbar {
             overflow: OverflowRow::new(),
             hidden: Vec::new(),
             merging: false,
+            servers: None,
             _view: None,
             _activation: activation,
         }
@@ -1054,8 +1060,83 @@ impl ThreadToolbar {
                 pull_request,
             });
         }
+        if self.servers.is_none() {
+            let servers = LocalServers::global(cx);
+            let subscription = cx.observe(&servers, |_, _, cx| cx.notify());
+            self.servers = Some((servers, subscription));
+        }
         self.location = ToolbarItemLocation::PrimaryLeft;
         self.location
+    }
+
+    /// The thread's local dev servers.
+    fn local_servers(
+        &self,
+        thread: &ToolbarThread,
+        cx: &App,
+    ) -> Vec<t3_client::t3_api::types::DiscoveredLocalServer> {
+        self.servers
+            .as_ref()
+            .map(|(servers, _)| servers.read(cx).of_thread(&thread.thread_id))
+            .unwrap_or_default()
+    }
+
+    fn deploy_servers_menu(
+        &mut self,
+        event: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(thread) = &self.thread else {
+            return;
+        };
+        let servers = self.local_servers(thread, cx);
+        let here = crate::worktrees::worktrees_are_local(cx);
+        let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            menu = menu.header(if here {
+                "The thread's local servers"
+            } else {
+                "The thread's servers, on T3's machine"
+            });
+            for server in &servers {
+                let url = server.url.clone();
+                let label = match &server.process_name {
+                    Some(process) => {
+                        format!("Open {} · {process}", local_servers::server_label(server))
+                    }
+                    None => format!("Open {}", local_servers::server_label(server)),
+                };
+                menu = menu.item(
+                    ContextMenuEntry::new(label)
+                        .disabled(!here)
+                        .handler(move |_, cx| cx.open_url(&url)),
+                );
+            }
+            menu
+        });
+        self.menu
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
+                &mut this.menu
+            });
+    }
+
+    fn render_servers(&self, thread: &ToolbarThread, cx: &mut Context<Self>) -> AnyElement {
+        let servers = self.local_servers(thread, cx);
+        let label = local_servers::chip_label(&servers).unwrap_or_default();
+        let palette = palette(cx);
+        let tooltip = if crate::worktrees::worktrees_are_local(cx) {
+            "The thread's terminals run these servers: open one in your browser"
+        } else {
+            "The thread's terminals run these servers on T3's machine"
+        };
+        Chip::new("thread-local-servers", label)
+            .dot(palette.ok.hsla())
+            .menu_indicator(true)
+            .tooltip(tooltip)
+            .on_click(
+                cx.listener(|this, event, window, cx| this.deploy_servers_menu(event, window, cx)),
+            )
+            .into_any_element()
     }
 
     /// What merging the thread back would do, when it's a fork (`thread_handoff.rs`).
@@ -1237,6 +1318,8 @@ impl ThreadToolbar {
             .contains(&OverflowEntry::PullRequest)
             .then(|| self.pull_request_entries(cx))
             .flatten();
+        let servers = self.local_servers(thread, cx);
+        let here = crate::worktrees::worktrees_are_local(cx);
         let editors = Editors::global(cx).read(cx);
         let available = editors.available().to_vec();
         let preferred = editors.preferred();
@@ -1260,6 +1343,19 @@ impl ThreadToolbar {
                                 )
                             },
                         );
+                    }
+                    OverflowEntry::Servers => {
+                        for server in &servers {
+                            let url = server.url.clone();
+                            menu = menu.item(
+                                ContextMenuEntry::new(format!(
+                                    "Open {}",
+                                    local_servers::server_label(server)
+                                ))
+                                .disabled(!here)
+                                .handler(move |_, cx| cx.open_url(&url)),
+                            );
+                        }
                     }
                     OverflowEntry::MergeBack(enabled) => {
                         let this = this.clone();
@@ -1345,6 +1441,7 @@ impl ThreadToolbar {
                 ),
                 ToolbarItem::ReviewChanges => actions.push(OverflowEntry::ReviewChanges),
                 ToolbarItem::Terminal => actions.push(OverflowEntry::Terminal),
+                ToolbarItem::Servers => actions.push(OverflowEntry::Servers),
                 ToolbarItem::MergeBack => actions.push(OverflowEntry::MergeBack(
                     !self.merging && merge.is_some_and(|merge| merge.run_id.is_some()),
                 )),
@@ -1537,6 +1634,9 @@ impl ThreadToolbar {
         if merge.is_some() {
             items.push(ToolbarItem::MergeBack);
         }
+        if !self.local_servers(thread, cx).is_empty() {
+            items.push(ToolbarItem::Servers);
+        }
         items.push(ToolbarItem::Terminal);
         if git.checkout().is_some() {
             items.push(ToolbarItem::OpenIn);
@@ -1575,6 +1675,7 @@ enum ToolbarItem {
     LinkPullRequest,
     ReviewChanges,
     MergeBack,
+    Servers,
     Terminal,
     OpenIn,
     GitAction,
@@ -1590,6 +1691,7 @@ impl ToolbarItem {
             Self::LinkPullRequest => "thread-toolbar-link-pull-request",
             Self::ReviewChanges => "thread-toolbar-review-changes",
             Self::MergeBack => "thread-toolbar-merge-back",
+            Self::Servers => "thread-toolbar-servers",
             Self::Terminal => "thread-toolbar-terminal",
             Self::OpenIn => "thread-toolbar-open-in",
             Self::GitAction => "thread-toolbar-git-action",
@@ -1609,6 +1711,7 @@ impl ToolbarItem {
             Self::Branch | Self::GitAction => overflow::ALWAYS,
             Self::ReviewChanges => 90,
             Self::MergeBack => 70,
+            Self::Servers => 35,
             Self::PullRequest => 60,
             Self::Checks => 50,
             Self::GitSummary => 40,
@@ -1627,6 +1730,8 @@ enum OverflowEntry {
     ReviewChanges,
     /// Merge back, and whether it can run now.
     MergeBack(bool),
+    /// The thread's local servers.
+    Servers,
     Terminal,
     /// Open in each of T3's editors.
     OpenIn,
@@ -1780,6 +1885,7 @@ impl Render for ThreadToolbar {
                         })
                         .into_any_element()
                 }
+                ToolbarItem::Servers => self.render_servers(thread, cx),
                 ToolbarItem::MergeBack => match &merge {
                     Some(merge) => self.render_merge_back(merge, cx),
                     None => div().into_any_element(),

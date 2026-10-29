@@ -582,6 +582,7 @@ fn toolbar_at(
         ToolbarItem::LinkPullRequest,
         ToolbarItem::ReviewChanges,
         ToolbarItem::MergeBack,
+        ToolbarItem::Servers,
         ToolbarItem::Terminal,
         ToolbarItem::OpenIn,
         ToolbarItem::GitAction,

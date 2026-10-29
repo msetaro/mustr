@@ -1728,7 +1728,7 @@ async fn follow_status_once(
     Ok(received)
 }
 
-fn retry_delay(attempt: usize) -> Duration {
+pub(crate) fn retry_delay(attempt: usize) -> Duration {
     const DELAYS: [Duration; 4] = [
         Duration::from_secs(1),
         Duration::from_secs(2),
