@@ -239,15 +239,17 @@ data directory and runs it on a free loopback port, never on 3773.
 
 mustr's macOS support was written on Linux and type-checked there for `aarch64-apple-darwin` with
 `script/mustr-check-macos` (`cargo clippy --all-targets`, warnings denied, for every mustr crate).
-Nothing has run on a Mac yet.
+On real Macs so far: the user built an early `m3/next` from source and ran it on an Apple silicon
+Mac (it needed Rust and CMake, now in Prerequisites), and the release workflow has built, linked,
+signed and packaged the app on GitHub's `macos-15` runners. Most of what follows hasn't been
+looked at on a Mac yet.
 
-- **Not checked on a Mac:** linking, the runtime-compiled Metal shaders, the Dock icon, the About
-  panel, the menu bar, the title bar's layout around the traffic lights and their moving when you
-  zoom, the zoom keys (only their bindings are tested, on Linux), keychain prompts, and mustr's
-  tests on macOS. Nor are releases: `script/mustr-package-mac`, the release workflow, the
-  installer (its logic ran on Linux with stand-ins for `ditto`, `plutil`, and `osascript`), and
-  the updater's `ditto`, `codesign`, and relaunch steps (its download, checks, and bundle swap ran
-  in tests with stand-in bundles). The launch agent and `t3` command handling was reviewed against T3's
+- **Not checked on a Mac:** the Dock icon, the About panel, the menu bar, the title bar's layout
+  around the traffic lights and their moving when you zoom, the zoom keys (only their bindings are
+  tested, on Linux), keychain prompts, and mustr's tests on macOS. Nor are the installer (its logic
+  ran on Linux with stand-ins for `ditto`, `plutil`, and `osascript`) and the updater's `ditto`,
+  `codesign`, and relaunch steps (its download, checks, and bundle swap ran in tests with stand-in
+  bundles). The launch agent and `t3` command handling was reviewed against T3's
   CLI (`mustr-docs/T3-RUNTIME.md`), not run.
 - **What the cross check can't see.** It runs without the macOS SDK: C code from build scripts
   goes to a stand-in compiler, and GPUI's shader outputs are stubbed. So C-level build failures

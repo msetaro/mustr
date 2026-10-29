@@ -384,8 +384,9 @@ each reason.
 
 ### macOS
 
-Nothing has run on a Mac yet: the build, the app bundle, the release workflow, the installer, the
-updater's last steps, keychain prompts and the menus were checked on Linux only
+mustr has been built from source and run on one Apple silicon Mac, and the release workflow builds
+and packages it on GitHub's Macs. The packaged app, the installer, the updater's last steps,
+keychain prompts and the menus were checked on Linux only
 (`mustr-docs/MACOS.md`, "Known gaps"). Releases are signed ad hoc, not with a Developer ID, and
 Intel Macs have no T3 engine.
 

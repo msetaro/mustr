@@ -81,9 +81,10 @@ the first launch.
 
 ### Known gaps
 
-- **Not tried on a Mac yet.** mustr was built and tested on Linux and type-checked for macOS;
-  this release is its first build on a Mac. The app bundle, menus, keychain prompts, the installer
-  and the updater's last steps haven't run on one.
+- **Barely tried on a Mac.** mustr was built and tested on Linux and type-checked for macOS.
+  It has been built from source and run on one Apple silicon Mac, and this release was built and
+  packaged on GitHub's Macs, but the packaged app, the installer, the updater's last steps, the
+  menus and the keychain prompts run on a Mac for the first time with this release.
 - **Signed ad hoc.** No Apple Developer ID or notarization yet, so install with the command above.
   A work Mac that only allows identified developers' apps would block it.
 - **Apple silicon only.** T3 Code publishes no engine for Intel Macs.
