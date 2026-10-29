@@ -11118,6 +11118,7 @@ dependencies = [
  "migrator",
  "mustr_release",
  "mustr_ui",
+ "nix",
  "node_runtime",
  "objc2 0.6.3",
  "objc2-app-kit 0.3.2",
