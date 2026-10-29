@@ -1234,7 +1234,9 @@ async fn the_palette_compacts_and_restarts_the_agent(cx: &mut TestAppContext) {
     let backend = Recorder::new(&projection, shell_thread(json!({})));
     let (workspace, cx) = workspace(backend.clone(), cx).await;
     open(&workspace, cx);
-    assert!(cx.debug_bounds("thread-compact").is_some());
+    // The context window's ring is in the composer's footer, with Compact in its menu.
+    let meter = cx.debug_bounds("thread-context-meter").unwrap();
+    assert!(meter.top() >= cx.debug_bounds("thread-composer").unwrap().top());
 
     cx.dispatch_action(CompactContext);
     cx.run_until_parked();
@@ -1380,9 +1382,18 @@ async fn a_limited_thread_can_resume_at_reset(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn the_header_shows_the_agents_status_and_usage(cx: &mut TestAppContext) {
+async fn the_header_shows_the_threads_status_but_not_usage_limits(cx: &mut TestAppContext) {
     let projection = two_runs();
-    let backend = Recorder::new(&projection, shell_thread(json!({})));
+    // The last run completed, but the agent still watches a pull request in the background.
+    let backend = Recorder::new(
+        &projection,
+        shell_thread(json!({
+            "pendingBackgroundTasks": [{
+                "taskId": "task-1", "kind": "background_task",
+                "description": "Watching pull request #80"
+            }]
+        })),
+    );
     *backend.providers.lock() = vec![provider(json!({
         "status": "error",
         "auth": { "status": "unauthenticated" },
@@ -1396,17 +1407,27 @@ async fn the_header_shows_the_agents_status_and_usage(cx: &mut TestAppContext) {
     }))];
     let (workspace, cx) = workspace(backend.clone(), cx).await;
     let view = open(&workspace, cx);
+    // The model and permission mode; the branch is in the thread's toolbar.
     assert_eq!(
         view.read_with(cx, |view, _| view
             .thread_state()
             .map(crate::header::header_details)),
         Some(vec![
-            "t3/retry-backoff".to_string(),
             "claude-sonnet-4-5".to_string(),
             "Full access".to_string()
         ])
     );
-    assert!(cx.debug_bounds("thread-provider-banner").is_some());
+    // It reads Waiting, as the threads sidebar does, not the last run's "completed".
+    assert_eq!(
+        view.read_with(cx, |view, cx| view.thread_status(cx)),
+        Some(crate::ShellStatus::Waiting)
+    );
+    assert!(cx.debug_bounds("thread-header-status-Waiting").is_some());
+    assert!(cx.debug_bounds("thread-header-status-Completed").is_none());
+
+    // The agent's status banner is under the header, above the timeline, as in T3.
+    let banner = cx.debug_bounds("thread-provider-banner").unwrap();
+    assert!(banner.bottom() <= cx.debug_bounds("thread-composer").unwrap().top());
     view.update(cx, |view, cx| {
         let key = view.provider_banner(cx).unwrap().key;
         view.dismiss_provider_banner(key, cx)
@@ -1414,13 +1435,8 @@ async fn the_header_shows_the_agents_status_and_usage(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("thread-provider-banner").is_none());
 
-    assert!(cx.debug_bounds("thread-usage-panel").is_none());
-    let summary = cx.debug_bounds("thread-usage-summary").unwrap();
-    cx.simulate_click(summary.center(), gpui::Modifiers::none());
-    cx.run_until_parked();
-    assert!(cx.debug_bounds("thread-usage-panel").is_some());
-    cx.dispatch_action(crate::ShowUsageLimits);
-    cx.run_until_parked();
+    // Usage limits are on the Usage page: the thread doesn't show them.
+    assert!(cx.debug_bounds("thread-usage-summary").is_none());
     assert!(cx.debug_bounds("thread-usage-panel").is_none());
 }
 

@@ -183,8 +183,6 @@ pub(crate) struct HistoryState {
     revert_targets: collections::HashMap<String, RevertTarget>,
     /// The provider status and usage banners' state (`usage.rs`).
     pub(crate) usage: crate::usage::UsageState,
-    /// Measures the header, so the usage meters make way for the title (`header.rs`).
-    pub(crate) header_overflow: mustr_ui::OverflowRow,
 }
 
 struct Rewind {

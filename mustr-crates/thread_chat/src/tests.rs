@@ -708,6 +708,8 @@ struct FakeBackend {
     /// Why calls that read files on T3's machine are refused, as for a pairing without
     /// `filesystem:read`.
     files_blocked: Mutex<Option<String>>,
+    /// The shell snapshot, when a test needs another than `shell_json`.
+    shell: Mutex<Option<Value>>,
 }
 
 impl FakeBackend {
@@ -752,7 +754,8 @@ fn ready<T: Send + 'static>(value: Result<T>) -> BoxFuture<'static, Result<T>> {
 
 impl ThreadBackend for FakeBackend {
     fn shell_snapshot(&self) -> BoxFuture<'static, Result<OrchestrationV2ShellSnapshot>> {
-        ready(serde_json::from_value(shell_json()).map_err(Into::into))
+        let shell = self.shell.lock().clone().unwrap_or_else(shell_json);
+        ready(serde_json::from_value(shell).map_err(Into::into))
     }
 
     fn subscribe_shell(

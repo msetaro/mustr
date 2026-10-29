@@ -1,5 +1,6 @@
 //! A thread's composer: the message editor and its buttons, which send, queue, steer, and stop,
-//! and above it the agent's pending requests, to approve or answer, and the queued messages.
+//! with the context window's ring in its footer, and above it the agent's pending requests, to
+//! approve or answer. The queued messages and the goal are above those (`thread_view.rs`).
 
 use crate::{
     attachments::{ComposerFile, ComposerImage, UploadState, has_image_extension},
@@ -421,6 +422,12 @@ impl ThreadView {
             cx.stop_propagation();
             self.composer_state.stash.open = false;
             cx.notify();
+        } else if self
+            .family_bar
+            .update(cx, |family_bar, cx| family_bar.close(cx))
+        {
+            // Escape closes the subagents drawer from the composer too.
+            cx.stop_propagation();
         }
     }
 }
@@ -1224,7 +1231,7 @@ impl ThreadView {
 
     /// The goal the agent works toward, above the composer as T3 shows it at the end of the
     /// timeline: its status, what it has used, its objective, and Resume and Clear.
-    fn render_goal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(crate) fn render_goal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let state = self.thread_state()?;
         let goal = GoalLine::new(state.goal()?, state.is_running());
         let palette = palette(cx);
@@ -1594,7 +1601,7 @@ impl ThreadView {
     /// edited, removed, steered into the running agent, or, while nothing runs on a server that
     /// has it, sent now; and when the agent takes its queue in another order, dragged or moved
     /// with its arrows.
-    fn render_queue(
+    pub(crate) fn render_queue(
         &mut self,
         queued: Vec<QueuedMessage>,
         running: bool,
@@ -2142,7 +2149,6 @@ impl ThreadView {
         let running = state.is_some_and(ThreadState::is_running);
         let is_draft = self.new_thread.is_some();
         let pending = state.map(ThreadState::pending_requests).unwrap_or_default();
-        let queued = state.map(ThreadState::queued_messages).unwrap_or_default();
         let blocked = self.write_blocked_reason();
         let can_write = blocked.is_none() && (is_draft || state.is_some()) && !self.sending;
         let has_text = !self.composer_text(cx).trim().is_empty();
@@ -2413,10 +2419,6 @@ impl ThreadView {
                                 ),
                         )
                     })
-                    .children(self.render_goal(cx))
-                    .when(!queued.is_empty(), |this| {
-                        this.child(self.render_queue(queued, running, cx))
-                    })
                     .when_some(self.error.clone(), |this, error| {
                         this.child(
                             h_flex()
@@ -2585,6 +2587,7 @@ impl ThreadView {
                                                     )
                                                 },
                                             )
+                                            .children(self.render_context_meter(cx))
                                             .children(buttons),
                                     ),
                             ),

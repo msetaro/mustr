@@ -64,6 +64,28 @@
   through what you looked at, from one place to another, and each rail button brings back what
   its place showed last. Outside Edit, ⌘W goes back instead of closing anything; in Edit it
   closes the file.
+- **A calmer thread header.** One row: the thread's title and its status, quietly, over its model
+  and access, with a subagents button and "…". A thread's status is worked out once, as T3 does,
+  so the header, the thread list, the hover card and the Inbox always agree: a thread whose agent
+  still waits on background work reads Waiting everywhere, not "completed" in one place.
+- **Avatars only for subagents.** Your messages and the agent's have no letter circles any more:
+  yours are bubbles on the right, the agent's answers read full width, as in T3. Subagents get T3's
+  badge, their agent's icon with a dot for how they're doing, in the timeline and the drawer.
+- **Subagents in a drawer.** The subagents button in the header (how many, with a dot while any
+  works) opens them from the right edge: each with its badge, Open and Stop, and workflows with
+  their agents and script. Escape or the button closes it. In a subagent, the header links to its
+  parent.
+- **What's waiting is above the composer,** in T3's order: the worktree's setup, a subagent
+  waiting for you, background work with Stop, the goal, queued messages, a usage limit that stopped
+  the thread, then the agent's request. The top of the thread is just the header.
+- **No usage limits in the thread.** The header's Session and Weekly meters and the thread's usage
+  panel are gone; usage and limits are on the Usage page. A thread still shows a limit when one
+  stops it, with Resume at reset and Snooze until reset. The context window is a small ring in the
+  composer's footer, with the numbers on hover and Compact context in its menu.
+- **Thread rows like T3's.** Taller rows in the thread list: the project and the thread's status
+  (Working with how long, Waiting, Completed, Failed…) or how long ago it was active, the title,
+  then the branch with the pull requests (one's number, "+3" for three, or a stack's size) and the
+  agent's icon. Rows have rounded corners, inset from the panel's edges.
 
 ## 0.1.0
 

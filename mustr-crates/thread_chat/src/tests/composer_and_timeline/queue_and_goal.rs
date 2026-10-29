@@ -371,3 +371,53 @@ async fn threads_without_a_goal_have_no_goal_line(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("thread-goal").is_none());
 }
+
+#[gpui::test]
+async fn what_waits_is_above_the_composer_in_t3s_order(cx: &mut TestAppContext) {
+    // A run waiting on an approval with a message queued behind it, a goal, background work,
+    // and a usage limit.
+    let backend = backend_for(
+        with_session(running_thread(), &[], Some(goal("active", json!({})))),
+        20,
+    );
+    let mut shell = shell_json();
+    let thread = &mut shell["threads"][1];
+    thread["status"] = json!("failed");
+    thread["lastErrorClass"] = json!("usage_limit");
+    thread["latestRunId"] = json!("run-2");
+    thread["latestRunCompletedAt"] = json!(NOW);
+    thread["usageLimitResetAt"] = json!("2099-01-01T15:40:00.000Z");
+    thread["pendingBackgroundTasks"] = json!([{
+        "taskId": "task-1", "kind": "background_task",
+        "description": "Watching pull request #80"
+    }]);
+    *backend.shell.lock() = Some(shell);
+    // The app's shell follows the installed backend.
+    cx.update(|cx| crate::set_backend(backend.clone(), cx));
+    let (_, cx) = open_view(backend, Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1200.), gpui::px(1400.)));
+    cx.run_until_parked();
+    let order = [
+        "family-now-background",
+        "thread-goal",
+        "thread-edit-queued-run-3",
+        "thread-limit-recovery",
+        "thread-pending-request-1",
+        "thread-composer",
+    ];
+    let tops = order
+        .iter()
+        .map(|selector| {
+            cx.debug_bounds(selector)
+                .unwrap_or_else(|| panic!("{selector} isn't rendered"))
+                .top()
+        })
+        .collect::<Vec<_>>();
+    for (pair, tops) in order.windows(2).zip(tops.windows(2)) {
+        assert!(tops[0] < tops[1], "{} should be above {}", pair[0], pair[1]);
+    }
+    // None of it is at the top of the page, under the header.
+    let above = cx.debug_bounds("thread-above-composer").unwrap();
+    assert!(above.top() <= tops[0]);
+    assert!(above.top() > gpui::px(400.));
+}

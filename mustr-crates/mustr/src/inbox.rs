@@ -194,6 +194,25 @@ pub enum ThreadStatus {
 }
 
 impl ThreadStatus {
+    /// A thread's status from its record in T3's shell, as the threads sidebar and the
+    /// thread's header read it (`thread_chat::ShellStatus`): a thread whose agent still waits on
+    /// background work reads "waiting", not its last run's "completed".
+    pub(crate) fn of(thread: &t3_client::t3_api::types::OrchestrationV2ThreadShell) -> Self {
+        use thread_chat::ShellStatus;
+        match ShellStatus::from_shell(thread) {
+            Some(ShellStatus::PendingApproval | ShellStatus::AwaitingInput) => Self::NeedsInput,
+            Some(ShellStatus::Failed) => Self::Failed,
+            Some(
+                status @ (ShellStatus::Working | ShellStatus::Connecting | ShellStatus::Waiting),
+            ) => Self::Working(status.label().to_lowercase()),
+            Some(status) => Self::Settled(status.label().to_lowercase()),
+            None => Self::Settled(match serde_json::to_value(&thread.status) {
+                Ok(Value::String(status)) => status.replace('_', " "),
+                _ => String::new(),
+            }),
+        }
+    }
+
     pub(crate) fn from_shell(status: String, has_pending_request: bool) -> Self {
         if has_pending_request {
             return Self::NeedsInput;

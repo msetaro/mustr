@@ -101,7 +101,6 @@ pub enum ToolKind {
     WebSearch,
     /// An MCP or provider tool.
     Tool,
-    Subagent,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -151,6 +150,25 @@ pub enum ItemKind {
         images: usize,
         /// The page a preview tool opened, for Open in browser (`html_renders.rs`).
         link: Option<String>,
+    },
+    /// A subagent the agent started (T3's `subagent` turn item), which the timeline shows as
+    /// T3's subagent row (`SubagentTimelineLink` in `chat/V2LifecycleRow.tsx`).
+    Subagent {
+        subagent_id: String,
+        title: String,
+        prompt: Option<String>,
+        /// What it's doing.
+        progress: Option<String>,
+        /// What it found.
+        result: Option<String>,
+        driver: String,
+        provider_instance_id: String,
+        /// Its thread, when it has one to open.
+        child_thread_id: Option<String>,
+        /// T3's word for its status ("running", "idle", "completed"…), for its badge.
+        status: String,
+        started_at: Option<String>,
+        completed_at: Option<String>,
     },
     /// A page the agent made with T3's `html_render`, kept as an attachment
     /// (`html_renders.rs`).
@@ -518,16 +536,20 @@ impl TimelineItem {
             ),
             OrchestrationV2TurnItem::Subagent(item) => item!(
                 item,
-                ItemKind::Tool {
-                    tool: ToolKind::Subagent,
-                    summary: non_empty(item.title.as_ref())
-                        .unwrap_or_else(|| format!("Subagent ({})", item.driver)),
-                    input: non_empty(Some(&item.prompt)),
-                    output: non_empty(item.result.as_ref())
-                        .or_else(|| non_empty(item.progress.as_ref())),
-                    output_omitted: false,
-                    images: 0,
-                    link: None,
+                ItemKind::Subagent {
+                    subagent_id: item.subagent_id.clone(),
+                    title: non_empty(item.title.as_ref())
+                        .map(|title| crate::family_bar::format_subagent_title(&title))
+                        .unwrap_or_else(|| "Subagent".to_string()),
+                    prompt: non_empty(Some(&item.prompt)),
+                    progress: non_empty(item.progress.as_ref()),
+                    result: non_empty(item.result.as_ref()),
+                    driver: item.driver.clone(),
+                    provider_instance_id: item.provider_instance_id.clone(),
+                    child_thread_id: item.child_thread_id.clone(),
+                    status: wire_string(&item.status),
+                    started_at: item.started_at.clone(),
+                    completed_at: item.completed_at.clone(),
                 }
             ),
             OrchestrationV2TurnItem::ApprovalRequest(item) => item!(
