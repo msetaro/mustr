@@ -5,12 +5,16 @@
 //!
 //! They're as tall as `TextButton` and `SplitButton` (each holds a line of their text, so the
 //! line height is the same), so a row of them lines up. Each hover background is rounded like
-//! the button, or like its own corners of a split button.
+//! the button, or, in a split button, on the corners each half shares with the frame, concentric
+//! with its border (`crate::corners`).
 
 use super::ClickHandler;
-use crate::{palette, tokens, tokens::Palette, tokens::scaled};
+use crate::{
+    ChildPosition, RoundedCorners as _, corners::inner_radius, palette, tokens, tokens::Palette,
+    tokens::scaled,
+};
 use gpui::{
-    AnyElement, AnyView, App, ClickEvent, ElementId, InteractiveElement as _, IntoElement,
+    AnyElement, AnyView, App, Axis, ClickEvent, ElementId, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _,
     Styled as _, Window, div, px,
 };
@@ -219,9 +223,9 @@ impl IconSplitButton {
 }
 
 impl RenderOnce for IconSplitButton {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = Outlined::new(palette(cx));
-        let radius = scaled(tokens::CONTROL_RADIUS);
+        let radius = inner_radius(scaled(tokens::CONTROL_RADIUS).to_pixels(window.rem_size()));
         let menu_id = ElementId::NamedChild(self.id.clone().into(), "menu".into());
         let (tooltip, menu_tooltip) = if self.menu_open {
             (None, None)
@@ -237,7 +241,7 @@ impl RenderOnce for IconSplitButton {
         )
         .debug_selector(|| "split-button-main".into())
         .h_full()
-        .rounded_l(radius)
+        .rounded_at(ChildPosition::First, Axis::Horizontal, radius)
         .py(scaled(px(3.)))
         .pl(scaled(px(6.)))
         .pr(scaled(px(5.)))
@@ -252,7 +256,7 @@ impl RenderOnce for IconSplitButton {
         )
         .debug_selector(|| "split-button-menu".into())
         .h_full()
-        .rounded_r(radius)
+        .rounded_at(ChildPosition::Last, Axis::Horizontal, radius)
         .py(scaled(px(3.)))
         .px(scaled(px(5.)))
         .text_color(colors.text)
