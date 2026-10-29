@@ -182,6 +182,19 @@ impl LocalGit {
         })
     }
 
+    /// What isn't committed yet: the working tree against `HEAD` (T3's `working-tree` source,
+    /// "Uncommitted").
+    pub async fn uncommitted(&self) -> Result<Comparison> {
+        let head = self
+            .git(&["rev-parse", "--verify", "HEAD"])
+            .await
+            .context("the checkout has no commits yet")?;
+        Ok(Comparison {
+            base_name: None,
+            merge_base: head.trim().to_string(),
+        })
+    }
+
     /// The files that differ between `merge_base` and the working tree, untracked files
     /// included, in git's order.
     pub async fn changed_paths(&self, merge_base: &str) -> Result<Vec<ChangedPath>> {
@@ -490,6 +503,24 @@ mod tests {
             FileText::Text("fn a() {}\nfn b() {}\nfn c() {}\n".to_string())
         );
         assert_eq!(missing, FileText::Missing);
+
+        // Only what isn't committed: against HEAD, so the agent's commit isn't in it.
+        let (uncommitted, changed, base) = futures::executor::block_on({
+            let root = root.to_path_buf();
+            async move {
+                let local = LocalGit::open(&root).await.expect("a git checkout");
+                let uncommitted = local.uncommitted().await.unwrap();
+                let changed = local.changed_paths(&uncommitted.merge_base).await.unwrap();
+                let base = local
+                    .show(&uncommitted.merge_base, "kept.rs")
+                    .await
+                    .unwrap();
+                (uncommitted, changed, base)
+            }
+        });
+        assert_eq!(uncommitted.base_name, None);
+        assert_eq!(changed.len(), 3, "{changed:?}");
+        assert_eq!(base, FileText::Text("fn a() {}\nfn b() {}\n".to_string()));
         assert_eq!(
             std::fs::read(root.join(".git/index")).unwrap(),
             before,

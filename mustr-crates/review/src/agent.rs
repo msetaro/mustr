@@ -39,6 +39,9 @@ pub struct OpenThreadChat {
 pub enum ReviewScope {
     /// The thread's branch against its base, including changes not committed yet.
     Changes,
+    /// Only what isn't committed yet: the working tree against `HEAD`, untracked files included
+    /// (T3's diff panel's "Uncommitted", its `working-tree` source).
+    Uncommitted,
     /// What one turn changed: T3's checkpoint before the turn against the one after it.
     Turn(u32),
 }
@@ -47,14 +50,16 @@ impl ReviewScope {
     pub fn label(&self) -> String {
         match self {
             ReviewScope::Changes => "Changes".to_string(),
+            ReviewScope::Uncommitted => "Uncommitted".to_string(),
             ReviewScope::Turn(turn) => format!("Turn {turn}"),
         }
     }
 
-    /// A stable name for files and logs: `changes`, `turn-3`.
+    /// A stable name for files and logs: `changes`, `uncommitted`, `turn-3`.
     pub fn key(&self) -> String {
         match self {
             ReviewScope::Changes => "changes".to_string(),
+            ReviewScope::Uncommitted => "uncommitted".to_string(),
             ReviewScope::Turn(turn) => format!("turn-{turn}"),
         }
     }

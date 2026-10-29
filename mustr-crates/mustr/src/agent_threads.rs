@@ -276,14 +276,21 @@ pub fn turn_checkpoints(thread_snapshot: &Value) -> Vec<TurnCheckpoint> {
     turns
 }
 
-/// What the scope picker offers: the thread's changes, then its turns newest first. When T3
-/// recorded which files turns changed, turns that changed nothing are left out.
+/// What the scope picker offers: the thread's changes, what isn't committed yet, then its turns
+/// newest first, as T3's diff panel does. When T3 recorded which files turns changed, turns that
+/// changed nothing are left out.
 pub fn scope_choices(turns: &[TurnCheckpoint]) -> Vec<ScopeChoice> {
     let knows_files = turns.iter().any(|turn| turn.files > 0);
-    let mut choices = vec![ScopeChoice {
-        scope: ReviewScope::Changes,
-        detail: Some("branch vs. base".to_string()),
-    }];
+    let mut choices = vec![
+        ScopeChoice {
+            scope: ReviewScope::Changes,
+            detail: Some("branch vs. base".to_string()),
+        },
+        ScopeChoice {
+            scope: ReviewScope::Uncommitted,
+            detail: Some("not committed yet".to_string()),
+        },
+    ];
     choices.extend(
         turns
             .iter()
@@ -459,6 +466,10 @@ mod tests {
                     detail: Some("branch vs. base".to_string())
                 },
                 ScopeChoice {
+                    scope: ReviewScope::Uncommitted,
+                    detail: Some("not committed yet".to_string())
+                },
+                ScopeChoice {
                     scope: ReviewScope::Turn(4),
                     detail: Some("1 file".to_string())
                 },
@@ -468,7 +479,7 @@ mod tests {
                 },
             ]
         );
-        // Without file counts, every turn is offered.
+        // Without file counts, every turn is offered (after Changes and Uncommitted).
         let unknown = turns
             .iter()
             .map(|turn| TurnCheckpoint {
@@ -476,7 +487,7 @@ mod tests {
                 ..turn.clone()
             })
             .collect::<Vec<_>>();
-        assert_eq!(scope_choices(&unknown).len(), 4);
+        assert_eq!(scope_choices(&unknown).len(), 5);
         assert!(turn_checkpoints(&json!({})).is_empty());
     }
 }

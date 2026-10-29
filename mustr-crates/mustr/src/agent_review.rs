@@ -4,6 +4,10 @@
 //!   thread's worktree is on this machine, git reads the base texts and the review shows the real
 //!   files (so language servers work once Zed trusts the worktree). Otherwise the review is built
 //!   from T3's thread diff (`orchestration.getFullThreadDiff`).
+//! - **Uncommitted**: only what isn't committed yet, the working tree against `HEAD` with
+//!   untracked files, as T3's diff panel's "Uncommitted" shows it. Git reads it from the worktree
+//!   on this machine; otherwise it's T3's `working-tree` diff (`review.getDiffPreview`, which
+//!   needs `filesystem:read`).
 //! - **Turn N**: what one turn changed (`orchestration.getTurnDiff` from checkpoint N-1 to N, as
 //!   T3's diff panel asks for it). Full texts come from T3's checkpoint commits when their
 //!   repository is on this machine, and from the patch otherwise.
@@ -27,8 +31,8 @@ use crate::{
     nav_panel::NavPanel,
     review_backend::{self, DryRunRpc, PullRequestRpc, write_error},
     t3_connection::{CurrentRpc, T3Connection, T3Session},
-    thread_git::{ControlsPlacement, ThreadGit, ThreadGitControls},
-    worktree_git::{ChangeKind, FileText, LocalGit},
+    thread_git::{Checkout, ControlsPlacement, ThreadGit, ThreadGitControls},
+    worktree_git::{ChangeKind, Comparison, FileText, LocalGit},
 };
 use anyhow::{Context as _, Result, anyhow};
 use gpui::{App, AppContext as _, Entity, Task, TaskExt as _, Window};
@@ -52,10 +56,11 @@ use t3_client::{
             OrchestrationV2CommandDispatchModeQueueAfterActive,
             OrchestrationV2CommandDispatchModeQueueAfterActiveType,
             OrchestrationV2CommandMessageDispatch, OrchestrationV2CommandMessageDispatchType,
-            OrchestrationV2CreationSource,
+            OrchestrationV2CreationSource, ReviewDiffPreviewInput, ReviewDiffPreviewSourceKind,
         },
     },
 };
+use thread_chat::ThreadShells;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use util::{paths::PathStyle, rel_path::RelPath};
 use workspace::{Toast, Workspace, notifications::NotificationId};
@@ -114,11 +119,15 @@ fn review_path(path: &str) -> Option<Arc<RelPath>> {
 }
 
 /// Reads a scope of a thread: its checkpoints (for the scope picker), then the files.
+///
+/// `project_root` is the thread's project's checkout, where a thread without a worktree works:
+/// its uncommitted changes are read there.
 async fn load_scope(
     session: &T3Session,
     rpc: &impl PullRequestRpc,
     thread: &AgentThread,
     scope: ReviewScope,
+    project_root: Option<&str>,
 ) -> Result<LoadedScope> {
     let mut problems = Vec::new();
     let turns = match session.thread_snapshot(&thread.id).await {
@@ -134,8 +143,22 @@ async fn load_scope(
         Some(path) => LocalGit::open(Path::new(path)).await,
         None => None,
     };
+    // A thread without a worktree works in its project's checkout.
+    let checkout = thread.worktree_path.as_deref().or(project_root);
+    let local = match (&local, scope, project_root) {
+        (None, ReviewScope::Uncommitted, Some(root))
+            if thread.worktree_path.is_none() && !ignore_local_worktrees() =>
+        {
+            LocalGit::open(Path::new(root)).await
+        }
+        _ => local,
+    };
     let mut loaded = match (scope, &local) {
         (ReviewScope::Changes, Some(local)) => changes_from_worktree(local).await?,
+        (ReviewScope::Uncommitted, Some(local)) => uncommitted_from_worktree(local).await?,
+        (ReviewScope::Uncommitted, None) => {
+            uncommitted_from_t3(session.server_is_local(), rpc, checkout).await?
+        }
         (ReviewScope::Changes, None) => {
             let latest = turns
                 .last()
@@ -194,6 +217,98 @@ async fn changes_from_worktree(local: &LocalGit) -> Result<LoadedScope> {
         .comparison(branch.as_deref())
         .await
         .with_context(|| format!("comparing {} with its base", local.root().display()))?;
+    let against = match &comparison.base_name {
+        Some(base) => format!("vs. {base}"),
+        None => "uncommitted changes".to_string(),
+    };
+    let (files, unavailable) = files_from_worktree(local, &comparison).await?;
+    Ok(LoadedScope {
+        files,
+        unavailable,
+        worktree: Some(local.root().to_path_buf()),
+        source: format!("{} {against}", display_path(local.root())),
+        branch,
+        turns: Vec::new(),
+        problems: Vec::new(),
+    })
+}
+
+/// What isn't committed yet, read with git from the worktree on this machine.
+async fn uncommitted_from_worktree(local: &LocalGit) -> Result<LoadedScope> {
+    let branch = local.current_branch().await;
+    let comparison = local.uncommitted().await?;
+    let (files, unavailable) = files_from_worktree(local, &comparison).await?;
+    Ok(LoadedScope {
+        files,
+        unavailable,
+        worktree: Some(local.root().to_path_buf()),
+        source: format!("{}, not committed yet", display_path(local.root())),
+        branch,
+        turns: Vec::new(),
+        problems: Vec::new(),
+    })
+}
+
+/// What isn't committed yet in a checkout on T3's machine: T3's `working-tree` diff
+/// (`review.getDiffPreview`).
+async fn uncommitted_from_t3(
+    server_is_local: bool,
+    rpc: &impl PullRequestRpc,
+    checkout: Option<&str>,
+) -> Result<LoadedScope> {
+    let cwd = checkout
+        .context("T3 hasn't said where this thread works")?
+        .to_string();
+    let preview = rpc
+        .call::<rpc::ReviewGetDiffPreview>(uncommitted_diff_input(&cwd))
+        .await
+        .map_err(|error| read_error(rpc::ReviewGetDiffPreview::TAG, error))?;
+    let source = preview
+        .sources
+        .into_iter()
+        .find(|source| source.kind == ReviewDiffPreviewSourceKind::WorkingTree)
+        .context("T3 sent no uncommitted changes for this checkout")?;
+    let patch = parse_patch(&source.diff);
+    let (files, unavailable) = review_files_from_patch(&patch);
+    let why = if server_is_local && !ignore_local_worktrees() {
+        format!("{} isn't on disk anymore", display_path(Path::new(&cwd)))
+    } else {
+        "the worktree isn't on this machine".to_string()
+    };
+    Ok(LoadedScope {
+        files,
+        unavailable,
+        worktree: None,
+        source: format!(
+            "T3's uncommitted diff{} ({why})",
+            if patch.truncated || source.truncated {
+                ", cut short"
+            } else {
+                ""
+            }
+        ),
+        branch: None,
+        turns: Vec::new(),
+        problems: Vec::new(),
+    })
+}
+
+/// What T3's diff panel asks for: both of the checkout's sources, of which the review takes the
+/// `working-tree` one.
+pub fn uncommitted_diff_input(cwd: &str) -> ReviewDiffPreviewInput {
+    ReviewDiffPreviewInput {
+        base_ref: None,
+        cwd: cwd.to_string(),
+        file: None,
+        ignore_whitespace: Some(false),
+    }
+}
+
+/// The files that differ between `comparison`'s base and the worktree, with their texts.
+async fn files_from_worktree(
+    local: &LocalGit,
+    comparison: &Comparison,
+) -> Result<(Vec<ReviewFileContents>, Vec<UnavailableFile>)> {
     let paths = local.changed_paths(&comparison.merge_base).await?;
     let mut files = Vec::new();
     let mut unavailable = Vec::new();
@@ -250,19 +365,7 @@ async fn changes_from_worktree(local: &LocalGit) -> Result<LoadedScope> {
             (Err(reason), _) | (_, Err(reason)) => skip(reason),
         }
     }
-    let against = match &comparison.base_name {
-        Some(base) => format!("vs. {base}"),
-        None => "uncommitted changes".to_string(),
-    };
-    Ok(LoadedScope {
-        files,
-        unavailable,
-        worktree: Some(local.root().to_path_buf()),
-        source: format!("{} {against}", display_path(local.root())),
-        branch,
-        turns: Vec::new(),
-        problems: Vec::new(),
-    })
+    Ok((files, unavailable))
 }
 
 /// One turn's changes: T3's patch for the file list, and full texts from its checkpoint commits
@@ -450,6 +553,7 @@ pub fn agent_message(
     }
     message.push_str(&match scope {
         ReviewScope::Changes => "Review of your changes:".to_string(),
+        ReviewScope::Uncommitted => "Review of your uncommitted changes:".to_string(),
         ReviewScope::Turn(turn) => format!(
             "Review of what you changed in turn {turn} (line numbers are as of the end of that \
              turn):"
@@ -634,9 +738,11 @@ async fn load_review(
     session: &T3Session,
     rpc: &CurrentRpc,
     target: &AgentReviewTarget,
+    project_root: Option<String>,
 ) -> Result<LoadedReview> {
     let thread = &target.thread;
-    let mut loaded = load_scope(session, rpc, thread, target.scope).await?;
+    let mut loaded =
+        load_scope(session, rpc, thread, target.scope, project_root.as_deref()).await?;
     if loaded.files.is_empty() && loaded.unavailable.is_empty() {
         anyhow::bail!(
             "{} has no changes in {}",
@@ -769,12 +875,17 @@ pub fn open_agent_review(
     if let Some(completed_at) = target.thread.latest_run_completed_at.clone() {
         ReviewedMarks::new(&agent_reviews_dir()).mark(target.thread.id.clone(), completed_at, cx);
     }
+    let project_root = ThreadShells::global(cx)
+        .read(cx)
+        .shell()
+        .and_then(|shell| Checkout::of_thread(shell, &target.thread.id))
+        .and_then(|checkout| checkout.project_root);
     cx.spawn_in(window, async move |workspace, cx| {
         let loading = cx.background_spawn({
             let target = target.clone();
             let session = session.clone();
             let rpc = rpc.clone();
-            async move { load_review(&session, &rpc, &target).await }
+            async move { load_review(&session, &rpc, &target, project_root).await }
         });
         let (contents, problems) = match loading.await {
             Ok(loaded) => review_contents(loaded, &session, rpc, &target),
@@ -1070,6 +1181,63 @@ Review of your changes:
         let comment = record["text"].as_str().unwrap();
         assert_eq!(comment.chars().count(), 16_000);
         assert!(comment.ends_with("\n… truncated …"));
+    }
+
+    #[test]
+    fn uncommitted_reviews_say_so_to_the_agent() {
+        let mut one = submission();
+        one.comments.truncate(1);
+        one.body = String::new();
+        let (text, context) = agent_message(ReviewScope::Uncommitted, &one);
+        assert_eq!(
+            text,
+            "Review of your uncommitted changes:
+- [main.rs L2](t3-context://v1/review-comment/review-comment_d1)"
+        );
+        let record = &serde_json::to_value(context.unwrap()).unwrap()["records"][0];
+        assert_eq!(
+            (&record["sectionId"], &record["sectionTitle"]),
+            (&json!("uncommitted"), &json!("Uncommitted"))
+        );
+    }
+
+    /// Without the checkout on this machine, the uncommitted changes are T3's `working-tree`
+    /// source, of the two `review.getDiffPreview` sends.
+    #[test]
+    fn uncommitted_changes_come_from_t3s_working_tree_diff() {
+        let rpc = RecordingRpc::default();
+        let source = |kind: &str, diff: &str| {
+            json!({
+                "id": kind, "kind": kind, "title": kind, "baseRef": "HEAD", "headRef": null,
+                "diff": diff, "diffHash": "h", "truncated": false
+            })
+        };
+        rpc.respond(Ok(json!({
+            "cwd": "/remote/api", "generatedAt": "2026-10-28T09:00:00.000Z",
+            "sources": [
+                source("branch-range", "diff --git a/old.rs b/old.rs\n--- a/old.rs\n+++ b/old.rs\n@@ -1 +1 @@\n-a\n+b\n"),
+                source("working-tree", "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,2 +1,2 @@\n fn a() {}\n-fn b() {}\n+fn c() {}\n"),
+            ]
+        })));
+        let loaded =
+            futures::executor::block_on(uncommitted_from_t3(false, &rpc, Some("/remote/api")))
+                .unwrap();
+        assert_eq!(
+            serde_json::to_value(rpc.only_call::<rpc::ReviewGetDiffPreview>()).unwrap(),
+            json!({ "cwd": "/remote/api", "ignoreWhitespace": false })
+        );
+        assert_eq!(
+            loaded
+                .files
+                .iter()
+                .map(|file| file.path.as_unix_str().to_string())
+                .collect::<Vec<_>>(),
+            ["src/lib.rs"]
+        );
+        assert_eq!(
+            loaded.source,
+            "T3's uncommitted diff (the worktree isn't on this machine)"
+        );
     }
 
     #[test]

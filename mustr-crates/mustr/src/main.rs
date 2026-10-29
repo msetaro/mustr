@@ -113,7 +113,7 @@ struct Args {
     #[arg(long, hide = true, value_name = "THREAD_ID")]
     review_thread: Option<String>,
 
-    /// The scope `--review-thread` opens: `changes` (the default) or `turn:N`.
+    /// The scope `--review-thread` opens: `changes` (the default), `uncommitted` or `turn:N`.
     #[arg(long, hide = true, value_name = "SCOPE", value_parser = parse_review_scope)]
     thread_scope: Option<review::ReviewScope>,
 
@@ -283,11 +283,12 @@ fn main() {
 fn parse_review_scope(scope: &str) -> Result<review::ReviewScope, String> {
     match scope {
         "changes" => Ok(review::ReviewScope::Changes),
+        "uncommitted" => Ok(review::ReviewScope::Uncommitted),
         _ => scope
             .strip_prefix("turn:")
             .and_then(|turn| turn.parse().ok())
             .map(review::ReviewScope::Turn)
-            .ok_or_else(|| format!("{scope:?} isn't `changes` or `turn:N`")),
+            .ok_or_else(|| format!("{scope:?} isn't `changes`, `uncommitted` or `turn:N`")),
     }
 }
 
