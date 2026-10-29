@@ -7,6 +7,10 @@
 //! The projects come from T3's shell, the agents and models from T3's provider catalog
 //! (`server.getConfig`), the defaults from T3's settings (`server.getSettings`), and the
 //! branches and worktrees from `vcs.listRefs`.
+//!
+//! As in T3, `mod+shift+x` opens the menu of where the agent works ([`ToggleWorkspacePicker`]),
+//! and `mod+shift+l` picks the worktree the project's latest thread used
+//! ([`UsePreviousWorktree`], T3's `resolvePreviousWorktreeSeed`).
 
 pub use crate::thread_settings::{AgentChoice, agent_choices};
 
@@ -24,9 +28,9 @@ use crate::{
 };
 use collections::HashMap;
 use gpui::{
-    Anchor, App, AppContext as _, Context, DismissEvent, EventEmitter, FontWeight, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window,
-    div, px, rems,
+    Anchor, App, AppContext as _, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
+    Focusable as _, FontWeight, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
+    Subscription, Task, WeakEntity, Window, actions, anchored, deferred, div, px, rems,
 };
 use mustr_ui::{Card, SegmentedControl, tokens::scaled};
 use picker::{Picker, PickerDelegate};
@@ -41,14 +45,55 @@ use t3_api::{
     },
 };
 use ui::{
-    Button, ButtonStyle, Color, ContextMenu, DropdownMenu, DropdownStyle, Icon, IconName,
-    IconPosition, IconSize, Label, LabelCommon as _, LabelSize, ListItem, ListItemSpacing,
-    PopoverMenu, PopoverMenuHandle, Switch, ToggleState, prelude::*,
+    Button, ButtonStyle, Color, ContextMenu, ContextMenuEntry, DropdownMenu, DropdownStyle, Icon,
+    IconButton, IconName, IconPosition, IconSize, Label, LabelCommon as _, LabelSize, ListItem,
+    ListItemSpacing, PopoverMenu, PopoverMenuHandle, Switch, ToggleState, Tooltip, prelude::*,
 };
 use workspace::Workspace;
 
+actions!(
+    thread_chat,
+    [
+        /// Opens the menu of where a new thread's agent works: a new worktree, an existing one,
+        /// the project's checkout, or the previous worktree.
+        ToggleWorkspacePicker,
+        /// Makes a new thread work in the worktree its project's latest thread used.
+        UsePreviousWorktree,
+    ]
+);
+
 pub enum NewThreadFormEvent {
     Changed,
+}
+
+/// The worktree a new thread in `project_id` would reuse (`resolvePreviousWorktreeSeed`): the
+/// one of the project's most recently updated thread that has one, other than `current`.
+pub(crate) fn previous_worktree<'a>(
+    threads: impl IntoIterator<Item = &'a t3_api::types::OrchestrationV2ThreadShell>,
+    project_id: &str,
+    current: Option<&str>,
+) -> Option<(String, Option<String>)> {
+    threads
+        .into_iter()
+        .filter(|thread| {
+            thread.project_id == project_id
+                && thread.archived_at.is_none()
+                && thread.deleted_at.is_none()
+        })
+        .filter_map(|thread| {
+            let path = thread
+                .worktree_path
+                .as_deref()
+                .filter(|path| !path.trim().is_empty() && Some(*path) != current)?;
+            let updated = time::OffsetDateTime::parse(
+                &thread.updated_at,
+                &time::format_description::well_known::Rfc3339,
+            )
+            .ok()?;
+            Some((updated, path, thread.branch.clone()))
+        })
+        .max_by_key(|(updated, _, _)| *updated)
+        .map(|(_, path, branch)| (path.to_string(), branch))
 }
 
 /// T3's title for its scratch project (`ensureScratchProject` in T3's
@@ -128,6 +173,8 @@ pub struct NewThreadForm {
     refs: HashMap<String, Loadable<RefList>>,
     base_ref_picker: PopoverMenuHandle<Picker<RefPickerDelegate>>,
     worktree_picker: PopoverMenuHandle<Picker<RefPickerDelegate>>,
+    /// The menu of where the agent works, while it's open, and what had focus before it.
+    workspace_menu: Option<(Entity<ContextMenu>, Option<FocusHandle>, Subscription)>,
     _tasks: Vec<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -233,6 +280,7 @@ impl NewThreadForm {
             refs: HashMap::default(),
             base_ref_picker: PopoverMenuHandle::default(),
             worktree_picker: PopoverMenuHandle::default(),
+            workspace_menu: None,
             _tasks: vec![load_projects, load_agents, load_settings],
             _subscriptions: subscriptions,
         }
@@ -578,6 +626,136 @@ impl NewThreadForm {
             }
         }
         self.changed(cx);
+    }
+
+    /// Whether the agent's workspace can be picked: a project with a repository.
+    fn can_pick_workspace(&self) -> bool {
+        !self.is_scratch() && self.selected_project().is_some() && self.is_repository()
+    }
+
+    /// The worktree [`UsePreviousWorktree`] would pick, from the app's shell.
+    pub(crate) fn previous_worktree(&self, cx: &mut App) -> Option<(String, Option<String>)> {
+        if !self.can_pick_workspace() {
+            return None;
+        }
+        let project_id = self.selected_project_id()?;
+        let current = match self.workspace_kind() {
+            WorkspaceKind::ExistingWorktree => {
+                self.worktree.as_ref().map(|(path, _)| path.as_str())
+            }
+            _ => None,
+        };
+        let shells = ThreadShells::global(cx);
+        let shell = shells.read(cx).shell()?;
+        previous_worktree(shell.threads.values(), project_id, current)
+    }
+
+    /// Works in the previous worktree, if there is one. Returns whether there was.
+    pub(crate) fn use_previous_worktree(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(worktree) = self.previous_worktree(cx) else {
+            return false;
+        };
+        self.workspace = Some(WorkspaceKind::ExistingWorktree);
+        self.worktree = Some(worktree);
+        self.branch = None;
+        self.changed(cx);
+        true
+    }
+
+    /// Opens or closes the menu of where the agent works. Returns whether it applies (a
+    /// project with a repository).
+    pub(crate) fn toggle_workspace_menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.can_pick_workspace() {
+            return false;
+        }
+        if let Some((menu, restore, _)) = self.workspace_menu.take() {
+            menu.update(cx, |_, cx| cx.emit(DismissEvent));
+            if let Some(restore) = restore {
+                window.focus(&restore, cx);
+            }
+            cx.notify();
+            return true;
+        }
+        // Key hints in the menu are the ones bound where the user is.
+        let restore = window.focused(cx);
+        let context = restore.clone();
+        let kind = self.workspace_kind();
+        let previous = self.previous_worktree(cx);
+        let form = cx.entity().downgrade();
+        let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            if let Some(context) = context.clone() {
+                menu = menu.context(context);
+            }
+            let pick = |menu: ContextMenu, label: &'static str, choice: WorkspaceKind| {
+                let form = form.clone();
+                menu.toggleable_entry(
+                    label,
+                    kind == choice,
+                    IconPosition::End,
+                    None,
+                    move |window, cx| {
+                        form.update(cx, |form, cx| {
+                            form.set_workspace_kind(choice, cx);
+                            if choice == WorkspaceKind::ExistingWorktree && form.worktree.is_none()
+                            {
+                                form.worktree_picker.show(window, cx);
+                            }
+                        })
+                        .ok();
+                    },
+                )
+            };
+            menu = pick(menu, "New worktree", WorkspaceKind::NewWorktree);
+            menu = pick(menu, "Existing worktree…", WorkspaceKind::ExistingWorktree);
+            menu = pick(menu, "Project checkout", WorkspaceKind::Checkout);
+            if let Some((_, branch)) = &previous {
+                let form = form.clone();
+                menu = menu.separator().item(
+                    ContextMenuEntry::new(match branch {
+                        Some(branch) => format!("Previous worktree ({branch})"),
+                        None => "Previous worktree".to_string(),
+                    })
+                    .icon(IconName::GitBranch)
+                    .icon_color(Color::Muted)
+                    .action(Box::new(UsePreviousWorktree))
+                    .handler(move |_, cx| {
+                        form.update(cx, |form, cx| form.use_previous_worktree(cx))
+                            .ok();
+                    }),
+                );
+            }
+            menu
+        });
+        window.focus(&menu.focus_handle(cx), cx);
+        let subscription =
+            cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, window, cx| {
+                if let Some((_, restore, _)) = this.workspace_menu.take()
+                    && let Some(restore) = restore
+                    && !this.worktree_picker.is_deployed()
+                {
+                    window.focus(&restore, cx);
+                }
+                cx.notify();
+            });
+        self.workspace_menu = Some((menu, restore, subscription));
+        cx.notify();
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn workspace_menu_is_open(&self) -> bool {
+        self.workspace_menu.is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn picked_worktree(
+        &self,
+    ) -> Option<(WorkspaceKind, Option<(String, Option<String>)>)> {
+        Some((self.workspace_kind(), self.worktree.clone()))
     }
 
     // The agent, model, options, and modes, which the settings bar picks.
@@ -1066,11 +1244,37 @@ impl NewThreadForm {
                 None => div().into_any_element(),
             },
         };
+        let menu = self.workspace_menu.as_ref().map(|(menu, _, _)| {
+            deferred(
+                anchored()
+                    .anchor(Anchor::TopLeft)
+                    .snap_to_window_with_margin(px(8.))
+                    .child(menu.clone()),
+            )
+            .with_priority(1)
+        });
+        let form = cx.entity().downgrade();
+        let more = v_flex()
+            .child(
+                IconButton::new("new-thread-workspace-menu", IconName::Ellipsis)
+                    .icon_size(IconSize::Small)
+                    .icon_color(Color::Muted)
+                    .toggle_state(self.workspace_menu.is_some())
+                    .tooltip(|_, cx| {
+                        Tooltip::for_action("Where the agent works", &ToggleWorkspacePicker, cx)
+                    })
+                    .on_click(move |_, window, cx| {
+                        form.update(cx, |form, cx| form.toggle_workspace_menu(window, cx))
+                            .ok();
+                    }),
+            )
+            .child(div().h_0().children(menu));
         h_flex()
             .gap_2()
             .flex_wrap()
             .child(segments)
             .child(detail)
+            .child(more)
             .into_any_element()
     }
 
@@ -1383,6 +1587,28 @@ pub(crate) fn register(workspace: &mut Workspace) {
             form.update(cx, |form, cx| form.prefill(action, cx));
         }
     });
+    // T3's `mod+shift+x` and `mod+shift+l`, on a draft. Elsewhere the keys go on to their other
+    // bindings (such as the editor's Select All Matches).
+    workspace.register_action(|workspace, _: &ToggleWorkspacePicker, window, cx| {
+        let opened = active_form(workspace, cx)
+            .is_some_and(|form| form.update(cx, |form, cx| form.toggle_workspace_menu(window, cx)));
+        if !opened {
+            cx.propagate();
+        }
+    });
+    workspace.register_action(|workspace, _: &UsePreviousWorktree, _, cx| {
+        let used = active_form(workspace, cx)
+            .is_some_and(|form| form.update(cx, |form, cx| form.use_previous_worktree(cx)));
+        if !used {
+            cx.propagate();
+        }
+    });
+}
+
+/// The form of the draft the workspace shows, if it shows one.
+fn active_form(workspace: &Workspace, cx: &App) -> Option<gpui::Entity<NewThreadForm>> {
+    let view = workspace.active_item(cx)?.downcast::<ThreadView>()?;
+    view.read(cx).new_thread.clone()
 }
 
 /// The form of `view`, if it's a draft. For tests.

@@ -1,11 +1,17 @@
-//! Images: the ones the composer sends with a message, and the ones the timeline shows.
+//! Attachments: the images and files the composer sends with a message, and the images the
+//! timeline shows.
 //!
-//! - **Sending.** An image pasted, dropped, or picked goes up as soon as it's added, as in T3's
-//!   web app (`chat/useComposerAttachmentIntake.ts`, `lib/attachmentUploadQueue.ts`):
-//!   `attachments.createUploadUrl` mints a URL for its size and type, the bytes go to it
-//!   ([`ThreadBackend::upload`]), and the message names it by the attachment id T3 gave
-//!   (`message.dispatch.attachments`). The strip in the composer shows each image's progress; a
-//!   failed upload can be retried, and removing an image deletes what T3 minted for it.
+//! - **Sending.** An image or file pasted, dropped, or picked goes up as soon as it's added, as
+//!   in T3's web app (`chat/useComposerAttachmentIntake.ts`, `lib/attachmentUploadQueue.ts`):
+//!   `attachments.createUploadUrl` mints a URL for its size and type (`type: "file"` for a
+//!   file), the bytes go to it ([`ThreadBackend::upload`]), and the message names it by the
+//!   attachment id T3 gave (`message.dispatch.attachments`). The strip in the composer shows each
+//!   one's progress; a failed upload can be retried, and removing one deletes what T3 minted
+//!   for it. T3's limits hold: 100 attachments, images up to 10 MiB (shrunk to fit), files up to
+//!   50 MiB (`chat/composerAttachmentFiles.ts`).
+//! - **Big pastes.** Pasted text of 32 KiB or more goes in as a file, `pasted-text.txt`, as
+//!   T3's composer folds it (`client-runtime/src/textPaste.ts`); `mod-shift-v` pastes it as
+//!   text.
 //! - **Showing.** An image in a message, or a screenshot in a tool's output, loads through
 //!   `assets.createUrl`, which signs a URL for it, then [`ThreadBackend::fetch_asset`]. Clicking
 //!   a thumbnail opens it full size ([`ImagePreview`]).
@@ -37,7 +43,8 @@ use t3_api::{
         AssetCreateUrlInput, AssetResourceAttachment, AssetResourceAttachmentTag,
         AssetResourceToolOutputImage, AssetResourceToolOutputImageTag,
         AttachmentCreateUploadUrlInput, AttachmentCreateUploadUrlInputVariant0MimeType,
-        AttachmentDeleteInput, OrchestrationV2ThreadLaunchInput,
+        AttachmentCreateUploadUrlInputVariant1Type, AttachmentDeleteInput,
+        OrchestrationV2ThreadLaunchInput,
     },
 };
 use ui::{Color, Label, LabelCommon as _, LabelSize, prelude::*};
@@ -50,6 +57,13 @@ pub const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 pub const MAX_ATTACHMENTS: usize = 100;
 /// The most image bytes one message takes (`PROVIDER_SEND_TURN_MAX_TOTAL_IMAGE_BYTES`).
 pub const MAX_TOTAL_IMAGE_BYTES: usize = 80 * 1024 * 1024;
+/// The largest file other than an image T3 takes (`PROVIDER_SEND_TURN_MAX_FILE_BYTES`).
+pub const MAX_FILE_BYTES: usize = 50 * 1024 * 1024;
+/// Pasted text this long, in characters or UTF-8 bytes, goes in as a file
+/// (`PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES` in T3's `client-runtime/src/textPaste.ts`).
+pub const PASTED_TEXT_THRESHOLD: usize = 32 * 1024;
+/// A big paste's type, as T3 makes the file.
+pub const PASTED_TEXT_MIME_TYPE: &str = "text/plain;charset=utf-8";
 /// The largest image mustr will shrink to fit; larger ones are refused
 /// (`MAX_COMPRESSIBLE_SOURCE_BYTES` in T3's `apps/web/src/lib/imageCompression.ts`).
 pub const MAX_SOURCE_BYTES: usize = 50 * 1024 * 1024;
@@ -131,6 +145,25 @@ pub fn sniff_format(bytes: &[u8]) -> Option<ImageFormat> {
     } else {
         None
     }
+}
+
+/// An image or another file, ready to upload.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NewAttachment {
+    Image(NewImage),
+    File(NewFile),
+}
+
+/// Whether a file is named like an image agents take, or one mustr converts.
+pub(crate) fn has_image_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tif" | "tiff"
+            )
+        })
 }
 
 /// An image ready to upload: a type agents take, within T3's size limit.
@@ -248,6 +281,201 @@ impl NewImage {
         }
         let bytes = std::fs::read(path).map_err(|error| format!("{shown_name}: {error}"))?;
         Self::prepare(name, None, bytes)
+    }
+}
+
+/// Whether pasted text is big enough to go in as a file (`pastedTextDisposition` in T3).
+pub fn is_big_paste(text: &str) -> bool {
+    !text.is_empty()
+        && (text.len() >= PASTED_TEXT_THRESHOLD || text.chars().count() >= PASTED_TEXT_THRESHOLD)
+}
+
+/// The name of the next big paste: `pasted-text.txt`, then `pasted-text-2.txt` and on, past the
+/// names the composer has (`nextPastedTextFileName` in T3).
+pub fn next_pasted_text_name<'a>(existing: impl IntoIterator<Item = &'a str>) -> String {
+    let names = existing
+        .into_iter()
+        .map(str::to_lowercase)
+        .collect::<collections::HashSet<_>>();
+    if !names.contains("pasted-text.txt") {
+        return "pasted-text.txt".to_string();
+    }
+    (2..)
+        .map(|sequence| format!("pasted-text-{sequence}.txt"))
+        .find(|name| !names.contains(name))
+        .expect("an unused name")
+}
+
+/// What T3 says about a file over its limit (`fileAttachmentTooLargeMessage` in T3's
+/// `client-runtime/src/state/attachments.ts`).
+pub fn file_too_large_message(name: &str, max_bytes: usize) -> String {
+    const MB: usize = 1024 * 1024;
+    let limit = if max_bytes >= MB && max_bytes.is_multiple_of(MB) {
+        format!("{} MB", max_bytes / MB)
+    } else if max_bytes >= 1024 && max_bytes.is_multiple_of(1024) {
+        format!("{} KB", max_bytes / 1024)
+    } else if max_bytes == 1 {
+        "1 byte".to_string()
+    } else {
+        format!("{max_bytes} bytes")
+    };
+    format!("'{name}' exceeds the {limit} attachment limit.")
+}
+
+/// A file's type from its name, as a browser would give it to T3's composer, or
+/// `application/octet-stream` (`composerFileAttachmentMimeType` in T3).
+pub fn mime_type_for(name: &str) -> &'static str {
+    let extension = Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    match extension.as_str() {
+        "txt" | "text" | "log" => "text/plain",
+        "md" | "markdown" => "text/markdown",
+        "csv" => "text/csv",
+        "tsv" => "text/tab-separated-values",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "js" | "mjs" | "cjs" => "text/javascript",
+        "ts" | "tsx" | "mts" | "cts" => "text/typescript",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "yaml" | "yml" => "application/yaml",
+        "toml" => "application/toml",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "gz" | "tgz" => "application/gzip",
+        "tar" => "application/x-tar",
+        "svg" => "image/svg+xml",
+        "dng" => "image/x-adobe-dng",
+        "heic" => "image/heic",
+        "heif" => "image/heif",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "sh" | "bash" | "zsh" => "application/x-sh",
+        "py" => "text/x-python",
+        "rs" => "text/x-rust",
+        "go" => "text/x-go",
+        "java" => "text/x-java",
+        "c" | "h" => "text/x-c",
+        "cpp" | "cc" | "hpp" => "text/x-c++",
+        "swift" => "text/x-swift",
+        "rb" => "text/x-ruby",
+        "sql" => "application/sql",
+        "diff" | "patch" => "text/x-diff",
+        _ => "application/octet-stream",
+    }
+}
+
+/// A file other than an image, ready to upload: within T3's limit, and not empty.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewFile {
+    pub name: String,
+    pub mime_type: String,
+    pub bytes: Vec<u8>,
+    /// It's a big paste, which T3 hands the agent as a path only.
+    pub pasted_text: bool,
+}
+
+impl NewFile {
+    /// Reads a file, as one dropped, picked, or copied.
+    pub fn from_path(path: &Path) -> Result<Self, String> {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        let metadata = std::fs::metadata(path)
+            .map_err(|_| format!("'{name}' is empty or could not be read."))?;
+        if metadata.is_dir() {
+            return Err(format!(
+                "'{name}' is a folder; attach the files in it instead."
+            ));
+        }
+        if metadata.len() as usize > MAX_FILE_BYTES {
+            return Err(file_too_large_message(&name, MAX_FILE_BYTES));
+        }
+        let bytes =
+            std::fs::read(path).map_err(|_| format!("'{name}' is empty or could not be read."))?;
+        Self::new(name, mime_type_for_path(path).to_string(), bytes, false)
+    }
+
+    /// A big paste as a file named `name` (`foldPastedText` in T3's
+    /// `chat/useComposerAttachmentIntake.ts`).
+    pub fn pasted_text(name: String, text: &str) -> Result<Self, String> {
+        Self::new(
+            name,
+            PASTED_TEXT_MIME_TYPE.to_string(),
+            text.as_bytes().to_vec(),
+            true,
+        )
+    }
+
+    fn new(
+        name: String,
+        mime_type: String,
+        bytes: Vec<u8>,
+        pasted_text: bool,
+    ) -> Result<Self, String> {
+        if bytes.is_empty() {
+            return Err(format!("'{name}' is empty or could not be read."));
+        }
+        if bytes.len() > MAX_FILE_BYTES {
+            return Err(file_too_large_message(&name, MAX_FILE_BYTES));
+        }
+        Ok(Self {
+            name,
+            mime_type,
+            bytes,
+            pasted_text,
+        })
+    }
+}
+
+fn mime_type_for_path(path: &Path) -> &'static str {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map_or("application/octet-stream", mime_type_for)
+}
+
+/// Whether T3 takes files other than images, from its config (`fileAttachmentStagingLimit` in
+/// T3's `chat/composerAttachmentFiles.ts`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FileUploads {
+    /// Its config isn't read yet: files up to T3's limit go, as T3's composer lets them.
+    #[default]
+    Unknown,
+    /// Files up to this many bytes.
+    UpTo(usize),
+    /// It takes images only.
+    Unsupported,
+}
+
+impl FileUploads {
+    /// Reads `server.getConfig`'s `environment.capabilities`: uploads must be on and a file
+    /// limit given; a limit over T3's own is cut to it (`clampFileAttachmentUploadBytes`).
+    pub fn from_config(config: &serde_json::Value) -> Self {
+        let capabilities = &config["environment"]["capabilities"];
+        if !capabilities.is_object() {
+            return Self::Unknown;
+        }
+        let max = capabilities["fileAttachments"]["maxUploadBytes"].as_u64();
+        match (capabilities["attachmentUploads"].as_bool(), max) {
+            (Some(true), Some(max)) => Self::UpTo((max as usize).min(MAX_FILE_BYTES)),
+            _ => Self::Unsupported,
+        }
+    }
+
+    /// The largest file that goes, or `None` when none do.
+    pub fn limit(self) -> Option<usize> {
+        match self {
+            Self::Unknown => Some(MAX_FILE_BYTES),
+            Self::UpTo(max) => Some(max),
+            Self::Unsupported => None,
+        }
     }
 }
 
@@ -371,6 +599,26 @@ impl ComposerImage {
     }
 }
 
+/// A file other than an image in the composer, to send with the next message.
+#[derive(Clone, Debug)]
+pub struct ComposerFile {
+    pub key: u64,
+    pub name: String,
+    pub mime_type: String,
+    pub bytes: Arc<Vec<u8>>,
+    /// It's a big paste.
+    pub pasted_text: bool,
+    /// The id T3 minted for it, once it has.
+    pub attachment_id: Option<String>,
+    pub upload: UploadState,
+}
+
+impl ComposerFile {
+    pub fn size(&self) -> usize {
+        self.bytes.len()
+    }
+}
+
 /// An image the timeline shows, as `assets.createUrl` names it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum AssetKey {
@@ -449,15 +697,20 @@ pub fn load_asset(
     }
 }
 
-/// A thread view's images: the composer's, and the timeline's as they load.
+/// A thread view's attachments: the composer's images and files, and the timeline's images as
+/// they load.
 #[derive(Default)]
 pub struct Images {
     pub(crate) composer: Vec<ComposerImage>,
+    /// The composer's other files, after its images in the strip and in the message.
+    pub(crate) files: Vec<ComposerFile>,
     next_key: u64,
-    /// Images being read or shrunk before they're added.
+    /// Images and files being read or shrunk before they're added.
     pub(crate) preparing: usize,
-    /// Why the last images couldn't be added, until more are.
+    /// Why the last attachments couldn't be added, until more are.
     pub(crate) intake_error: Option<SharedString>,
+    /// What happened to the last big paste, until the next intake.
+    pub(crate) intake_note: Option<SharedString>,
     /// A send waiting on retried uploads, as T3's Send waits for them.
     pub(crate) send_when_uploaded: Option<Delivery>,
     pub(crate) assets: HashMap<AssetKey, AssetState>,
@@ -467,32 +720,58 @@ pub struct Images {
 }
 
 impl Images {
-    fn get_mut(&mut self, key: u64) -> Option<&mut ComposerImage> {
-        self.composer.iter_mut().find(|image| image.key == key)
+    /// An attachment's upload and the id T3 minted for it, by key: an image's or a file's.
+    fn upload_mut(&mut self, key: u64) -> Option<(&mut UploadState, &mut Option<String>)> {
+        if let Some(image) = self.composer.iter_mut().find(|image| image.key == key) {
+            return Some((&mut image.upload, &mut image.attachment_id));
+        }
+        self.files
+            .iter_mut()
+            .find(|file| file.key == key)
+            .map(|file| (&mut file.upload, &mut file.attachment_id))
     }
 
-    /// Whether any image is still going up.
+    fn uploads(&self) -> impl Iterator<Item = &UploadState> {
+        self.composer
+            .iter()
+            .map(|image| &image.upload)
+            .chain(self.files.iter().map(|file| &file.upload))
+    }
+
+    /// Whether the composer holds an image or a file.
+    pub fn has_attachments(&self) -> bool {
+        !self.composer.is_empty() || !self.files.is_empty()
+    }
+
+    /// Whether the composer has no attachment, not even one on its way.
+    pub fn is_empty(&self) -> bool {
+        self.composer.is_empty() && self.files.is_empty() && self.preparing == 0
+    }
+
+    /// How many attachments the composer holds or is preparing, against T3's limit.
+    pub fn count(&self) -> usize {
+        self.composer.len() + self.files.len() + self.preparing
+    }
+
+    /// Whether any attachment is still going up.
     pub fn uploading(&self) -> bool {
         self.preparing > 0
             || self
-                .composer
-                .iter()
-                .any(|image| matches!(image.upload, UploadState::Uploading { .. }))
+                .uploads()
+                .any(|upload| matches!(upload, UploadState::Uploading { .. }))
     }
 
     pub fn any_failed(&self) -> bool {
-        self.composer
-            .iter()
-            .any(|image| matches!(image.upload, UploadState::Failed { .. }))
+        self.uploads()
+            .any(|upload| matches!(upload, UploadState::Failed { .. }))
     }
 
     /// Why Send waits, if it does: "Attachment still uploading", as T3 says it.
     pub fn send_blocked_reason(&self) -> Option<&'static str> {
         let uploading = self.preparing
             + self
-                .composer
-                .iter()
-                .filter(|image| matches!(image.upload, UploadState::Uploading { .. }))
+                .uploads()
+                .filter(|upload| matches!(upload, UploadState::Uploading { .. }))
                 .count();
         match uploading {
             0 => None,
@@ -501,9 +780,10 @@ impl Images {
         }
     }
 
-    /// The uploaded images, as the next message names them.
+    /// The uploaded images, then files, as the next message names them.
     pub fn attachments(&self) -> Vec<ChatAttachment> {
-        self.composer
+        let images = self
+            .composer
             .iter()
             .filter(|image| image.upload == UploadState::Uploaded)
             .filter_map(|image| {
@@ -513,17 +793,47 @@ impl Images {
                     image.image_type.mime_type(),
                     image.size(),
                 ))
-            })
+            });
+        let files = self
+            .files
+            .iter()
+            .filter(|file| file.upload == UploadState::Uploaded)
+            .filter_map(|file| {
+                Some(commands::file_attachment(
+                    file.attachment_id.as_deref()?,
+                    &file.name,
+                    &file.mime_type,
+                    file.size(),
+                    file.pasted_text,
+                ))
+            });
+        images.chain(files).collect()
+    }
+
+    /// The keys of the uploaded attachments, which a message takes.
+    pub(crate) fn uploaded_keys(&self) -> Vec<u64> {
+        self.composer
+            .iter()
+            .filter(|image| image.upload == UploadState::Uploaded)
+            .map(|image| image.key)
+            .chain(
+                self.files
+                    .iter()
+                    .filter(|file| file.upload == UploadState::Uploaded)
+                    .map(|file| file.key),
+            )
             .collect()
     }
 
-    /// Forgets the images a message took, without deleting them from T3.
+    /// Forgets the attachments a message took, without deleting them from T3.
     pub(crate) fn clear_sent(&mut self, keys: &[u64]) {
         self.composer.retain(|image| !keys.contains(&image.key));
+        self.files.retain(|file| !keys.contains(&file.key));
         for key in keys {
             self.uploads.remove(key);
         }
         self.intake_error = None;
+        self.intake_note = None;
         self.send_when_uploaded = None;
     }
 }
@@ -534,8 +844,13 @@ impl ThreadView {
         &self.images.composer
     }
 
-    /// Puts the composer's uploaded images on a new thread's first message, returning which
-    /// they were, to forget once it starts.
+    /// The composer's other files, for tests.
+    pub fn composer_files(&self) -> &[ComposerFile] {
+        &self.images.files
+    }
+
+    /// Puts the composer's uploaded images and files on a new thread's first message,
+    /// returning which they were, to forget once it starts.
     pub(crate) fn attach_composer_images(
         &self,
         input: &mut OrchestrationV2ThreadLaunchInput,
@@ -544,12 +859,7 @@ impl ThreadView {
             return Vec::new();
         };
         message.attachments = self.images.attachments();
-        self.images
-            .composer
-            .iter()
-            .filter(|image| image.upload == UploadState::Uploaded)
-            .map(|image| image.key)
-            .collect()
+        self.images.uploaded_keys()
     }
 
     /// Adds images from the clipboard, as pasted.
@@ -562,14 +872,18 @@ impl ThreadView {
         let prepare = cx.background_spawn(async move {
             images
                 .into_iter()
-                .map(|image| NewImage::prepare(None, Some(image.format), image.bytes))
+                .map(|image| {
+                    NewImage::prepare(None, Some(image.format), image.bytes)
+                        .map(NewAttachment::Image)
+                })
                 .collect::<Vec<_>>()
         });
-        self.prepare_images(prepare, window, cx);
+        self.prepare_attachments(prepare, window, cx);
     }
 
-    /// Adds image files, as dropped or picked.
-    pub(crate) fn add_image_paths(
+    /// Adds files, as dropped, picked or copied: images by their names, which mustr shrinks to
+    /// fit, and any other file as it is.
+    pub(crate) fn add_paths(
         &mut self,
         paths: Vec<PathBuf>,
         window: &mut Window,
@@ -578,20 +892,80 @@ impl ThreadView {
         let prepare = cx.background_spawn(async move {
             paths
                 .iter()
-                .map(|path| NewImage::from_path(path))
+                .map(|path| {
+                    if has_image_extension(path) {
+                        NewImage::from_path(path).map(NewAttachment::Image)
+                    } else {
+                        NewFile::from_path(path).map(NewAttachment::File)
+                    }
+                })
                 .collect::<Vec<_>>()
         });
-        self.prepare_images(prepare, window, cx);
+        self.prepare_attachments(prepare, window, cx);
     }
 
-    fn prepare_images(
+    /// Takes a paste of text as a file when it's big, as T3's composer folds it
+    /// (`foldPastedText`): returns whether it did. It stays text when the server takes no files
+    /// or the composer is full, and when it's too big even for a file, it says so instead.
+    pub(crate) fn fold_big_paste(
         &mut self,
-        prepare: Task<Vec<Result<NewImage, String>>>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !is_big_paste(text) {
+            return false;
+        }
+        let Some(limit) = self.file_uploads().limit() else {
+            return false;
+        };
+        if self.images.count() >= MAX_ATTACHMENTS {
+            return false;
+        }
+        if text.len() > limit {
+            self.images.intake_note = None;
+            self.images.intake_error = Some(
+                "Pasted text is too large to attach. Reduce the clipboard contents or save a \
+                 smaller excerpt as a file."
+                    .into(),
+            );
+            cx.notify();
+            return true;
+        }
+        let name = next_pasted_text_name(self.images.files.iter().map(|file| file.name.as_str()));
+        let file = NewFile::pasted_text(name, text).map(NewAttachment::File);
+        let size = format_size(text.len());
+        let added = self.add_attachments(vec![file], window, cx);
+        if let Some(name) = added.first() {
+            self.images.intake_note = Some(
+                format!(
+                    "Large paste attached as {name} ({size}). Use {} to keep a large paste inline.",
+                    if cfg!(target_os = "macos") {
+                        "⌘⇧V"
+                    } else {
+                        "Ctrl+Shift+V"
+                    }
+                )
+                .into(),
+            );
+        }
+        true
+    }
+
+    /// Whether T3 takes files, as far as the composer has read its config.
+    pub(crate) fn file_uploads(&self) -> FileUploads {
+        self.composer_state.menu.file_uploads()
+    }
+
+    fn prepare_attachments(
+        &mut self,
+        prepare: Task<Vec<Result<NewAttachment, String>>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.images.preparing += 1;
         self.images.intake_error = None;
+        self.images.intake_note = None;
         cx.notify();
         self.images._intake.retain(|task| !task.is_ready());
         self.images
@@ -600,82 +974,138 @@ impl ThreadView {
                 let prepared = prepare.await;
                 this.update_in(cx, |this, window, cx| {
                     this.images.preparing -= 1;
-                    this.add_images(prepared, window, cx);
+                    this.add_attachments(prepared, window, cx);
                 })
                 .ok();
             }));
     }
 
-    /// Adds prepared images and starts their uploads, refusing any past T3's limits.
+    /// Adds prepared images, as [`Self::add_attachments`] does.
+    #[cfg(test)]
     pub(crate) fn add_images(
         &mut self,
         images: Vec<Result<NewImage, String>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let attachments = images
+            .into_iter()
+            .map(|image| image.map(NewAttachment::Image))
+            .collect();
+        self.add_attachments(attachments, window, cx);
+    }
+
+    /// Adds prepared images and files and starts their uploads, refusing any past T3's limits
+    /// (`addComposerAttachments` in T3). Returns the names of the ones it added.
+    pub(crate) fn add_attachments(
+        &mut self,
+        attachments: Vec<Result<NewAttachment, String>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<String> {
         let mut errors = Vec::new();
-        for image in images {
-            let image = match image {
-                Ok(image) => image,
+        let mut added = Vec::new();
+        for attachment in attachments {
+            let attachment = match attachment {
+                Ok(attachment) => attachment,
                 Err(error) => {
                     errors.push(error);
                     continue;
                 }
             };
-            if self.images.composer.len() >= MAX_ATTACHMENTS {
+            if self.images.composer.len() + self.images.files.len() >= MAX_ATTACHMENTS {
                 errors.push(format!(
-                    "You can attach up to {MAX_ATTACHMENTS} images per message."
-                ));
-                continue;
-            }
-            let total = self
-                .images
-                .composer
-                .iter()
-                .map(ComposerImage::size)
-                .sum::<usize>()
-                + image.bytes.len();
-            if total > MAX_TOTAL_IMAGE_BYTES {
-                errors.push(format!(
-                    "{} doesn't fit: a message's images can be up to {} in all.",
-                    image.name,
-                    format_size(MAX_TOTAL_IMAGE_BYTES)
+                    "You can attach up to {MAX_ATTACHMENTS} files per message."
                 ));
                 continue;
             }
             self.images.next_key += 1;
             let key = self.images.next_key;
-            self.images.composer.push(ComposerImage {
-                key,
-                name: image.name,
-                image_type: image.image_type,
-                image: Arc::new(Image::from_bytes(image.image_type.format(), image.bytes)),
-                attachment_id: None,
-                upload: UploadState::Uploading { progress: 0. },
-            });
+            match attachment {
+                NewAttachment::Image(image) => {
+                    let total = self
+                        .images
+                        .composer
+                        .iter()
+                        .map(ComposerImage::size)
+                        .sum::<usize>()
+                        + image.bytes.len();
+                    if total > MAX_TOTAL_IMAGE_BYTES {
+                        errors.push(format!(
+                            "{} doesn't fit: a message's images can be up to {} in all.",
+                            image.name,
+                            format_size(MAX_TOTAL_IMAGE_BYTES)
+                        ));
+                        continue;
+                    }
+                    added.push(image.name.clone());
+                    self.images.composer.push(ComposerImage {
+                        key,
+                        name: image.name,
+                        image_type: image.image_type,
+                        image: Arc::new(Image::from_bytes(image.image_type.format(), image.bytes)),
+                        attachment_id: None,
+                        upload: UploadState::Uploading { progress: 0. },
+                    });
+                }
+                NewAttachment::File(file) => {
+                    let Some(limit) = self.file_uploads().limit() else {
+                        errors.push("This server does not support file attachments.".into());
+                        continue;
+                    };
+                    if file.bytes.len() > limit {
+                        errors.push(file_too_large_message(&file.name, limit));
+                        continue;
+                    }
+                    added.push(file.name.clone());
+                    self.images.files.push(ComposerFile {
+                        key,
+                        name: file.name,
+                        mime_type: file.mime_type,
+                        bytes: Arc::new(file.bytes),
+                        pasted_text: file.pasted_text,
+                        attachment_id: None,
+                        upload: UploadState::Uploading { progress: 0. },
+                    });
+                }
+            }
             self.start_upload(key, window, cx);
         }
         errors.dedup();
         self.images.intake_error = (!errors.is_empty()).then(|| errors.join(" ").into());
         cx.notify();
+        added
     }
 
-    /// Mints an upload URL for an image (`attachments.createUploadUrl`), then sends its bytes.
+    /// Mints an upload URL for an image or file (`attachments.createUploadUrl`), then sends its
+    /// bytes.
     fn start_upload(&mut self, key: u64, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(image) = self.images.get_mut(key) else {
-            return;
-        };
-        image.upload = UploadState::Uploading { progress: 0. };
-        image.attachment_id = None;
-        let mime_type = image.image_type.mime_type().to_string();
-        let bytes = image.image.bytes.clone();
-        // T3 leaves `type` out for images; only files say `"file"`.
-        let input = AttachmentCreateUploadUrlInput::Variant0 {
-            mime_type: image.image_type.wire(),
-            name: image.name.clone(),
-            size_bytes: bytes.len() as i64,
-            type_: None,
-        };
+        let (input, mime_type, bytes) =
+            if let Some(image) = self.images.composer.iter().find(|image| image.key == key) {
+                let bytes = image.image.bytes.clone();
+                // T3 leaves `type` out for images; only files say `"file"`.
+                let input = AttachmentCreateUploadUrlInput::Variant0 {
+                    mime_type: image.image_type.wire(),
+                    name: image.name.clone(),
+                    size_bytes: bytes.len() as i64,
+                    type_: None,
+                };
+                (input, image.image_type.mime_type().to_string(), bytes)
+            } else if let Some(file) = self.images.files.iter().find(|file| file.key == key) {
+                let input = AttachmentCreateUploadUrlInput::Variant1 {
+                    mime_type: file.mime_type.clone(),
+                    name: file.name.clone(),
+                    size_bytes: file.size() as i64,
+                    type_: AttachmentCreateUploadUrlInputVariant1Type::File,
+                };
+                (input, file.mime_type.clone(), file.bytes.as_ref().clone())
+            } else {
+                return;
+            };
+        if let Some((upload, attachment_id)) = self.images.upload_mut(key) {
+            *upload = UploadState::Uploading { progress: 0. };
+            *attachment_id = None;
+        }
         let backend = self.backend.clone();
         let mint = backend.call::<rpc::AttachmentsCreateUploadUrl>(input, Access::Operate);
         let total = bytes.len() as u64;
@@ -698,8 +1128,8 @@ impl ThreadView {
             let attachment_id = minted.attachment_id.clone();
             if this
                 .update(cx, |this, _| {
-                    if let Some(image) = this.images.get_mut(key) {
-                        image.attachment_id = Some(attachment_id);
+                    if let Some((_, minted_id)) = this.images.upload_mut(key) {
+                        *minted_id = Some(attachment_id);
                     }
                 })
                 .is_err()
@@ -730,7 +1160,7 @@ impl ThreadView {
             };
             this.update_in(cx, |this, window, cx| {
                 let result = result.map_err(|error| {
-                    log::warn!("couldn't upload an image: {error:#}");
+                    log::warn!("couldn't upload an attachment: {error:#}");
                     format!("Upload failed: {error:#}")
                 });
                 this.finish_upload(key, result, window, cx)
@@ -741,12 +1171,12 @@ impl ThreadView {
     }
 
     fn set_upload_progress(&mut self, key: u64, progress: f32, cx: &mut Context<Self>) {
-        let Some(image) = self.images.get_mut(key) else {
+        let Some((upload, _)) = self.images.upload_mut(key) else {
             return;
         };
         // In steps of 5%, as T3 shows it, so a big upload doesn't redraw for every chunk.
         let stepped = (progress.clamp(0., 1.) * 20.).floor() / 20.;
-        if let UploadState::Uploading { progress } = &mut image.upload
+        if let UploadState::Uploading { progress } = upload
             && *progress != stepped
         {
             *progress = stepped;
@@ -762,10 +1192,10 @@ impl ThreadView {
         cx: &mut Context<Self>,
     ) {
         self.images.uploads.remove(&key);
-        let Some(image) = self.images.get_mut(key) else {
+        let Some((upload, _)) = self.images.upload_mut(key) else {
             return;
         };
-        image.upload = match result {
+        *upload = match result {
             Ok(()) => UploadState::Uploaded,
             Err(reason) => UploadState::Failed {
                 reason: reason.into(),
@@ -796,8 +1226,15 @@ impl ThreadView {
             .images
             .composer
             .iter()
-            .filter(|image| matches!(image.upload, UploadState::Failed { .. }))
-            .map(|image| image.key)
+            .map(|image| (image.key, &image.upload))
+            .chain(
+                self.images
+                    .files
+                    .iter()
+                    .map(|file| (file.key, &file.upload)),
+            )
+            .filter(|(_, upload)| matches!(upload, UploadState::Failed { .. }))
+            .map(|(key, _)| key)
             .collect::<Vec<_>>();
         self.images.send_when_uploaded = Some(delivery);
         self.error = None;
@@ -810,13 +1247,13 @@ impl ThreadView {
     /// Uploads a failed image again with a fresh URL, deleting what T3 minted for the failed
     /// try (`retryAttachmentUpload` in T3).
     pub(crate) fn retry_image(&mut self, key: u64, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(image) = self.images.get_mut(key) else {
+        let Some((upload, attachment_id)) = self.images.upload_mut(key) else {
             return;
         };
-        if !matches!(image.upload, UploadState::Failed { .. }) {
+        if !matches!(upload, UploadState::Failed { .. }) {
             return;
         }
-        if let Some(attachment_id) = image.attachment_id.take() {
+        if let Some(attachment_id) = attachment_id.take() {
             self.delete_attachment(attachment_id, cx);
         }
         self.start_upload(key, window, cx);
@@ -826,20 +1263,23 @@ impl ThreadView {
     /// Takes an image out of the composer, stopping its upload and deleting whatever T3
     /// minted for it (`releaseAttachmentUpload` in T3).
     pub(crate) fn remove_image(&mut self, key: u64, cx: &mut Context<Self>) {
-        let Some(index) = self
+        let attachment_id = if let Some(index) = self
             .images
             .composer
             .iter()
             .position(|image| image.key == key)
-        else {
+        {
+            self.images.composer.remove(index).attachment_id
+        } else if let Some(index) = self.images.files.iter().position(|file| file.key == key) {
+            self.images.files.remove(index).attachment_id
+        } else {
             return;
         };
-        let image = self.images.composer.remove(index);
         self.images.uploads.remove(&key);
-        if let Some(attachment_id) = image.attachment_id {
+        if let Some(attachment_id) = attachment_id {
             self.delete_attachment(attachment_id, cx);
         }
-        if self.images.composer.is_empty() {
+        if self.images.composer.is_empty() && self.images.files.is_empty() {
             self.images.send_when_uploaded = None;
         }
         cx.notify();
@@ -865,8 +1305,8 @@ impl ThreadView {
         .detach();
     }
 
-    /// Asks for image files with the system's file picker (on Linux, its desktop portal).
-    pub(crate) fn pick_images(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Asks for files to attach with the system's file picker (on Linux, its desktop portal).
+    pub(crate) fn pick_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -891,10 +1331,8 @@ impl ThreadView {
                         return;
                     }
                 };
-                this.update_in(cx, |this, window, cx| {
-                    this.add_image_paths(paths, window, cx)
-                })
-                .ok();
+                this.update_in(cx, |this, window, cx| this.add_paths(paths, window, cx))
+                    .ok();
             }));
     }
 

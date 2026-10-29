@@ -6,7 +6,10 @@ use crate::{
     attachments::{AssetKey, AssetState},
     backend::{Access, ThreadBackendExt as _},
     composer::LiveOutput,
-    model::{ItemKind, ItemStatus, MessageImage, Row, TimelineItem, ToolKind, canonical_item},
+    model::{
+        ItemKind, ItemStatus, MessageFile, MessageImage, Row, TimelineItem, ToolKind,
+        canonical_item,
+    },
     thread_view::{CONTENT_MAX_WIDTH, Loadable, ThreadView},
 };
 use futures::StreamExt as _;
@@ -52,6 +55,44 @@ struct Thumbnail {
     fit: ObjectFit,
 }
 
+/// Where the timeline's "new since your last visit" line goes: above the first item that began
+/// after the thread's last visit before this view opened. T3 records visits
+/// (`chat/ThreadVisitWatermark.tsx`, which the sidebar does here); the line shows what they
+/// mark. It's placed once, when the thread loads, so what arrives while the view is open
+/// doesn't move it.
+#[derive(Default)]
+pub(crate) struct VisitLine {
+    /// The shell's `lastVisitedAt` when the view opened: `None` until the shell says, and
+    /// `Some(None)` for a thread never visited.
+    last_visited_at: Option<Option<String>>,
+    /// Whether the line has been placed.
+    placed: bool,
+    /// The item the line goes above, if anything is new.
+    pub(crate) item_id: Option<String>,
+    /// Waits for T3's shell, when the view opened before it loaded (as at startup).
+    _wait_for_shell: Option<gpui::Subscription>,
+}
+
+/// The first row with something new since `last_visited_at`, by the item it starts with, unless
+/// it's the first row: then everything is new, and the line would say nothing.
+pub(crate) fn first_new_item(
+    state: &crate::model::ThreadState,
+    rows: &[Row],
+    last_visited_at: &str,
+) -> Option<String> {
+    let visited = chrono::DateTime::parse_from_rfc3339(last_visited_at).ok()?;
+    let index = rows.iter().position(|row| {
+        state
+            .item(row.first_index())
+            .and_then(|item| chrono::DateTime::parse_from_rfc3339(&item.time).ok())
+            .is_some_and(|time| time > visited)
+    })?;
+    (index > 0)
+        .then(|| state.item(rows[index].first_index()))
+        .flatten()
+        .map(|item| item.id.clone())
+}
+
 /// Tool calls shown as chips on a collapsed run of work.
 const COLLAPSED_CHIPS: usize = 6;
 const CHIP_MAX_CHARS: usize = 48;
@@ -92,6 +133,12 @@ impl ThreadView {
                     .filter_map(markdown_source),
             );
         }
+        let changed = !texts.is_empty() || unchanged < self.rows.len().max(rows.len());
+        // The first load places the last-visit line; its row is measured with it.
+        let mut unchanged = unchanged;
+        if let Some(row) = self.place_visit_line(&rows, cx) {
+            unchanged = unchanged.min(row);
+        }
         self.list_state
             .splice(unchanged..self.rows.len(), rows.len() - unchanged);
         self.rows = rows;
@@ -99,8 +146,73 @@ impl ThreadView {
         for (id, text) in texts {
             self.update_markdown(id, text, cx);
         }
+        // Find in thread finds again in what changed.
+        if changed {
+            self.refresh_find(cx);
+        }
         // Where messages can be rewound to, and whether a rewind in flight has happened.
         self.sync_history();
+    }
+
+    /// Notes the thread's last visit as the shell has it now, before this view's visit moves
+    /// it, for the last-visit line. Called when the view opens.
+    pub(crate) fn note_last_visit(&mut self, cx: &mut Context<Self>) {
+        let Some(thread_id) = self.thread_id.as_deref() else {
+            return;
+        };
+        let visit = &mut self.composer_state.visit;
+        if visit.last_visited_at.is_some() {
+            return;
+        }
+        let shells = crate::shell::ThreadShells::global(cx);
+        let Some(shell) = shells.read(cx).shell() else {
+            // Notes it once the shell loads, and places the line if the thread has by then.
+            if visit._wait_for_shell.is_none() {
+                visit._wait_for_shell = Some(cx.observe(&shells, |this, _, cx| {
+                    this.note_last_visit(cx);
+                    if this.composer_state.visit.last_visited_at.is_some() {
+                        this.composer_state.visit._wait_for_shell = None;
+                        this.sync_rows(cx);
+                        cx.notify();
+                    }
+                }));
+            }
+            return;
+        };
+        visit.last_visited_at = Some(
+            shell
+                .threads
+                .get(thread_id)
+                .and_then(|thread| thread.last_visited_at.clone()),
+        );
+    }
+
+    /// Places the last-visit line once the thread has loaded, returning the row it went on.
+    fn place_visit_line(&mut self, rows: &[Row], cx: &mut Context<Self>) -> Option<usize> {
+        if self.composer_state.visit.placed || rows.is_empty() {
+            return None;
+        }
+        self.note_last_visit(cx);
+        let Loadable::Loaded(state) = &self.state else {
+            return None;
+        };
+        let visit = &mut self.composer_state.visit;
+        let last_visited_at = visit.last_visited_at.clone()?;
+        visit.placed = true;
+        visit.item_id = last_visited_at
+            .as_deref()
+            .and_then(|last_visited_at| first_new_item(state, rows, last_visited_at));
+        let item_id = visit.item_id.as_deref()?;
+        rows.iter().position(|row| {
+            state
+                .item(row.first_index())
+                .is_some_and(|item| item.id == item_id)
+        })
+    }
+
+    /// The item the last-visit line goes above, for tests.
+    pub fn visit_line_item(&self) -> Option<&str> {
+        self.composer_state.visit.item_id.as_deref()
     }
 
     fn update_markdown(&mut self, id: String, text: String, cx: &mut Context<Self>) {
@@ -148,8 +260,23 @@ impl ThreadView {
         cx.notify();
     }
 
+    /// Creates the Markdown of one item, if it shows Markdown and has none yet, as find needs
+    /// it to highlight a match in a row not rendered yet.
+    pub(crate) fn ensure_item_markdown(&mut self, item_id: &str, cx: &mut Context<Self>) {
+        if self.markdown.contains_key(item_id) {
+            return;
+        }
+        let source = self
+            .thread_state()
+            .and_then(|state| state.items().iter().find(|item| item.id == item_id))
+            .and_then(markdown_source);
+        if let Some((id, text)) = source {
+            self.update_markdown(id, text, cx);
+        }
+    }
+
     /// The row that shows an item.
-    fn row_of_item(&self, item_id: &str) -> Option<usize> {
+    pub(crate) fn row_of_item(&self, item_id: &str) -> Option<usize> {
         let state = self.thread_state()?;
         let index = state.items().iter().position(|item| item.id == item_id)?;
         self.rows.iter().position(|row| match row {
@@ -331,6 +458,73 @@ fn muted_markdown_style(window: &Window, cx: &App) -> MarkdownStyle {
     style
 }
 
+/// The line above what's new since the user's last visit.
+fn render_visit_line(cx: &App) -> AnyElement {
+    let palette = palette(cx);
+    let rule = || {
+        div()
+            .flex_1()
+            .h(px(1.))
+            .bg(palette.accent.hsla().opacity(0.5))
+    };
+    h_flex()
+        .debug_selector(|| "thread-visit-line".into())
+        .w_full()
+        .gap_2()
+        .pt(scaled(px(6.)))
+        .child(rule())
+        .child(
+            div()
+                .flex_none()
+                .text_size(tokens::text_size(tokens::TEXT_SIZE_XSMALL))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(palette.accent.hsla())
+                .child("New since your last visit"),
+        )
+        .child(rule())
+        .into_any_element()
+}
+
+/// The files a user message sent besides images, as chips with their names and sizes.
+fn render_message_files(files: &[MessageFile], cx: &App) -> AnyElement {
+    let palette = palette(cx);
+    h_flex()
+        .flex_wrap()
+        .gap_1()
+        .children(files.iter().map(|file| {
+            let size = crate::attachments::format_size(file.size_bytes.max(0) as usize);
+            let detail = if file.pasted_text {
+                format!("{size} · pasted text")
+            } else {
+                size
+            };
+            h_flex()
+                .gap_1()
+                .px_1p5()
+                .py_0p5()
+                .rounded(scaled(tokens::CONTROL_RADIUS))
+                .border(tokens::BORDER_WIDTH)
+                .border_color(palette.border.hsla())
+                .bg(palette.surface.hsla())
+                .child(
+                    Icon::new(if file.pasted_text {
+                        IconName::TextSnippet
+                    } else {
+                        IconName::Paperclip
+                    })
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+                )
+                .child(Label::new(file.name.clone()).size(LabelSize::Small))
+                .child(
+                    Label::new(detail)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+        }))
+        .into_any_element()
+}
+
 pub(crate) fn truncate(text: &str, max_chars: usize) -> String {
     let line = text.lines().next().unwrap_or_default().trim();
     match line.char_indices().nth(max_chars) {
@@ -509,6 +703,9 @@ impl ThreadView {
                     .map_or("", |item| item.id.as_str())
             ),
         };
+        let visit_line = state.item(row.first_index()).is_some_and(|item| {
+            Some(item.id.as_str()) == self.composer_state.visit.item_id.as_deref()
+        });
         let content = match row {
             Row::Item(item_index) => match state.item(item_index).cloned() {
                 Some(item) => self.render_item(&item, window, cx),
@@ -527,12 +724,17 @@ impl ThreadView {
             .justify_center()
             .px_4()
             .child(
-                div()
+                v_flex()
                     .w_full()
                     .max_w(scaled(px(CONTENT_MAX_WIDTH)))
-                    .py(scaled(px(6.)))
-                    .debug_selector(|| selector)
-                    .child(content),
+                    .when(visit_line, |this| this.child(render_visit_line(cx)))
+                    .child(
+                        div()
+                            .w_full()
+                            .py(scaled(px(6.)))
+                            .debug_selector(|| selector)
+                            .child(content),
+                    ),
             )
             .into_any_element()
     }
@@ -560,9 +762,15 @@ impl ThreadView {
     ) -> AnyElement {
         let palette = palette(cx);
         match &item.kind {
-            ItemKind::UserMessage { text, images, .. } => {
+            ItemKind::UserMessage {
+                text,
+                images,
+                files,
+                ..
+            } => {
                 let thumbnails =
                     (!images.is_empty()).then(|| self.render_message_images(&item.id, images, cx));
+                let files = (!files.is_empty()).then(|| render_message_files(files, cx));
                 let edit = self.render_edit_from_here(item, cx);
                 let copy = self.render_copy_message(item, text, cx);
                 h_flex()
@@ -582,7 +790,8 @@ impl ThreadView {
                             .when(!text.trim().is_empty(), |this| {
                                 this.child(self.render_markdown(&item.id, false, window, cx))
                             })
-                            .children(thumbnails),
+                            .children(thumbnails)
+                            .children(files),
                     )
                     .child(v_flex().flex_none().children(copy).children(edit))
                     .into_any_element()

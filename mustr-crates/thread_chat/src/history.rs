@@ -71,6 +71,13 @@ pub(crate) const REWIND_DETAIL: &str = "Rewind the chat to before this message. 
 pub(crate) const REWIND_ANSWERS: [&str; 3] =
     ["Revert Files Too", "Revert and Keep Changes", "Cancel"];
 
+/// What the user is asked before restarting the agent's session while it works: detaching the
+/// session ends the run in progress.
+pub(crate) const RESTART_TITLE: &str = "Restart the agent session?";
+pub(crate) const RESTART_DETAIL: &str = "The agent is working. Restarting its session ends the \
+     run in progress, and your next message starts a fresh session.";
+pub(crate) const RESTART_ANSWERS: [&str; 2] = ["Restart", "Cancel"];
+
 const THREAD_CHANGED: &str = "The thread has changed. Pick a message to rewind to again.";
 
 // The commands. Each takes its command's id, so tests can fix it.
@@ -519,7 +526,8 @@ impl ThreadView {
     }
 
     /// Restart agent session: detaches the thread's agent sessions, then has T3 check its agents
-    /// again, as T3's command palette does.
+    /// again, as T3's command palette does. While the agent works, it asks first, since that
+    /// ends the run in progress.
     pub(crate) fn restart_agent_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(state) = self.thread_state() else {
             return;
@@ -530,6 +538,35 @@ impl ThreadView {
         if let Some(reason) = self.backend.blocked_reason(Access::Operate) {
             self.error = Some(format!("Couldn't restart the agent session: {reason}").into());
             cx.notify();
+            return;
+        }
+        if !state.is_running() {
+            self.restart_agent_session_now(window, cx);
+            return;
+        }
+        let answer = window.prompt(
+            PromptLevel::Warning,
+            RESTART_TITLE,
+            Some(RESTART_DETAIL),
+            &RESTART_ANSWERS,
+            cx,
+        );
+        self._tasks.push(cx.spawn_in(window, async move |this, cx| {
+            if answer.await != Ok(0) {
+                return;
+            }
+            this.update_in(cx, |this, window, cx| {
+                this.restart_agent_session_now(window, cx)
+            })
+            .ok();
+        }));
+    }
+
+    fn restart_agent_session_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(state) = self.thread_state() else {
+            return;
+        };
+        if self.history.restarting {
             return;
         }
         let detaches = restart_session(state, &commands::new_id());

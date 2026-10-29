@@ -17,7 +17,8 @@ use t3_api::{
         OrchestrationV2AppThread, OrchestrationV2Checkpoint, OrchestrationV2CheckpointStatus,
         OrchestrationV2ConversationMessage, OrchestrationV2DomainEvent,
         OrchestrationV2NativeRefStrength, OrchestrationV2PlanArtifactProposedPlanStatus,
-        OrchestrationV2ProviderCapabilities, OrchestrationV2ProviderSession,
+        OrchestrationV2ProviderCapabilities, OrchestrationV2ProviderGoal,
+        OrchestrationV2ProviderGoalStatus, OrchestrationV2ProviderSession,
         OrchestrationV2ProviderSessionStatus, OrchestrationV2ProviderThread,
         OrchestrationV2ProviderTurn, OrchestrationV2Run, OrchestrationV2RunAttempt,
         OrchestrationV2RunStatus, OrchestrationV2RuntimeRequest, OrchestrationV2RuntimeRequestKind,
@@ -33,6 +34,12 @@ use t3_api::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineItem {
     pub id: String,
+    /// What T3's find in thread names the item by (`entryId` in `orchestration.searchThread`):
+    /// a message's id for user and agent messages, the item's own id otherwise.
+    pub entry_id: String,
+    /// When the item began (`startedAt`, else when T3 first sent it), as T3 writes times. The
+    /// timeline's "new since your last visit" line compares it with the thread's last visit.
+    pub time: String,
     pub ordinal: i64,
     pub run_id: Option<String>,
     pub status: ItemStatus,
@@ -108,6 +115,8 @@ pub enum ItemKind {
         starts_turn: bool,
         /// The images sent with it.
         images: Vec<MessageImage>,
+        /// The other files sent with it, such as a big paste (`attachments.rs`).
+        files: Vec<MessageFile>,
     },
     AssistantMessage {
         text: String,
@@ -205,6 +214,16 @@ pub struct Question {
     pub options: Vec<(String, String)>,
 }
 
+/// A file other than an image attached to a user message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessageFile {
+    pub name: String,
+    pub mime_type: String,
+    pub size_bytes: i64,
+    /// It was a big paste that mustr attached as a file.
+    pub pasted_text: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TodoStep {
     pub text: String,
@@ -264,9 +283,14 @@ fn non_empty(text: Option<&String>) -> Option<String> {
 impl TimelineItem {
     pub fn from_turn_item(item: &OrchestrationV2TurnItem) -> Option<Self> {
         macro_rules! item {
-            ($item:expr, $kind:expr) => {
+            ($item:expr, $entry_id:expr, $kind:expr) => {
                 Self {
                     id: $item.id.clone(),
+                    entry_id: $entry_id,
+                    time: $item
+                        .started_at
+                        .clone()
+                        .unwrap_or_else(|| $item.updated_at.clone()),
                     ordinal: $item.ordinal,
                     run_id: $item.run_id.clone(),
                     status: ItemStatus::from_wire(&$item.status),
@@ -275,11 +299,15 @@ impl TimelineItem {
                     kind: $kind,
                 }
             };
+            ($item:expr, $kind:expr) => {
+                item!($item, $item.id.clone(), $kind)
+            };
         }
         let notice = |text: String| ItemKind::Notice { text };
         Some(match item {
             OrchestrationV2TurnItem::UserMessage(item) => item!(
                 item,
+                item.message_id.clone(),
                 ItemKind::UserMessage {
                     text: item.text.clone(),
                     queued: item.input_intent == OrchestrationV2UserMessageInputIntent::QueuedTurn,
@@ -289,10 +317,12 @@ impl TimelineItem {
                             | OrchestrationV2UserMessageInputIntent::QueuedTurn
                     ),
                     images: message_images(&item.attachments),
+                    files: message_files(&item.attachments),
                 }
             ),
             OrchestrationV2TurnItem::AssistantMessage(item) => item!(
                 item,
+                item.message_id.clone(),
                 ItemKind::AssistantMessage {
                     text: item.text.clone(),
                     streaming: item.streaming,
@@ -572,6 +602,21 @@ fn message_images(attachments: &[ChatAttachment]) -> Vec<MessageImage> {
         .collect()
 }
 
+fn message_files(attachments: &[ChatAttachment]) -> Vec<MessageFile> {
+    attachments
+        .iter()
+        .filter_map(|attachment| match attachment {
+            ChatAttachment::File(file) => Some(MessageFile {
+                name: file.name.clone(),
+                mime_type: file.mime_type.clone(),
+                size_bytes: file.size_bytes,
+                pasted_text: file.source.is_some(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The most images T3 serves from one tool's output (`MAX_TOOL_OUTPUT_IMAGES`).
 pub const MAX_TOOL_OUTPUT_IMAGES: usize = 8;
 
@@ -739,6 +784,86 @@ pub struct Resumable {
     pub held_queue: bool,
 }
 
+/// What the goal line says (`presentProviderGoal` in T3's
+/// `client-runtime/src/state/threadExecution.ts`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GoalLine {
+    pub title: String,
+    pub objective: String,
+    /// What the goal has used so far: tokens, time, and checks.
+    pub usage: Option<String>,
+    /// Whether `/goal resume` would pick it up again.
+    pub can_resume: bool,
+}
+
+impl GoalLine {
+    pub fn new(goal: &OrchestrationV2ProviderGoal, working: bool) -> Self {
+        use OrchestrationV2ProviderGoalStatus as Status;
+        let mut usage = Vec::new();
+        if let Some(tokens) = goal.tokens_used.filter(|tokens| *tokens > 0) {
+            usage.push(match goal.token_budget {
+                Some(budget) => format!(
+                    "{} / {} tokens",
+                    format_goal_tokens(tokens),
+                    format_goal_tokens(budget)
+                ),
+                None => format!("{} tokens", format_goal_tokens(tokens)),
+            });
+        }
+        if let Some(seconds) = goal.time_used_seconds.filter(|seconds| *seconds >= 60) {
+            usage.push(format_duration(seconds));
+        }
+        if let Some(checks) = goal.checks.filter(|checks| *checks > 0) {
+            usage.push(format!(
+                "{checks} {}",
+                if checks == 1 { "check" } else { "checks" }
+            ));
+        }
+        let title = match &goal.status {
+            Status::Active if !working => "Goal set",
+            Status::Active => "Pursuing goal",
+            Status::Paused => "Goal paused",
+            Status::Blocked => "Goal blocked",
+            Status::UsageLimited => "Goal hit a usage limit",
+            Status::BudgetLimited => "Goal reached its token budget",
+            Status::Complete => "Goal complete",
+            Status::Unrecognized(_) => "Goal",
+        };
+        Self {
+            title: title.to_string(),
+            objective: goal.objective.trim().to_string(),
+            usage: (!usage.is_empty()).then(|| usage.join(" · ")),
+            can_resume: !matches!(goal.status, Status::Active | Status::Complete),
+        }
+    }
+}
+
+/// "800", "12k", "1.5m" (`formatGoalTokens` in T3).
+fn format_goal_tokens(tokens: i64) -> String {
+    if tokens < 1_000 {
+        tokens.to_string()
+    } else if tokens < 1_000_000 {
+        format!("{}k", (tokens as f64 / 1_000.).round())
+    } else {
+        let millions = format!("{:.1}", tokens as f64 / 1_000_000.);
+        format!("{}m", millions.trim_end_matches(".0"))
+    }
+}
+
+/// "5m", "1h 2m 3s", for a minute or more (`formatDuration` in T3's
+/// `packages/shared/src/orchestrationTiming.ts`).
+fn format_duration(seconds: i64) -> String {
+    let hours = seconds / 3_600;
+    let minutes = (seconds % 3_600) / 60;
+    let seconds = seconds % 60;
+    [(hours, "h"), (minutes, "m"), (seconds, "s")]
+        .into_iter()
+        .filter(|(amount, _)| *amount > 0)
+        .map(|(amount, unit)| format!("{amount}{unit}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// What changed when an event was applied.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Applied {
@@ -756,6 +881,10 @@ pub struct PendingRequest {
     /// Whether the agent's session can still take an answer. T3's web app only answers live
     /// requests; others are shown, but not answerable.
     pub can_respond: bool,
+    /// Whether the agent takes a reason with a decline (`supportsFeedback`, T3 0.1.3): the
+    /// composer's message then declines the request and tells the agent why. Older servers
+    /// never say so.
+    pub supports_feedback: bool,
 }
 
 /// What the timeline shows: single items, and runs of the agent's work (tool calls, file
@@ -977,6 +1106,11 @@ impl ThreadState {
             .items
             .iter()
             .rposition(|existing| existing.id == item.id);
+        let mut item = item;
+        if let Some(index) = existing {
+            // An item without a start time keeps the time T3 first sent it at.
+            item.time = self.items[index].time.clone();
+        }
         if let Some(index) = existing
             && !self.items[index].inherited
             && self.items[index].ordinal == item.ordinal
@@ -1091,6 +1225,29 @@ impl ThreadState {
             .collect()
     }
 
+    /// Whether the queue can be put in another order (`queued-run.reorder`): the agent's session
+    /// takes queued messages (`canReorder` in T3's `client-runtime/src/state/threadWorkflows.ts`).
+    pub fn can_reorder_queue(&self) -> bool {
+        self.provider_session()
+            .is_some_and(|session| session.capabilities.turns.supports_queued_messages)
+    }
+
+    /// Whether a queued message can start a run now (`queued-run.start`): no run is active and
+    /// the thread is neither archived nor deleted (`canSendNow` in T3).
+    pub fn can_start_queued(&self) -> bool {
+        !self.is_running() && self.thread.archived_at.is_none() && self.thread.deleted_at.is_none()
+    }
+
+    /// The goal the agent works toward (`/goal`), from the thread's provider thread.
+    pub fn goal(&self) -> Option<&OrchestrationV2ProviderGoal> {
+        let provider_thread_id = self.thread.active_provider_thread_id.as_deref()?;
+        self.provider_threads
+            .iter()
+            .find(|thread| thread.id == provider_thread_id)?
+            .goal
+            .as_ref()
+    }
+
     /// Whether a run is active, so a new message can queue or steer.
     pub fn is_running(&self) -> bool {
         self.active_run().is_some()
@@ -1132,6 +1289,11 @@ impl ThreadState {
                     can_respond: matches!(
                         request.response_capability,
                         OrchestrationV2RuntimeRequestResponseCapability::Live(_)
+                    ),
+                    supports_feedback: matches!(
+                        &request.response_capability,
+                        OrchestrationV2RuntimeRequestResponseCapability::Live(live)
+                            if live.supports_feedback == Some(true)
                     ),
                 }
             })

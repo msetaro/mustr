@@ -17,8 +17,9 @@ use t3_api::{
         OrchestrationV2ThreadLaunchWorkspaceStrategy, SecretRequestAnswerInputAnswer,
     },
     types::{
-        ChatImageAttachment, ChatImageAttachmentType, ModelSelection, OrchestrationMessageContext,
-        OrchestrationV2Actor, OrchestrationV2CommandDispatchModeQueueAfterActive,
+        ChatFileAttachment, ChatFileAttachmentType, ChatImageAttachment, ChatImageAttachmentType,
+        ModelSelection, OrchestrationMessageContext, OrchestrationV2Actor,
+        OrchestrationV2CommandDispatchModeQueueAfterActive,
         OrchestrationV2CommandDispatchModeQueueAfterActiveType,
         OrchestrationV2CommandDispatchModeStartImmediately,
         OrchestrationV2CommandDispatchModeStartImmediatelyType,
@@ -29,6 +30,8 @@ use t3_api::{
         OrchestrationV2CommandQueuedMessagePromoteToSteerType,
         OrchestrationV2CommandQueuedRunCancel, OrchestrationV2CommandQueuedRunCancelType,
         OrchestrationV2CommandQueuedRunEdit, OrchestrationV2CommandQueuedRunEditType,
+        OrchestrationV2CommandQueuedRunReorder, OrchestrationV2CommandQueuedRunReorderType,
+        OrchestrationV2CommandQueuedRunStart, OrchestrationV2CommandQueuedRunStartType,
         OrchestrationV2CommandRuntimeRequestRespond,
         OrchestrationV2CommandRuntimeRequestRespondType, OrchestrationV2CommandThreadCreate,
         OrchestrationV2CommandThreadCreateType, OrchestrationV2CommandThreadDelete,
@@ -42,8 +45,9 @@ use t3_api::{
         OrchestrationV2ThreadLaunchWorkspaceStrategyRoot,
         OrchestrationV2ThreadLaunchWorkspaceStrategyRootType,
         OrchestrationV2ThreadLaunchWorkspaceStrategyWorktree,
-        OrchestrationV2ThreadLaunchWorkspaceStrategyWorktreeType, ProviderApprovalDecision,
-        ProviderInteractionMode, ProviderUserInputAnswers, RuntimeMode, SecretRequestAnswerInput,
+        OrchestrationV2ThreadLaunchWorkspaceStrategyWorktreeType, PastedTextAttachmentSource,
+        PastedTextAttachmentSourceTag, ProviderApprovalDecision, ProviderInteractionMode,
+        ProviderUserInputAnswers, RuntimeMode, SecretRequestAnswerInput,
         SecretRequestAnswerInputAnswerDecline, SecretRequestAnswerInputAnswerDeclineType,
         SecretRequestAnswerInputAnswerSave, SecretRequestAnswerInputAnswerSaveType,
     },
@@ -149,6 +153,27 @@ pub fn image_attachment(
         size_bytes: size_bytes as i64,
         source: None,
         type_: ChatImageAttachmentType::Image,
+    })
+}
+
+/// An uploaded file other than an image, as a message names it (`ChatFileAttachment`). A big
+/// paste is marked as one (`source: pasted-text`), so T3 hands the agent only its path.
+pub fn file_attachment(
+    attachment_id: &str,
+    name: &str,
+    mime_type: &str,
+    size_bytes: usize,
+    pasted_text: bool,
+) -> ChatAttachment {
+    ChatAttachment::File(ChatFileAttachment {
+        id: attachment_id.to_string(),
+        mime_type: mime_type.to_string(),
+        name: name.to_string(),
+        size_bytes: size_bytes as i64,
+        source: pasted_text.then_some(PastedTextAttachmentSource {
+            tag: PastedTextAttachmentSourceTag::PastedText,
+        }),
+        type_: ChatFileAttachmentType::File,
     })
 }
 
@@ -433,6 +458,27 @@ pub fn respond_to_approval(
     })
 }
 
+/// Declines an approval and tells the agent why (`runtime-request.respond` with `feedback`,
+/// T3 0.1.3), as T3's composer does when the request `supportsFeedback`
+/// (`sendApprovalFeedback` in T3's `client-runtime/src/state/threadRequests.ts`).
+pub fn decline_with_feedback(
+    thread_id: &str,
+    request_id: &str,
+    feedback: &str,
+    command_id: String,
+) -> OrchestrationV2Command {
+    let mut command = respond_to_approval(
+        thread_id,
+        request_id,
+        ProviderApprovalDecision::Decline,
+        command_id,
+    );
+    if let OrchestrationV2Command::RuntimeRequestRespond(respond) = &mut command {
+        respond.feedback = Some(feedback.trim().to_string());
+    }
+    command
+}
+
 /// Answers the questions of a user-input request (`runtime-request.respond`), by question id.
 pub fn answer_questions(
     thread_id: &str,
@@ -500,6 +546,38 @@ pub fn cancel_queued(
         run_id: queued_run_id.to_string(),
         thread_id: thread_id.to_string(),
         type_: OrchestrationV2CommandQueuedRunCancelType::QueuedRunCancel,
+    })
+}
+
+/// Moves a queued message before another (`queued-run.reorder`), or to the end with `None`, as
+/// T3's queue does when a row is dragged.
+pub fn reorder_queued(
+    thread_id: &str,
+    queued_run_id: &str,
+    before_run_id: Option<&str>,
+    command_id: String,
+) -> OrchestrationV2Command {
+    OrchestrationV2Command::QueuedRunReorder(OrchestrationV2CommandQueuedRunReorder {
+        before_run_id: before_run_id.map(str::to_string),
+        command_id,
+        run_id: queued_run_id.to_string(),
+        thread_id: thread_id.to_string(),
+        type_: OrchestrationV2CommandQueuedRunReorderType::QueuedRunReorder,
+    })
+}
+
+/// Starts a queued message's run now, while no other run is active (`queued-run.start`, T3
+/// 0.1.3's Send now).
+pub fn start_queued(
+    thread_id: &str,
+    queued_run_id: &str,
+    command_id: String,
+) -> OrchestrationV2Command {
+    OrchestrationV2Command::QueuedRunStart(OrchestrationV2CommandQueuedRunStart {
+        command_id,
+        run_id: queued_run_id.to_string(),
+        thread_id: thread_id.to_string(),
+        type_: OrchestrationV2CommandQueuedRunStartType::QueuedRunStart,
     })
 }
 
