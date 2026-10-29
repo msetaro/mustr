@@ -92,6 +92,14 @@ pub fn resolve_mode(
     }
 }
 
+/// Whether a flag, `MUSTR_T3_MODE`, or `"t3": {"mode"}` in mustr's settings picks the mode, so
+/// the server picked last in the title bar's menu doesn't.
+pub fn mode_configured(cli_mode: Option<&str>, settings_text: Option<&str>) -> bool {
+    cli_mode.is_some_and(|mode| !mode.trim().is_empty())
+        || std::env::var(MODE_ENV).is_ok_and(|mode| !mode.trim().is_empty())
+        || settings_text.and_then(mode_from_settings).is_some()
+}
+
 // Zed's settings types ignore keys they don't know, so mustr keeps its own in the same file.
 fn mode_from_settings(text: &str) -> Option<String> {
     let settings: Value = settings::parse_json_with_comments(text).log_err()?;

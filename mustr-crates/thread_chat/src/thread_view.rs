@@ -389,6 +389,11 @@ impl ThreadView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // WP17: a draft can start in the background, or once for each of several models.
+        if crate::launch::launches_in_background(&form, cx) {
+            self.launch_in_background(form, text, window, cx);
+            return;
+        }
         let new_thread = match form.read(cx).new_thread(text.trim(), cx) {
             Ok(new_thread) => new_thread,
             Err(reason) => {
@@ -400,7 +405,7 @@ impl ThreadView {
         let title = commands::title_from_message(&new_thread.text);
         let mut input = commands::launch(new_thread, LaunchIds::new());
         self.attach_mention_context(&mut input);
-        let sent_images = self.attach_composer_images(&mut input);
+        let sent_images = self.attach_composer_images(&mut input, cx);
         let launch = self.backend.launch_thread(input);
         self.sending = true;
         self.error = None;

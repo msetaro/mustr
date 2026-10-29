@@ -1314,3 +1314,5 @@ mod feedback;
 mod find_and_visits;
 // Reordering the queue, Send now, and the goal line.
 mod queue_and_goal;
+// Quotes, answers with attachments, MCP elicitation, the prompt stash, and context records.
+mod wp15;

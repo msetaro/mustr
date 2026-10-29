@@ -282,7 +282,7 @@ pub(crate) fn file_link(path: &str) -> String {
 }
 
 /// Undoes [`file_link`]'s encoding.
-fn percent_decode(text: &str) -> Option<String> {
+pub(crate) fn percent_decode(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -1009,6 +1009,12 @@ pub(crate) struct ServerInfo {
     pub file_uploads: crate::attachments::FileUploads,
     /// Its T3 Code version (`environment.serverVersion`), such as `0.1.3`.
     pub server_version: Option<String>,
+    /// Whether it takes images and files in answers to questions
+    /// (`environment.capabilities.questionAttachments`, T3 0.1.3).
+    pub question_attachments: bool,
+    /// Whether it takes context records inline in messages
+    /// (`environment.capabilities.inlineMessageContext`).
+    pub inline_message_context: bool,
 }
 
 /// Whether a T3 Code version is `major.minor.patch` or later; a pre-release counts as its
@@ -1031,6 +1037,12 @@ impl ServerInfo {
             server_version: config["environment"]["serverVersion"]
                 .as_str()
                 .map(str::to_string),
+            question_attachments: config["environment"]["capabilities"]["questionAttachments"]
+                .as_bool()
+                .unwrap_or(false),
+            inline_message_context: config["environment"]["capabilities"]["inlineMessageContext"]
+                .as_bool()
+                .unwrap_or(false),
             environment_id: config["environment"]["environmentId"]
                 .as_str()
                 .filter(|id| !id.trim().is_empty())
@@ -1179,6 +1191,43 @@ impl ComposerMenu {
         self.server = Some((server, Instant::now()));
     }
 
+    /// Whether T3's config has been read, or failed to be.
+    pub(crate) fn has_server_info(&self) -> bool {
+        self.server.is_some()
+    }
+
+    /// Keeps what `server.getConfig` answered; a failure leaves what was read before, or
+    /// nothing known.
+    pub(crate) fn set_server_config(&mut self, config: Result<Value>) {
+        match config {
+            Ok(config) => self.server = Some((ServerInfo::from_config(&config), Instant::now())),
+            Err(error) => {
+                log::warn!("couldn't read T3's config for the composer: {error:#}");
+                self.server
+                    .get_or_insert_with(|| (ServerInfo::default(), Instant::now()));
+            }
+        }
+    }
+
+    /// Whether the server takes context records inline, once its config is read.
+    pub(crate) fn inline_message_context(&self) -> bool {
+        self.server
+            .as_ref()
+            .is_some_and(|(server, _)| server.inline_message_context)
+    }
+
+    /// Whether the server takes attachments in answers, once its config is read.
+    pub(crate) fn question_attachments(&self) -> bool {
+        self.server
+            .as_ref()
+            .is_some_and(|(server, _)| server.question_attachments)
+    }
+
+    /// The server's environment id, once its config is read.
+    pub(crate) fn environment_id(&self) -> Option<&str> {
+        self.server.as_ref()?.0.environment_id.as_deref()
+    }
+
     /// Whether the server has `queued-run.start` (T3 0.1.3), once its config is read.
     pub(crate) fn server_has_queued_start(&self) -> bool {
         self.server
@@ -1229,7 +1278,7 @@ impl ComposerMenu {
         self.listing = None;
     }
 
-    fn remember_record(&mut self, record: Value) {
+    pub(crate) fn remember_record(&mut self, record: Value) {
         let Some(context_id) = record["contextId"].as_str().map(str::to_string) else {
             return;
         };
@@ -1290,7 +1339,7 @@ fn thread_folder(worktree_path: Option<&str>, project_root: Option<&str>, local:
 
 /// What a chip shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ChipKind {
+pub(crate) enum ChipKind {
     File,
     Folder,
     Thread,
@@ -1300,6 +1349,8 @@ enum ChipKind {
     Terminal,
     /// A comment on a diff.
     ReviewComment,
+    /// A quote of an agent's message (`quote.rs`).
+    Quote,
     Other,
 }
 
@@ -1411,10 +1462,10 @@ pub(crate) fn init(cx: &mut App) {
 }
 
 /// What a chip in the composer shows: its kind, its label, and its tooltip.
-struct Chip {
-    kind: ChipKind,
-    label: String,
-    tooltip: String,
+pub(crate) struct Chip {
+    pub(crate) kind: ChipKind,
+    pub(crate) label: String,
+    pub(crate) tooltip: String,
 }
 
 /// A mention in the composer, drawn over its text the way T3's `ContextChip` draws it.
@@ -1436,6 +1487,7 @@ impl RenderOnce for MentionChip {
             ChipKind::PullRequest(state) => (IconName::PullRequest, pull_request_tint(state, cx)),
             ChipKind::Terminal => (IconName::Terminal, palette.text_muted.hsla()),
             ChipKind::ReviewComment => (IconName::Chat, palette.warning.hsla()),
+            ChipKind::Quote => (IconName::Quote, palette.agent.hsla()),
             ChipKind::Other => (IconName::Paperclip, palette.text_muted.hsla()),
         };
         let height = window.line_height() - scaled(px(2.)).to_pixels(window.rem_size());
@@ -1464,8 +1516,49 @@ impl RenderOnce for MentionChip {
 }
 
 impl ThreadView {
+    /// The server's environment as the app follows it (`usage.rs`), when it does.
+    fn followed_environment<'a>(
+        &self,
+        cx: &'a App,
+    ) -> Option<&'a t3_api::types::ExecutionEnvironmentDescriptor> {
+        crate::usage::ServerConfigs::try_global(cx)?
+            .read(cx)
+            .environment()
+    }
+
+    /// The server's environment id: from the config the composer read, or the one the app
+    /// follows.
+    pub(crate) fn server_environment_id(&self, cx: &App) -> Option<String> {
+        self.composer_state
+            .menu
+            .environment_id()
+            .map(str::to_string)
+            .or_else(|| {
+                self.followed_environment(cx)
+                    .map(|environment| environment.environment_id.clone())
+                    .filter(|id| !id.trim().is_empty())
+            })
+    }
+
+    /// Whether the server takes images and files in answers (`questionAttachments`, T3 0.1.3).
+    pub(crate) fn server_takes_question_attachments(&self, cx: &App) -> bool {
+        self.composer_state.menu.question_attachments()
+            || self.followed_environment(cx).is_some_and(|environment| {
+                environment.capabilities.question_attachments == Some(true)
+            })
+    }
+
+    /// Whether the server takes context records inline in messages (`inlineMessageContext`),
+    /// which image and file records need.
+    pub(crate) fn server_takes_inline_context(&self, cx: &App) -> bool {
+        self.composer_state.menu.inline_message_context()
+            || self.followed_environment(cx).is_some_and(|environment| {
+                environment.capabilities.inline_message_context == Some(true)
+            })
+    }
+
     /// The folder `@` searches: the thread's, or a draft's project's.
-    fn mention_folder(&self, cx: &mut Context<Self>) -> Folder {
+    pub(crate) fn mention_folder(&self, cx: &mut Context<Self>) -> Folder {
         let local = folders_are_local(cx);
         if let Some(form) = &self.new_thread {
             let Ok(new_thread) = form.read(cx).new_thread("@", cx) else {
@@ -1514,7 +1607,7 @@ impl ThreadView {
     }
 
     /// The text and the cursor, when nothing's selected.
-    fn composer_cursor(&self, cx: &App) -> Option<(String, usize)> {
+    pub(crate) fn composer_cursor(&self, cx: &App) -> Option<(String, usize)> {
         let editor = self.composer.read(cx);
         let snapshot = editor.buffer().read(cx).snapshot(cx);
         let selection = editor.selections.newest_anchor();
@@ -1607,16 +1700,7 @@ impl ThreadView {
             this.update(cx, |this, cx| {
                 let menu = &mut this.composer_state.menu;
                 menu.loading_server = None;
-                match config {
-                    Ok(config) => {
-                        menu.server = Some((ServerInfo::from_config(&config), Instant::now()))
-                    }
-                    Err(error) => {
-                        log::warn!("couldn't read T3's config for the composer: {error:#}");
-                        menu.server
-                            .get_or_insert_with(|| (ServerInfo::default(), Instant::now()));
-                    }
-                }
+                menu.set_server_config(config);
                 this.update_items(cx);
             })
             .ok();
@@ -2130,7 +2214,7 @@ impl ThreadView {
     }
 
     /// Folds `range` of the composer's text into a chip.
-    fn add_chip(
+    pub(crate) fn add_chip(
         &mut self,
         range: Range<usize>,
         chip: Chip,
@@ -2215,6 +2299,9 @@ impl ThreadView {
                 tooltip,
             };
             self.add_chip(reference.range, chip, window, cx);
+        }
+        for quote in crate::quote::quote_references(&text) {
+            self.add_chip(quote.range, quote.chip, window, cx);
         }
     }
 

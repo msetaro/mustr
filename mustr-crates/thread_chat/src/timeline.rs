@@ -101,6 +101,8 @@ impl ThreadView {
     /// Brings the list's rows in line with the thread, re-measuring only from the first row
     /// that changed. Streaming changes the last rows, so this stays cheap.
     pub(crate) fn sync_rows(&mut self, cx: &mut Context<Self>) {
+        #[cfg(debug_assertions)]
+        self.apply_debug_fixture();
         let Loadable::Loaded(state) = &self.state else {
             return;
         };
@@ -249,6 +251,12 @@ impl ThreadView {
         for (id, text) in missing {
             self.update_markdown(id, text, cx);
         }
+    }
+
+    /// Expands or collapses a run of work (`work:<id>`) or a tool call, for tests.
+    #[cfg(test)]
+    pub(crate) fn toggle_expanded_for_test(&mut self, key: &str, cx: &mut Context<Self>) {
+        self.toggle_expanded(key.to_string(), cx);
     }
 
     fn toggle_expanded(&mut self, key: String, cx: &mut Context<Self>) {
@@ -739,19 +747,33 @@ impl ThreadView {
             .into_any_element()
     }
 
-    fn render_markdown(&self, id: &str, muted: bool, window: &Window, cx: &App) -> AnyElement {
-        match self.markdown.get(id) {
-            Some(markdown) => MarkdownElement::new(
-                markdown.clone(),
-                if muted {
-                    muted_markdown_style(window, cx)
-                } else {
-                    markdown_style(window, cx)
-                },
-            )
-            .into_any_element(),
-            None => div().into_any_element(),
-        }
+    /// An item's Markdown. Its links open as T3's do (`file_links.rs`): files in mustr's
+    /// editor, pages in the browser, and paths in inline code become links to their files.
+    fn render_markdown(
+        &self,
+        id: &str,
+        muted: bool,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let Some(markdown) = self.markdown.get(id) else {
+            return div().into_any_element();
+        };
+        let view = cx.weak_entity();
+        MarkdownElement::new(
+            markdown.clone(),
+            if muted {
+                muted_markdown_style(window, cx)
+            } else {
+                markdown_style(window, cx)
+            },
+        )
+        .on_url_click(move |url, window, cx| {
+            view.update(cx, |view, cx| view.open_link(&url, window, cx))
+                .ok();
+        })
+        .on_code_span_link(|code, _| crate::file_links::inline_code_link(code).map(Into::into))
+        .into_any_element()
     }
 
     fn render_item(
@@ -800,6 +822,12 @@ impl ThreadView {
                 let copy = (!*streaming)
                     .then(|| self.render_copy_message(item, text, cx))
                     .flatten();
+                let quote = if *streaming {
+                    None
+                } else {
+                    self.note_quote_selection(&item.id, cx);
+                    self.render_quote_button(&item.id, text, cx)
+                };
                 let fork = self.render_fork(item, cx);
                 h_flex()
                     .group(SharedString::from(format!("message-{}", item.id)))
@@ -821,13 +849,20 @@ impl ThreadView {
                                 )
                             }),
                     )
-                    .child(v_flex().flex_none().children(copy).children(fork))
+                    .child(
+                        v_flex()
+                            .flex_none()
+                            .children(copy)
+                            .children(quote)
+                            .children(fork),
+                    )
                     .into_any_element()
             }
             ItemKind::Plan {
                 title, markdown, ..
             } => {
                 let actions = self.render_plan_actions(item, cx);
+                let (save, save_row) = self.render_plan_save(&item.id, markdown, cx);
                 let copied = self.composer_state.copied.as_deref() == Some(item.id.as_str());
                 let copy_text = format!("{}\n", markdown.trim_end());
                 let item_id = item.id.clone();
@@ -848,6 +883,7 @@ impl ThreadView {
                                     .weight(FontWeight::SEMIBOLD),
                             )
                             .child(div().flex_1())
+                            .child(save)
                             .child(
                                 div()
                                     .debug_selector(|| format!("thread-plan-copy-{item_id}"))
@@ -873,6 +909,7 @@ impl ThreadView {
                             ),
                     )
                     .child(self.render_markdown(&item.id, false, window, cx))
+                    .children(save_row)
                     .children(actions)
                     .into_any_element()
             }
@@ -928,8 +965,11 @@ impl ThreadView {
                 title,
                 prompt,
                 request_kind,
+                app_name,
                 ..
             } => {
+                // An MCP server's question reads as prose, a command or a path as code.
+                let elicitation = request_kind == "mcp-elicitation";
                 let outcome = match item.status {
                     status if status.is_in_progress() => "waiting for you".to_string(),
                     ItemStatus::Completed => "answered".to_string(),
@@ -947,14 +987,19 @@ impl ThreadView {
                                     .color(Color::Warning),
                             )
                             .child(
-                                Label::new(
-                                    title
-                                        .clone()
-                                        .unwrap_or_else(|| format!("Approval: {request_kind}")),
-                                )
+                                Label::new(title.clone().unwrap_or_else(|| {
+                                    crate::answers::approval_label(request_kind).to_string()
+                                }))
                                 .size(LabelSize::Small)
                                 .weight(FontWeight::SEMIBOLD),
                             )
+                            .when_some(app_name.clone(), |this, app_name| {
+                                this.child(
+                                    Label::new(app_name)
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                )
+                            })
                             .child(div().flex_1())
                             .child(
                                 Label::new(outcome)
@@ -969,7 +1014,11 @@ impl ThreadView {
                                 .py_1()
                                 .rounded(scaled(tokens::CONTROL_RADIUS))
                                 .bg(palette.background.hsla())
-                                .child(Label::new(prompt).size(LabelSize::Small).buffer_font(cx)),
+                                .child(if elicitation {
+                                    Label::new(prompt).size(LabelSize::Small)
+                                } else {
+                                    Label::new(prompt).size(LabelSize::Small).buffer_font(cx)
+                                }),
                         )
                     })
                     .into_any_element()
@@ -1044,6 +1093,10 @@ impl ThreadView {
                 )
                 .child(div().flex_1().h(px(1.)).bg(palette.border.hsla()))
                 .into_any_element(),
+            ItemKind::HtmlRender {
+                attachment_id,
+                title,
+            } => self.render_html_render(&item.id, attachment_id, title, cx),
             ItemKind::Tool { .. } | ItemKind::FileChange { .. } | ItemKind::Reasoning { .. } => {
                 self.render_work(vec![item.clone()], window, cx)
             }
@@ -1608,6 +1661,32 @@ impl ThreadView {
             None
         };
         let item_id = item.id.clone();
+        // A page a preview tool opened opens in the browser too.
+        let link = match &item.kind {
+            ItemKind::Tool {
+                link: Some(link), ..
+            } => Some(link.clone()),
+            _ => None,
+        };
+        let open_link = link.map(|link| {
+            div()
+                .flex_none()
+                .debug_selector({
+                    let item_id = item.id.clone();
+                    move || format!("thread-preview-open-{item_id}")
+                })
+                .child(
+                    TextButton::new(
+                        SharedString::from(format!("preview-open-{}", item.id)),
+                        "Open in browser",
+                    )
+                    .tooltip(link.clone())
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        cx.open_url(&link)
+                    }),
+                )
+        });
         v_flex()
             .gap_0p5()
             .child(
@@ -1631,6 +1710,7 @@ impl ThreadView {
                             .font_buffer(cx)
                             .child(truncate(&work_label(item), 160)),
                     )
+                    .children(open_link)
                     .child(
                         div()
                             .flex_none()

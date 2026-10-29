@@ -467,3 +467,132 @@ async fn a_view_opened_before_the_shell_loads_waits_for_it(cx: &mut TestAppConte
     );
     assert!(cx.debug_bounds("thread-visit-line").is_some());
 }
+
+/// A finished thread whose answer is `paragraphs` paragraphs long, with `needle` in paragraph
+/// `at`.
+fn long_answer_thread(paragraphs: usize, at: usize) -> Projection {
+    let text = (0..paragraphs)
+        .map(|index| {
+            if index == at {
+                format!("Paragraph {index} has the needle in it.")
+            } else {
+                format!("Paragraph {index} is about retries.")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let mut projection = finished_thread();
+    projection.items[4] = assistant_message("i5", 5, "run-1", &text, false);
+    projection
+}
+
+#[gpui::test]
+async fn find_scrolls_inside_a_long_message_to_its_match(cx: &mut TestAppContext) {
+    let inner = FakeBackend::with_thread(long_answer_thread(200, 100), 10);
+    let backend = Arc::new(Wrapped {
+        inner,
+        shell: None,
+        unsupported: vec!["orchestration.searchThread"],
+    });
+    let (view, cx) = open_view(backend, Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(600.)));
+    cx.run_until_parked();
+
+    let matches = find(&view, "needle", cx).await;
+    assert_eq!(matches.len(), 1);
+    // A frame lays the message out, and its Markdown scrolls the list to the match.
+    for _ in 0..3 {
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+    let (top, height) = view.read_with(cx, |view, _| {
+        let top = view.list_state.logical_scroll_top();
+        let height = view
+            .list_state
+            .bounds_for_item(2)
+            .map(|bounds| bounds.size.height);
+        (top, height)
+    });
+    assert_eq!(top.item_ix, 2, "the timeline shows the answer");
+    let height = height.expect("the answer is laid out");
+    // The match is halfway down the answer, so the list is about halfway into it: not at its
+    // top, which revealing the row alone would show.
+    let fraction = top.offset_in_item / height;
+    assert!(
+        (0.3..0.7).contains(&fraction),
+        "scrolled {fraction:.2} into the answer"
+    );
+}
+
+#[gpui::test]
+async fn open_thread_with_find_opens_the_thread_with_find_on_the_query(cx: &mut TestAppContext) {
+    init_test(cx);
+    let backend = FakeBackend::with_thread(finished_thread(), 10);
+    cx.update(|cx| {
+        crate::set_backend(backend.clone(), cx);
+        editor::init(cx);
+        search::init(cx);
+    });
+    let fs = project::FakeFs::new(cx.executor());
+    let project = project::Project::test(fs, [], cx).await;
+    let (multi_workspace, cx) = cx.add_window_view(|window, cx| {
+        workspace::MultiWorkspace::test_new(project.clone(), window, cx)
+    });
+    let workspace =
+        multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+    // The app's toolbar has Zed's search bar (`mustr/src/window.rs`).
+    workspace.update_in(cx, |workspace, window, cx| {
+        let bar = cx.new(|cx| search::BufferSearchBar::new(None, window, cx));
+        workspace.active_pane().update(cx, |pane, cx| {
+            pane.toolbar()
+                .update(cx, |toolbar, cx| toolbar.add_item(bar, window, cx))
+        });
+    });
+    backend.raw_responses.lock().push(json!({
+        "snapshotSequence": 10,
+        "totalMatches": 1,
+        "activeIndex": 0,
+        "match": { "entryId": "message-i5", "runId": "run-1", "occurrence": 0 },
+        "navigation": [{ "entryId": "message-i5", "runId": "run-1", "startIndex": 0, "count": 1 }]
+    }));
+
+    let weak = workspace.downgrade();
+    cx.update(|window, cx| {
+        crate::open_thread_with_find(THREAD.into(), "  wraps ".into(), weak, window, cx)
+    });
+    cx.run_until_parked();
+
+    let view = workspace
+        .read_with(cx, |workspace, cx| {
+            workspace
+                .active_pane()
+                .read(cx)
+                .active_item()
+                .and_then(|item| item.downcast::<ThreadView>())
+        })
+        .expect("the thread opened");
+    // The bar opened with the query, which T3 searched, and the match is active.
+    assert_eq!(
+        view.read_with(cx, |view, _| view.find_seed_for_test().is_none()),
+        true
+    );
+    let searches = backend
+        .raw_calls
+        .lock()
+        .iter()
+        .filter(|call| call.tag == "orchestration.searchThread")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        searches,
+        [RawCall {
+            tag: "orchestration.searchThread".into(),
+            payload: json!({ "threadId": THREAD, "query": "wraps" }),
+            access: Access::Read,
+        }]
+    );
+    assert_eq!(
+        highlights(&view, "i5", cx),
+        [occurrences("Done. `withRetry` now wraps `post()`.", "wraps")[0].clone()]
+    );
+}

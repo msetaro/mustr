@@ -98,6 +98,8 @@ pub struct ModelChoice {
     pub name: String,
     pub slug: String,
     pub options: Vec<ModelOption>,
+    /// A model the user added in T3's settings, which T3's pickers never hide.
+    pub custom: bool,
 }
 
 impl AgentChoice {
@@ -130,6 +132,7 @@ pub fn agent_choices(providers: &[ServerProvider]) -> Vec<AgentChoice> {
                 .map(|model| ModelChoice {
                     name: model.name.clone(),
                     slug: model.slug.clone(),
+                    custom: model.is_custom,
                     options: model
                         .capabilities
                         .as_ref()
@@ -160,6 +163,59 @@ pub fn agent_choices(providers: &[ServerProvider]) -> Vec<AgentChoice> {
                 supported_runtime_modes: provider.supported_runtime_modes.clone(),
                 plan_mode: provider.show_interaction_mode_toggle != Some(false),
                 fixed_model: provider.requires_new_thread_for_model_change == Some(true),
+            }
+        })
+        .collect()
+}
+
+/// The agents with the models T3's settings show in model pickers (`applyInstanceModelPreferences`
+/// in T3's `modelSelection.ts`): the ones `providerModelPreferences` hides are left out, except
+/// custom models and `keep` (the instance and model picked now, so it still shows checked), and
+/// the rest go in the settings' `modelOrder`, then in T3's own order. Without T3's settings, or
+/// on servers whose settings don't have the preferences, every model shows.
+pub fn shown_agents(
+    agents: &[AgentChoice],
+    settings: Option<&ServerSettings>,
+    keep: Option<(&str, &str)>,
+) -> Vec<AgentChoice> {
+    let preferences = settings.and_then(|settings| settings.provider_model_preferences.as_ref());
+    agents
+        .iter()
+        .map(|agent| {
+            let Some(preferences) =
+                preferences.and_then(|preferences| preferences.get(&agent.instance_id))
+            else {
+                return agent.clone();
+            };
+            let hidden = preferences.hidden_models.as_deref().unwrap_or_default();
+            let order = preferences.model_order.as_deref().unwrap_or_default();
+            let kept = |model: &ModelChoice| {
+                keep == Some((agent.instance_id.as_str(), model.slug.as_str()))
+            };
+            let mut models = agent
+                .models
+                .iter()
+                .filter(|model| model.custom || kept(model) || !hidden.contains(&model.slug))
+                .cloned()
+                .collect::<Vec<_>>();
+            // A stable sort, so models the order doesn't name keep T3's order after it.
+            models.sort_by_key(|model| {
+                order
+                    .iter()
+                    .position(|slug| *slug == model.slug)
+                    .unwrap_or(usize::MAX)
+            });
+            let default_slug = agent
+                .default_model
+                .and_then(|index| agent.models.get(index))
+                .map(|model| model.slug.as_str());
+            AgentChoice {
+                default_model: models
+                    .iter()
+                    .position(|model| Some(model.slug.as_str()) == default_slug)
+                    .or((!models.is_empty()).then_some(0)),
+                models,
+                ..agent.clone()
             }
         })
         .collect()
