@@ -6,7 +6,10 @@ use crate::{
     attachments::{AssetKey, AssetState},
     backend::{Access, ThreadBackendExt as _},
     composer::LiveOutput,
-    model::{ItemKind, ItemStatus, MessageImage, Row, TimelineItem, ToolKind, canonical_item},
+    model::{
+        ItemKind, ItemStatus, MessageFile, MessageImage, Row, TimelineItem, ToolKind,
+        canonical_item,
+    },
     thread_view::{CONTENT_MAX_WIDTH, Loadable, ThreadView},
 };
 use futures::StreamExt as _;
@@ -331,6 +334,46 @@ fn muted_markdown_style(window: &Window, cx: &App) -> MarkdownStyle {
     style
 }
 
+/// The files a user message sent besides images, as chips with their names and sizes.
+fn render_message_files(files: &[MessageFile], cx: &App) -> AnyElement {
+    let palette = palette(cx);
+    h_flex()
+        .flex_wrap()
+        .gap_1()
+        .children(files.iter().map(|file| {
+            let size = crate::attachments::format_size(file.size_bytes.max(0) as usize);
+            let detail = if file.pasted_text {
+                format!("{size} · pasted text")
+            } else {
+                size
+            };
+            h_flex()
+                .gap_1()
+                .px_1p5()
+                .py_0p5()
+                .rounded(scaled(tokens::CONTROL_RADIUS))
+                .border(tokens::BORDER_WIDTH)
+                .border_color(palette.border.hsla())
+                .bg(palette.surface.hsla())
+                .child(
+                    Icon::new(if file.pasted_text {
+                        IconName::TextSnippet
+                    } else {
+                        IconName::Paperclip
+                    })
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+                )
+                .child(Label::new(file.name.clone()).size(LabelSize::Small))
+                .child(
+                    Label::new(detail)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+        }))
+        .into_any_element()
+}
+
 pub(crate) fn truncate(text: &str, max_chars: usize) -> String {
     let line = text.lines().next().unwrap_or_default().trim();
     match line.char_indices().nth(max_chars) {
@@ -560,9 +603,15 @@ impl ThreadView {
     ) -> AnyElement {
         let palette = palette(cx);
         match &item.kind {
-            ItemKind::UserMessage { text, images, .. } => {
+            ItemKind::UserMessage {
+                text,
+                images,
+                files,
+                ..
+            } => {
                 let thumbnails =
                     (!images.is_empty()).then(|| self.render_message_images(&item.id, images, cx));
+                let files = (!files.is_empty()).then(|| render_message_files(files, cx));
                 let edit = self.render_edit_from_here(item, cx);
                 let copy = self.render_copy_message(item, text, cx);
                 h_flex()
@@ -582,7 +631,8 @@ impl ThreadView {
                             .when(!text.trim().is_empty(), |this| {
                                 this.child(self.render_markdown(&item.id, false, window, cx))
                             })
-                            .children(thumbnails),
+                            .children(thumbnails)
+                            .children(files),
                     )
                     .child(v_flex().flex_none().children(copy).children(edit))
                     .into_any_element()

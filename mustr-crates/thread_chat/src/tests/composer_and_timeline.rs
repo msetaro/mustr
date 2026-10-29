@@ -263,9 +263,12 @@ async fn new_threads_start_with_their_images(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-async fn dropped_files_attach_their_images(cx: &mut TestAppContext) {
+async fn dropped_files_attach_as_images_and_files(cx: &mut TestAppContext) {
     let backend = FakeBackend::with_thread(finished_thread(), 10);
-    backend.raw_responses.lock().push(minted("attachment-1"));
+    backend
+        .raw_responses
+        .lock()
+        .extend([minted("attachment-1"), minted("attachment-2")]);
     let (view, cx) = open_view(backend.clone(), Some(THREAD), cx);
     cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(900.)));
     cx.run_until_parked();
@@ -273,34 +276,60 @@ async fn dropped_files_attach_their_images(cx: &mut TestAppContext) {
     let dir = scratch_dir("drop");
     let image = dir.join("diagram.png");
     let notes = dir.join("notes.txt");
+    let folder = dir.join("logs");
     std::fs::write(&image, png(20, 10)).unwrap();
     std::fs::write(&notes, "not an image").unwrap();
+    std::fs::create_dir_all(&folder).unwrap();
 
     let composer = cx.debug_bounds("thread-composer").unwrap();
     cx.simulate_event(FileDropEvent::Entered {
         position: composer.center(),
-        paths: ExternalPaths(vec![image, notes].into()),
+        paths: ExternalPaths(vec![image, notes, folder].into()),
     });
     cx.simulate_event(FileDropEvent::Submit {
         position: composer.center(),
     });
     cx.run_until_parked();
 
+    // An image goes up as an image; any other file as a file, by its type (T3's
+    // `FileAttachmentCreateUploadUrlInput`).
     assert_eq!(
         *backend.raw_calls.lock(),
-        [upload_url_call(
-            "diagram.png",
-            "image/png",
-            png(20, 10).len()
-        )]
+        [
+            upload_url_call("diagram.png", "image/png", png(20, 10).len()),
+            RawCall {
+                tag: "attachments.createUploadUrl".into(),
+                payload: json!({
+                    "type": "file", "name": "notes.txt", "mimeType": "text/plain",
+                    "sizeBytes": 12
+                }),
+                access: Access::Operate,
+            },
+        ]
     );
     assert_eq!(upload_states(&view, cx), [UploadState::Uploaded]);
     view.read_with(cx, |view, _| {
+        let files = view.composer_files();
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| (file.name.as_str(), &file.upload))
+                .collect::<Vec<_>>(),
+            [("notes.txt", &UploadState::Uploaded)]
+        );
         assert_eq!(
             view.images.intake_error.as_deref(),
-            Some("notes.txt isn't a supported image type. Attach GIF, JPEG, PNG, or WebP images.")
+            Some("'logs' is a folder; attach the files in it instead.")
         );
     });
+    assert_eq!(
+        backend.uploads.lock()[1],
+        Upload {
+            relative_url: "/api/attachments/upload/attachment-2.signature".into(),
+            mime_type: "text/plain".into(),
+            bytes: b"not an image".to_vec(),
+        }
+    );
     std::fs::remove_dir_all(dir).ok();
 }
 
@@ -1274,3 +1303,6 @@ async fn running_commands_stream_their_output(cx: &mut TestAppContext) {
     // A running command's output isn't fetched whole while it streams.
     assert!(backend.turn_items.lock().is_empty());
 }
+
+// Files and big pastes.
+mod files;

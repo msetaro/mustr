@@ -138,7 +138,8 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-alt-k", SearchThreads, Some("Workspace")),
         KeyBinding::new("escape", menu::Cancel, Some("ThreadsSidebar > Editor")),
         // WP11, terminals, worktrees and the PR flow:
-        // WP12, composer and timeline:
+        // WP12, composer and timeline: T3's `mod+shift+v` pastes text as text, however big.
+        KeyBinding::new("secondary-shift-v", composer::PasteAsText, composer),
         // WP13, thread list and navigation:
         // WP14, agent setup and T3's settings:
     ]

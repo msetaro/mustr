@@ -108,6 +108,8 @@ pub enum ItemKind {
         starts_turn: bool,
         /// The images sent with it.
         images: Vec<MessageImage>,
+        /// The other files sent with it, such as a big paste (`attachments.rs`).
+        files: Vec<MessageFile>,
     },
     AssistantMessage {
         text: String,
@@ -205,6 +207,16 @@ pub struct Question {
     pub options: Vec<(String, String)>,
 }
 
+/// A file other than an image attached to a user message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessageFile {
+    pub name: String,
+    pub mime_type: String,
+    pub size_bytes: i64,
+    /// It was a big paste that mustr attached as a file.
+    pub pasted_text: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TodoStep {
     pub text: String,
@@ -289,6 +301,7 @@ impl TimelineItem {
                             | OrchestrationV2UserMessageInputIntent::QueuedTurn
                     ),
                     images: message_images(&item.attachments),
+                    files: message_files(&item.attachments),
                 }
             ),
             OrchestrationV2TurnItem::AssistantMessage(item) => item!(
@@ -566,6 +579,21 @@ fn message_images(attachments: &[ChatAttachment]) -> Vec<MessageImage> {
                 attachment_id: image.id.clone(),
                 name: image.name.clone(),
                 mime_type: image.mime_type.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn message_files(attachments: &[ChatAttachment]) -> Vec<MessageFile> {
+    attachments
+        .iter()
+        .filter_map(|attachment| match attachment {
+            ChatAttachment::File(file) => Some(MessageFile {
+                name: file.name.clone(),
+                mime_type: file.mime_type.clone(),
+                size_bytes: file.size_bytes,
+                pasted_text: file.source.is_some(),
             }),
             _ => None,
         })

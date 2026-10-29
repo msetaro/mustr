@@ -17,7 +17,8 @@ use t3_api::{
         OrchestrationV2ThreadLaunchWorkspaceStrategy, SecretRequestAnswerInputAnswer,
     },
     types::{
-        ChatImageAttachment, ChatImageAttachmentType, ModelSelection, OrchestrationMessageContext,
+        ChatFileAttachment, ChatFileAttachmentType, ChatImageAttachment, ChatImageAttachmentType,
+        ModelSelection, OrchestrationMessageContext,
         OrchestrationV2Actor, OrchestrationV2CommandDispatchModeQueueAfterActive,
         OrchestrationV2CommandDispatchModeQueueAfterActiveType,
         OrchestrationV2CommandDispatchModeStartImmediately,
@@ -43,7 +44,8 @@ use t3_api::{
         OrchestrationV2ThreadLaunchWorkspaceStrategyRootType,
         OrchestrationV2ThreadLaunchWorkspaceStrategyWorktree,
         OrchestrationV2ThreadLaunchWorkspaceStrategyWorktreeType, ProviderApprovalDecision,
-        ProviderInteractionMode, ProviderUserInputAnswers, RuntimeMode, SecretRequestAnswerInput,
+        PastedTextAttachmentSource, PastedTextAttachmentSourceTag, ProviderInteractionMode,
+        ProviderUserInputAnswers, RuntimeMode, SecretRequestAnswerInput,
         SecretRequestAnswerInputAnswerDecline, SecretRequestAnswerInputAnswerDeclineType,
         SecretRequestAnswerInputAnswerSave, SecretRequestAnswerInputAnswerSaveType,
     },
@@ -149,6 +151,27 @@ pub fn image_attachment(
         size_bytes: size_bytes as i64,
         source: None,
         type_: ChatImageAttachmentType::Image,
+    })
+}
+
+/// An uploaded file other than an image, as a message names it (`ChatFileAttachment`). A big
+/// paste is marked as one (`source: pasted-text`), so T3 hands the agent only its path.
+pub fn file_attachment(
+    attachment_id: &str,
+    name: &str,
+    mime_type: &str,
+    size_bytes: usize,
+    pasted_text: bool,
+) -> ChatAttachment {
+    ChatAttachment::File(ChatFileAttachment {
+        id: attachment_id.to_string(),
+        mime_type: mime_type.to_string(),
+        name: name.to_string(),
+        size_bytes: size_bytes as i64,
+        source: pasted_text.then_some(PastedTextAttachmentSource {
+            tag: PastedTextAttachmentSourceTag::PastedText,
+        }),
+        type_: ChatFileAttachmentType::File,
     })
 }
 

@@ -1005,12 +1005,15 @@ pub(crate) fn match_pull_requests(
 pub(crate) struct ServerInfo {
     pub environment_id: Option<String>,
     pub providers: Vec<t3_api::types::ServerProvider>,
+    /// Whether it takes files besides images (`attachments.rs`).
+    pub file_uploads: crate::attachments::FileUploads,
 }
 
 impl ServerInfo {
     /// Reads `server.getConfig`'s answer leniently: an agent this build can't read is skipped.
     fn from_config(config: &Value) -> Self {
         Self {
+            file_uploads: crate::attachments::FileUploads::from_config(config),
             environment_id: config["environment"]["environmentId"]
                 .as_str()
                 .filter(|id| !id.trim().is_empty())
@@ -1147,6 +1150,23 @@ impl ComposerMenu {
             .providers
             .iter()
             .find(|provider| provider.instance_id == instance_id)
+    }
+
+    /// Has the menu read a config that says how T3 takes files, for tests.
+    #[cfg(test)]
+    pub(crate) fn set_file_uploads(&mut self, file_uploads: crate::attachments::FileUploads) {
+        let server = ServerInfo {
+            file_uploads,
+            ..ServerInfo::default()
+        };
+        self.server = Some((server, Instant::now()));
+    }
+
+    /// Whether T3 takes files besides images, once its config is read.
+    pub(crate) fn file_uploads(&self) -> crate::attachments::FileUploads {
+        self.server
+            .as_ref()
+            .map_or_else(Default::default, |(server, _)| server.file_uploads)
     }
 
     fn set_items(&mut self, items: Vec<MenuItem>) {

@@ -2,7 +2,7 @@
 //! and above it the agent's pending requests, to approve or answer, and the queued messages.
 
 use crate::{
-    attachments::{ComposerImage, UploadState},
+    attachments::{ComposerFile, ComposerImage, UploadState, has_image_extension},
     backend::ThreadBackendExt as _,
     commands::{self, CommandIds, Delivery, Message, PlanRef},
     model::{ItemKind, PendingRequest, QueuedMessage, ThreadState},
@@ -18,7 +18,6 @@ use gpui::{
 use mustr_ui::{
     ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens, tokens::scaled,
 };
-use std::path::Path;
 use t3_api::types::ProviderApprovalDecision;
 use t3_api::types::ProviderInteractionMode;
 use ui::{
@@ -36,12 +35,17 @@ actions!(
         SteerMessage,
         /// Stops the agent's run.
         StopThread,
+        /// Pastes the clipboard's text into the composer as text, even when it's big enough to
+        /// go in as a file.
+        PasteAsText,
     ]
 );
 
 pub(crate) const COMPOSER_CONTEXT: &str = "ThreadComposer";
 /// The side of an image's tile in the composer, as T3's (`h-16 w-16`).
 const IMAGE_TILE_SIZE: f32 = 64.;
+/// A file's tile is as tall, and wide enough for its name.
+const FILE_TILE_WIDTH: f32 = 200.;
 
 /// The composer's and timeline's state besides their images.
 #[derive(Default)]
@@ -280,7 +284,7 @@ impl ThreadView {
             self.move_menu_highlight(-1, cx);
             return;
         }
-        if !self.images.composer.is_empty() || self.cursor_row(cx).0 != 0 {
+        if self.images.has_attachments() || self.cursor_row(cx).0 != 0 {
             return;
         }
         let text = self.composer_text(cx);
@@ -400,17 +404,6 @@ pub(crate) fn observe_composer(
     })
 }
 
-/// Whether a file is named like an image agents take, or one mustr converts.
-fn has_image_extension(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tif" | "tiff"
-            )
-        })
-}
 pub(crate) const COMPOSER_MIN_LINES: usize = 2;
 pub(crate) const COMPOSER_MAX_LINES: usize = 12;
 
@@ -429,7 +422,7 @@ impl ThreadView {
             return;
         }
         let text = self.composer_text(cx);
-        let has_images = !self.images.composer.is_empty();
+        let has_images = self.images.has_attachments();
         if (text.trim().is_empty() && !has_images) || self.sending {
             return;
         }
@@ -463,12 +456,7 @@ impl ThreadView {
             return;
         };
         let thread_id = state.thread_id().to_string();
-        let sent_images = self
-            .images
-            .composer
-            .iter()
-            .map(|image| image.key)
-            .collect::<Vec<_>>();
+        let sent_images = self.images.uploaded_keys();
         let message = Message {
             attachments: self.images.attachments(),
             context,
@@ -834,7 +822,9 @@ impl ThreadView {
         cx.notify();
     }
 
-    /// Pastes images as attachments; anything else goes to the editor.
+    /// Takes a paste as T3's composer does (`shouldHandleComposerAttachmentPaste` and
+    /// `foldPastedText`): images are attached, and so are copied files unless text comes with
+    /// them; text of 32 KiB or more goes in as a file; anything else goes to the editor.
     fn on_paste(
         &mut self,
         _: &editor::actions::Paste,
@@ -846,6 +836,7 @@ impl ThreadView {
         };
         let mut images = Vec::new();
         let mut paths = Vec::new();
+        let mut text = String::new();
         for entry in clipboard.entries() {
             match entry {
                 ClipboardEntry::Image(image) if !image.bytes.is_empty() => {
@@ -854,21 +845,38 @@ impl ThreadView {
                 ClipboardEntry::ExternalPaths(external) => {
                     paths.extend(external.paths().iter().cloned())
                 }
+                ClipboardEntry::String(string) => text.push_str(string.text()),
                 _ => {}
             }
         }
-        // Copied files are attached only when they're all images; otherwise they paste as text.
-        let image_paths = !paths.is_empty() && paths.iter().all(|path| has_image_extension(path));
-        if images.is_empty() && !image_paths {
+        let attach_paths = !paths.is_empty()
+            && (text.is_empty() || paths.iter().any(|path| has_image_extension(path)));
+        if !images.is_empty() || attach_paths {
+            cx.stop_propagation();
+            if !images.is_empty() {
+                self.add_clipboard_images(images, window, cx);
+            }
+            if attach_paths {
+                self.add_paths(paths, window, cx);
+            }
             return;
         }
-        cx.stop_propagation();
-        if !images.is_empty() {
-            self.add_clipboard_images(images, window, cx);
+        if self.fold_big_paste(&text, window, cx) {
+            cx.stop_propagation();
         }
-        if image_paths {
-            self.add_image_paths(paths, window, cx);
-        }
+    }
+
+    /// Pastes the clipboard's text as text, however big (T3's `mod+shift+v`).
+    fn on_paste_as_text(&mut self, _: &PasteAsText, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = cx
+            .read_from_clipboard()
+            .and_then(|clipboard| clipboard.text())
+        else {
+            return;
+        };
+        self.composer.update(cx, |editor, cx| {
+            editor.insert(&text, window, cx);
+        });
     }
 
     fn on_drop_paths(
@@ -877,7 +885,7 @@ impl ThreadView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.add_image_paths(paths.paths().to_vec(), window, cx);
+        self.add_paths(paths.paths().to_vec(), window, cx);
     }
 
     fn dispatch(
@@ -1370,6 +1378,12 @@ impl ThreadView {
                     .iter()
                     .map(|image| self.render_image_tile(image, cx)),
             )
+            .children(
+                self.images
+                    .files
+                    .iter()
+                    .map(|file| self.render_file_tile(file, cx)),
+            )
             .when(preparing > 0, |this| {
                 let palette = mustr_ui::palette(cx);
                 this.child(
@@ -1385,6 +1399,151 @@ impl ThreadView {
                         .child(Label::new("0%").size(LabelSize::XSmall).color(Color::Muted)),
                 )
             })
+    }
+
+    /// A file's tile in the strip: its name and size, its upload's progress, Retry when it
+    /// failed, and a remove button, as T3's file chips show them.
+    fn render_file_tile(&self, file: &ComposerFile, cx: &mut Context<Self>) -> AnyElement {
+        let palette = palette(cx);
+        let key = file.key;
+        let failed = match &file.upload {
+            UploadState::Failed { reason } => Some(reason.clone()),
+            _ => None,
+        };
+        let progress = match file.upload {
+            UploadState::Uploading { progress } => Some(progress),
+            _ => None,
+        };
+        let detail = if file.pasted_text {
+            format!(
+                "{} · pasted text",
+                crate::attachments::format_size(file.size())
+            )
+        } else {
+            crate::attachments::format_size(file.size())
+        };
+        let tooltip = match &failed {
+            Some(reason) => format!("{}: {reason}", file.name),
+            None => file.name.clone(),
+        };
+        let button = |id: SharedString, icon: IconName, tooltip: &'static str| {
+            IconButton::new(id, icon)
+                .icon_size(IconSize::XSmall)
+                .icon_color(Color::Muted)
+                .tooltip(Tooltip::text(tooltip))
+        };
+        h_flex()
+            .id(SharedString::from(format!("composer-file-{key}")))
+            .debug_selector(move || format!("thread-file-{key}"))
+            .relative()
+            .flex_none()
+            .h(scaled(px(IMAGE_TILE_SIZE)))
+            .w(scaled(px(FILE_TILE_WIDTH)))
+            .gap_2()
+            .pl_2()
+            .pr_1()
+            .rounded(scaled(tokens::CORNER_RADIUS))
+            .overflow_hidden()
+            .border(tokens::BORDER_WIDTH)
+            .border_color(if failed.is_some() {
+                cx.theme().status().error
+            } else {
+                palette.border.hsla()
+            })
+            .bg(palette.surface_2.hsla())
+            .tooltip(Tooltip::text(tooltip))
+            .child(
+                Icon::new(if file.pasted_text {
+                    IconName::TextSnippet
+                } else {
+                    IconName::File
+                })
+                .size(IconSize::Medium)
+                .color(if failed.is_some() {
+                    Color::Error
+                } else {
+                    Color::Muted
+                }),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .gap_0p5()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(file.name.clone()),
+                    )
+                    .child(
+                        Label::new(match (&failed, progress) {
+                            (Some(_), _) => "Upload failed".to_string(),
+                            (None, Some(progress)) => {
+                                format!("{}%", (progress * 100.).floor() as u32)
+                            }
+                            (None, None) => detail,
+                        })
+                        .size(LabelSize::XSmall)
+                        .color(if failed.is_some() {
+                            Color::Error
+                        } else {
+                            Color::Muted
+                        }),
+                    ),
+            )
+            .child(
+                v_flex()
+                    .flex_none()
+                    .child(
+                        div()
+                            .debug_selector(move || format!("thread-file-remove-{key}"))
+                            .child(
+                                button(
+                                    SharedString::from(format!("remove-file-{key}")),
+                                    IconName::Close,
+                                    "Remove",
+                                )
+                                .on_click(
+                                    cx.listener(move |this, _, _, cx| this.remove_image(key, cx)),
+                                ),
+                            ),
+                    )
+                    .when(failed.is_some(), |this| {
+                        this.child(
+                            div()
+                                .debug_selector(move || format!("thread-file-retry-{key}"))
+                                .child(
+                                    button(
+                                        SharedString::from(format!("retry-file-{key}")),
+                                        IconName::RotateCw,
+                                        "Retry",
+                                    )
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            this.retry_image(key, window, cx)
+                                        },
+                                    )),
+                                ),
+                        )
+                    }),
+            )
+            .when_some(progress, |this, progress| {
+                this.child(
+                    div()
+                        .absolute()
+                        .bottom_0()
+                        .left_0()
+                        .h(scaled(px(3.)))
+                        .w(relative(progress.max(0.04)))
+                        .bg(palette.accent.hsla()),
+                )
+            })
+            .into_any_element()
     }
 
     fn render_image_tile(&self, image: &ComposerImage, cx: &mut Context<Self>) -> AnyElement {
@@ -1613,11 +1772,11 @@ impl ThreadView {
             // T3's primary actions (`ComposerPrimaryActions.tsx`): Resume in an empty composer
             // when there's a run to continue or a held queue, then Implement or Refine for an
             // active plan, then Send.
-            let empty = !has_text && self.images.composer.is_empty();
+            let empty = !has_text && !self.images.has_attachments();
             let resumable = state.and_then(ThreadState::resumable);
             let plan = state
                 .and_then(ThreadState::actionable_plan)
-                .filter(|_| self.images.composer.is_empty());
+                .filter(|_| !self.images.has_attachments());
             if empty && let Some(resumable) = resumable {
                 let tooltip = match (&resumable.continue_run_id, resumable.held_queue) {
                     (Some(_), true) => "Continue the stopped run, then the held queue",
@@ -1761,6 +1920,31 @@ impl ThreadView {
                                 ),
                         )
                     })
+                    .when_some(self.images.intake_note.clone(), |this, note| {
+                        this.child(
+                            h_flex()
+                                .w_full()
+                                .items_start()
+                                .gap_1()
+                                .debug_selector(|| "thread-intake-note".into())
+                                .child(
+                                    div().flex_none().pt_0p5().child(
+                                        Icon::new(IconName::TextSnippet)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Muted),
+                                    ),
+                                )
+                                // It's long, so it wraps rather than running past the composer.
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
+                                        .text_color(palette.text_muted.hsla())
+                                        .child(note),
+                                ),
+                        )
+                    })
                     .when_some(self.images.intake_error.clone(), |this, error| {
                         this.child(
                             h_flex()
@@ -1786,6 +1970,7 @@ impl ThreadView {
                             .on_action(cx.listener(Self::on_send))
                             .on_action(cx.listener(Self::on_steer))
                             .on_action(cx.listener(Self::on_stop))
+                            .on_action(cx.listener(Self::on_paste_as_text))
                             .capture_action(cx.listener(Self::on_paste))
                             .capture_action(cx.listener(Self::on_move_up))
                             .capture_action(cx.listener(Self::on_move_down))
@@ -1806,10 +1991,9 @@ impl ThreadView {
                             .border(tokens::BORDER_WIDTH)
                             .border_color(palette.border.hsla())
                             .bg(palette.surface.hsla())
-                            .when(
-                                !self.images.composer.is_empty() || self.images.preparing > 0,
-                                |this| this.child(self.render_image_strip(cx)),
-                            )
+                            .when(!self.images.is_empty(), |this| {
+                                this.child(self.render_image_strip(cx))
+                            })
                             .child(self.composer.clone())
                             .child(
                                 // When the composer is narrow (a big ui_font_size in a small
@@ -1821,14 +2005,15 @@ impl ThreadView {
                                     .child(self.settings_bar.clone())
                                     .child(
                                         div().debug_selector(|| "thread-attach".into()).child(
-                                            IconButton::new("thread-attach", IconName::Image)
+                                            IconButton::new("thread-attach", IconName::Paperclip)
                                                 .icon_size(IconSize::Small)
                                                 .icon_color(Color::Muted)
                                                 .tooltip(Tooltip::text(
-                                                    "Attach images (or paste or drop them)",
+                                                    "Attach images and files (or paste or drop \
+                                                     them)",
                                                 ))
                                                 .on_click(cx.listener(|this, _, window, cx| {
-                                                    this.pick_images(window, cx)
+                                                    this.pick_files(window, cx)
                                                 })),
                                         ),
                                     )
