@@ -85,7 +85,7 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         "ThreadsSidebar",
         "MustrHome",
         "MustrAgentSetup",
-        "MustrT3Settings",
+        "MustrSettings",
         "MustrSchedules",
         "MustrWorktrees",
         "MustrUsage",

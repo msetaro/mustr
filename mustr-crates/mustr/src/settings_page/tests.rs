@@ -17,7 +17,9 @@ use gpui::{Action as _, KeybindingKeystroke, Keystroke, TestAppContext, VisualTe
 use pretty_assertions::assert_eq;
 use project::FakeFs;
 use serde_json::{Value, json};
-use settings::{KeybindSource, ThemeAppearanceMode, ThemeName, ThemeSelection};
+use settings::{
+    KeybindSource, KeymapFile, KeymapFileLoadResult, ThemeAppearanceMode, ThemeName, ThemeSelection,
+};
 use std::sync::Arc;
 use thread_chat::{ServerConfigs, thread_settings::FollowUpBehavior};
 use workspace::MultiWorkspace;
@@ -657,6 +659,30 @@ async fn recording_a_shortcut_saves_it_without_running_the_old_one(cx: &mut Test
             { "unbind": { "ctrl-,": "mustr::OpenSettings" } },
         ])
     );
+
+    // Once mustr loads the file, the list has the new keys, as the user's, and not the old.
+    page.cx.update(|_, cx| {
+        let KeymapFileLoadResult::Success { mut key_bindings } = KeymapFile::load(&text, cx) else {
+            panic!("the saved keymap doesn't load");
+        };
+        for binding in &mut key_bindings {
+            binding.set_meta(KeybindSource::User.meta());
+        }
+        cx.bind_keys(key_bindings);
+        cx.set_global(crate::keymap::KeymapVersion(2));
+    });
+    page.cx.run_until_parked();
+    keys.read_with(page.cx, |keys, _| {
+        let shown = keys
+            .shown()
+            .iter()
+            .map(|row| (row.keys.clone(), row.source))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shown,
+            [("ctrl-, ctrl-alt-s".to_string(), Some(KeybindSource::User))]
+        );
+    });
 
     // Esc cancels.
     keys.update_in(page.cx, |keys, window, cx| {

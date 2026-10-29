@@ -779,7 +779,15 @@ fn rows_for_keymap(cx: &App) -> Vec<BindingRow> {
         let keymap = keymap.borrow();
         for binding in keymap.bindings() {
             let action = binding.action();
-            if action.name() == gpui::NoAction.name() || hidden(action) {
+            if gpui::is_no_action(action) || gpui::is_unbind(action) || hidden(action) {
+                continue;
+            }
+            // Left out when a later `null` or `unbind` turns it off, such as the user's unbind
+            // of the keys they changed.
+            let enabled = keymap
+                .bindings_for_action(action)
+                .any(|enabled| std::ptr::eq(enabled, binding));
+            if !enabled {
                 continue;
             }
             bound.insert(action.name());
