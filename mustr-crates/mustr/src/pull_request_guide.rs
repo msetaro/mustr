@@ -459,7 +459,7 @@ impl Render for ReviewGuideDialog {
         };
         let write = TextButton::new("review-guide-write", write_label)
             .disabled(self.state.is_running() || blocked.is_some())
-            .tooltip(blocked.clone().unwrap_or_else(|| {
+            .tooltip(blocked.unwrap_or_else(|| {
                 "An agent on T3 reads the change and writes the guide (it runs a model)".to_string()
             }))
             .on_click(cx.listener(|this, _, _, cx| this.write(cx)));

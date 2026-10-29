@@ -509,7 +509,7 @@ impl ThreadTerminalPanel {
         };
         let scripts = match &self.scripts {
             Some((store, _)) => store.read(cx).scripts(&project),
-            None => project.scripts.clone(),
+            None => project.scripts,
         };
         scripts.iter().map(Script::from_project).collect()
     }

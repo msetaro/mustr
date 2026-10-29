@@ -288,7 +288,7 @@ fn switching_agents_makes_the_next_message_hand_off() {
         })
     );
     // Nothing to hand over yet, or the same agent: no handoff.
-    let empty = thread_state(codex.clone(), vec![started("run-1", "completed")], true);
+    let empty = thread_state(codex, vec![started("run-1", "completed")], true);
     assert_eq!(pending_handoff(&empty, &providers(json!({}))), None);
     let same = thread_state(claude.clone(), vec![started("run-1", "completed")], false);
     assert_eq!(pending_handoff(&same, &providers(json!({}))), None);

@@ -115,7 +115,7 @@ fn new_scripts_get_t3s_ids_and_roles() {
     ]);
     let claims = ScriptInput {
         run_on_settle: true,
-        ..input.clone()
+        ..input
     };
     let next = saved_scripts(&existing, None, &claims);
     assert_eq!(ids(&next), ["setup", "clean", "install"]);

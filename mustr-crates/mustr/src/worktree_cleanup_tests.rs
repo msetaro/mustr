@@ -125,7 +125,7 @@ async fn rules_and_delete_now_go_through_t3(cx: &mut TestAppContext) {
         }
     });
     backend.respond("server.getSettings", Ok(server_settings.clone()));
-    let mut changed = server_settings.clone();
+    let mut changed = server_settings;
     changed["storageCleanup"]["worktreeOnMerge"] = json!(true);
     backend.respond("server.updateSettings", Ok(changed));
     backend.respond("server.runStorageCleanup", Ok(report()));

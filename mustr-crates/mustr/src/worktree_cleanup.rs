@@ -171,7 +171,7 @@ fn keep_when_summary(keep_when: &WorktreeKeepWhen) -> &'static str {
 /// policy instead, that policy with the rule changed too.
 pub fn rule_patch(settings: &ServerSettings, key: &'static str, value: Value) -> Value {
     let mut patch = Map::new();
-    patch.insert("storageCleanup".into(), json!({ key: value.clone() }));
+    patch.insert("storageCleanup".into(), json!({ key: value }));
     if settings.worktree_cleanup.is_some() {
         let mut rules = CleanupRules::of(settings).json();
         rules[key] = value;
