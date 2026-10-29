@@ -31,7 +31,9 @@ A GitHub release on `msetaro/mustr`, tagged `vX.Y.Z`, with five files:
 
 1. **Bump the version** in `mustr-crates/mustr/Cargo.toml` (`version = "0.2.0"`), and run
    `cargo check -p mustr` so `Cargo.lock` follows. Versions are semver; mustr compares them by
-   semver precedence, so a release must be higher than the one before it.
+   semver precedence, so a release must be higher than the one before it. Add the version's
+   notes at the top of `mustr-docs/RELEASE-NOTES.md` (the GitHub release keeps GitHub's
+   generated notes).
 2. **Commit on `m3/next`**, for example `mustr: Release 0.2.0`, and push the branch.
 3. **Tag that commit and push the tag:**
    ```sh
