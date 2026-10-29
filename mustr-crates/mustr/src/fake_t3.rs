@@ -53,6 +53,8 @@ pub(crate) struct FakeT3 {
     unsupported: Mutex<HashSet<String>>,
     /// Refuses calls that need these, as a pairing without their scopes does.
     blocked: Mutex<HashMap<Access, String>>,
+    /// The shell snapshot T3 serves, if any.
+    shell: Mutex<Option<Value>>,
 }
 
 impl FakeT3 {
@@ -63,6 +65,10 @@ impl FakeT3 {
     /// Answers every `tag` call with `answer`.
     pub(crate) fn answer(&self, tag: &str, answer: Value) {
         self.standing.lock().insert(tag.to_string(), Ok(answer));
+    }
+
+    pub(crate) fn has_answer(&self, tag: &str) -> bool {
+        self.standing.lock().contains_key(tag)
     }
 
     /// Answers the next `tag` call with `answer`, then goes back to the standing answer.
@@ -83,6 +89,26 @@ impl FakeT3 {
     /// Answers `tag` as a server without the RPC does.
     pub(crate) fn unsupported(&self, tag: &str) {
         self.unsupported.lock().insert(tag.to_string());
+    }
+
+    /// Serves a shell with these projects (each `{id, title, workspaceRoot, …}`, completed with
+    /// T3's other fields) and no threads.
+    pub(crate) fn serve_projects(&self, projects: Vec<Value>) {
+        let projects = projects
+            .into_iter()
+            .map(|project| {
+                let mut full = serde_json::json!({
+                    "scripts": [], "createdAt": "2026-10-01T00:00:00.000Z",
+                    "updatedAt": "2026-10-01T00:00:00.000Z", "defaultModelSelection": null
+                });
+                util::merge_json_value_into(project, &mut full);
+                full
+            })
+            .collect::<Vec<_>>();
+        *self.shell.lock() = Some(serde_json::json!({
+            "schemaVersion": 1, "snapshotSequence": 1, "threads": [], "archivedThreads": [],
+            "projects": projects
+        }));
     }
 
     pub(crate) fn block(&self, access: Access, reason: &str) {
@@ -140,7 +166,10 @@ fn ready<T: Send + 'static>(value: Result<T>) -> BoxFuture<'static, Result<T>> {
 
 impl ThreadBackend for FakeT3 {
     fn shell_snapshot(&self) -> BoxFuture<'static, Result<OrchestrationV2ShellSnapshot>> {
-        ready(Err(anyhow!("the fake T3 has no shell")))
+        ready(match self.shell.lock().clone() {
+            Some(shell) => serde_json::from_value(shell).map_err(Into::into),
+            None => Err(anyhow!("the fake T3 has no shell")),
+        })
     }
 
     fn subscribe_shell(

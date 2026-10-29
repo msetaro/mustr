@@ -153,3 +153,12 @@ impl ComposerContext {
         Ok(record)
     }
 }
+
+/// Opens a project's settings: its name, and the model and workspace its new threads start
+/// with. Handled by the project settings page (`mustr/src/project_settings.rs`, WP18).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Action)]
+#[action(namespace = thread_chat)]
+#[serde(deny_unknown_fields)]
+pub struct OpenProjectSettings {
+    pub project_id: String,
+}

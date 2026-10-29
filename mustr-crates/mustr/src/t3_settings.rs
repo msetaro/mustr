@@ -423,7 +423,7 @@ fn set_editor_text(editor: &mut Editor, text: &str, window: &mut Window, cx: &mu
 
 // Rendering.
 
-fn muted(text: impl Into<SharedString>) -> Label {
+pub(crate) fn muted(text: impl Into<SharedString>) -> Label {
     Label::new(text.into())
         .size(LabelSize::Small)
         .color(Color::Muted)
@@ -431,7 +431,7 @@ fn muted(text: impl Into<SharedString>) -> Label {
 
 /// A setting: its name and what it does, with its control beside them, or under them when the
 /// page is narrow (`SettingsRow` in T3).
-fn row(
+pub(crate) fn row(
     selector: &'static str,
     title: &'static str,
     description: impl Into<SharedString>,
@@ -466,7 +466,11 @@ fn row(
         .into_any_element()
 }
 
-fn section(title: &'static str, note: Option<&'static str>, rows: Vec<AnyElement>) -> AnyElement {
+pub(crate) fn section(
+    title: &'static str,
+    note: Option<&'static str>,
+    rows: Vec<AnyElement>,
+) -> AnyElement {
     v_flex()
         .w_full()
         .gap_1p5()

@@ -777,8 +777,11 @@ impl HomeView {
             }
             (projects, true, _) => {
                 let selected_background = cx.theme().colors().element_selected;
-                body = body.children(projects.iter().map(|project| {
+                body = body.children(projects.iter().enumerate().map(|(index, project)| {
                     let selected = self.selected_project.as_ref() == Some(&project.id);
+                    let settings = thread_chat::OpenProjectSettings {
+                        project_id: project.id.clone(),
+                    };
                     h_flex()
                         .w_full()
                         .gap_3()
@@ -804,6 +807,25 @@ impl HomeView {
                                             .truncate(),
                                     )
                                 }),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .debug_selector(move || format!("home-project-settings-{index}"))
+                                .child(
+                                    IconButton::new(
+                                        ("home-project-settings", index),
+                                        IconName::Settings,
+                                    )
+                                    .icon_size(IconSize::Small)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(ui::Tooltip::text("Project settings"))
+                                    .on_click(
+                                        move |_, window, cx| {
+                                            window.dispatch_action(Box::new(settings.clone()), cx)
+                                        },
+                                    ),
+                                ),
                         )
                 }))
             }

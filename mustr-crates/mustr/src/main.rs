@@ -53,6 +53,7 @@ mod t3_settings;
 // WP18, settings, usage, accounts and servers:
 #[cfg(test)]
 mod fake_t3;
+mod project_settings;
 mod servers;
 mod usage_page;
 // Zoom:
@@ -497,6 +498,7 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     // WP18, settings, usage, accounts and servers:
     usage_page::init(cx);
     servers::init(cx);
+    project_settings::init(cx);
     // Zoom:
     zoom::init(cx);
     // Releases and self-update:
