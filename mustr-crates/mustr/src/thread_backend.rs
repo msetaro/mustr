@@ -315,6 +315,7 @@ fn blocked_reason(missing: &[Scope], access: Access) -> Option<String> {
         Access::TerminalOperate => (Scope::TerminalOperate, "use T3's terminals"),
         Access::SettingsWrite => (Scope::SettingsWrite, "change T3's settings"),
         Access::ProvidersManage => (Scope::ProvidersManage, "set up agents"),
+        Access::DiagnosticsRead => (Scope::DiagnosticsRead, "read T3's usage"),
     };
     missing
         .contains(&scope)
@@ -523,6 +524,7 @@ mod tests {
             Access::TerminalOperate,
             Access::SettingsWrite,
             Access::ProvidersManage,
+            Access::DiagnosticsRead,
         ];
         // A full pairing refuses nothing.
         for access in all {
@@ -534,6 +536,7 @@ mod tests {
             Scope::TerminalOperate,
             Scope::SettingsWrite,
             Scope::ProvidersManage,
+            Scope::DiagnosticsRead,
         ];
         let refused = all
             .into_iter()
@@ -564,6 +567,10 @@ mod tests {
                 (
                     Access::ProvidersManage,
                     reason("set up agents", "providers:manage")
+                ),
+                (
+                    Access::DiagnosticsRead,
+                    reason("read T3's usage", "diagnostics:read")
                 ),
             ]
         );

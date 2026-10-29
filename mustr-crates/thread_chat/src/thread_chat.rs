@@ -91,8 +91,8 @@ pub use palette::{
 mod tests;
 
 pub use actions::{
-    AddComposerContext, ComposerContext, NewThreadInWorktree, OpenInEditor, OpenThreadTerminal,
-    RemoveThreadWorktree, ReviewThreadChanges,
+    AddComposerContext, ComposerContext, NewThreadInWorktree, OpenInEditor, OpenProjectSettings,
+    OpenThreadTerminal, RemoveThreadWorktree, ReviewThreadChanges,
 };
 pub use backend::{
     Access, AttachmentUpload, GlobalThreadBackend, ReadOnlyBackend, ThreadBackend,
