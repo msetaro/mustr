@@ -364,7 +364,7 @@ impl Render for TaskEditor {
             .as_deref()
             .and_then(|id| projects.iter().position(|project| project.id == id));
         let project_control = if projects.is_empty() {
-            note("T3 has no projects yet. Add one from Home.").into_any_element()
+            note("T3 has no projects yet. Add one from the Inbox.").into_any_element()
         } else {
             self.dropdown(
                 "schedule-project",

@@ -148,6 +148,11 @@ struct Args {
     #[arg(long, hide = true)]
     new_thread: bool,
 
+    /// Opens this folder in Edit at startup (for smoke tests and screenshots: Open Folder…
+    /// asks the desktop's folder picker).
+    #[arg(long, hide = true, value_name = "FOLDER")]
+    edit: Option<PathBuf>,
+
     /// Relays a Git or SSH password prompt over a Unix socket, so git doesn't
     /// need netcat.
     #[cfg(not(target_os = "windows"))]
@@ -208,6 +213,7 @@ fn main() {
     let startup_threads = window::StartupThreads {
         open_thread: args.open_thread.clone(),
         new_thread: args.new_thread,
+        edit_folder: args.edit.clone(),
     };
     let data_dir = match data_dir::init(args.user_data_dir) {
         Ok(data_dir) => data_dir,

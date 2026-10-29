@@ -455,10 +455,7 @@ impl ReviewPage {
             None if rows.is_empty() => vec![muted_line("Nothing here.").into_any_element()],
             None => rows,
         };
-        let id = SharedString::from(format!(
-            "review-section-{}",
-            index.unwrap_or(usize::MAX)
-        ));
+        let id = SharedString::from(format!("review-section-{}", index.unwrap_or(usize::MAX)));
         let toggle = {
             let name = name.to_string();
             cx.listener(move |this, _, _, cx| {

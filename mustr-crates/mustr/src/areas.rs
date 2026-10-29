@@ -21,10 +21,10 @@ use crate::{
 };
 use collections::HashMap;
 use gpui::{
-    App, AppContext as _, Context, Div, Entity, EntityId, EventEmitter, FocusHandle, Focusable,
-    Global, InteractiveElement as _, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
-    NavigationDirection, ParentElement as _, Render, SharedString, Styled as _, Subscription,
-    WeakEntity, Window, actions, px,
+    AnyWindowHandle, App, AppContext as _, Context, Div, Entity, EntityId, EventEmitter,
+    FocusHandle, Focusable, Global, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
+    MouseDownEvent, NavigationDirection, ParentElement as _, Render, SharedString, Styled as _,
+    Subscription, WeakEntity, Window, actions, px,
 };
 use mustr_ui::{MustrIcon, tokens, tokens::scaled};
 use review::ReviewView;
@@ -155,6 +155,7 @@ struct Visit {
 /// A window's areas: the view on screen, the history of visits, and each area's last view.
 pub struct Areas {
     workspace: WeakEntity<Workspace>,
+    window: AnyWindowHandle,
     history: Vec<Visit>,
     /// The visit on screen, in `history`.
     position: usize,
@@ -217,12 +218,35 @@ impl Areas {
         );
         Self {
             workspace: workspace.downgrade(),
+            window: window.window_handle(),
             history: Vec::new(),
             position: 0,
             last: HashMap::default(),
             shown_closed: None,
             reconcile_scheduled: false,
             _subscription: subscription,
+        }
+    }
+
+    /// Records the view on screen in every window. The views a window opens while it's being
+    /// made (the Inbox, and what the startup flags open) send their events before anything can
+    /// hear them, so the window's setup calls this once the window is open.
+    pub fn sync_all(cx: &mut App) {
+        let Some(registry) = cx.try_global::<Registry>() else {
+            return;
+        };
+        let all = registry
+            .0
+            .values()
+            .filter_map(WeakEntity::upgrade)
+            .collect::<Vec<_>>();
+        for areas in all {
+            let window = areas.read(cx).window;
+            window
+                .update(cx, |_, window, cx| {
+                    areas.update(cx, |areas, cx| areas.schedule_reconcile(window, cx))
+                })
+                .ok();
         }
     }
 

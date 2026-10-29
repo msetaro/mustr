@@ -212,6 +212,17 @@ impl NavPanel {
         on::<areas::ShowAgents>(workspace, nav_panel, Area::Agents);
     }
 
+    /// Sizes the panel for the area on screen, once it's in `left_dock`. For the window's setup,
+    /// which can't let the panel read the workspace it's setting up.
+    pub fn added_to_dock(
+        &mut self,
+        left_dock: &Entity<Dock>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_size(left_dock, window, cx);
+    }
+
     /// Follows the area on screen: highlights its rail button and shows its sidebar (widening
     /// the panel).
     pub fn areas_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -307,6 +318,10 @@ impl NavPanel {
     ) {
         let sidebar = self.sidebar();
         if self.sized_for == Some(sidebar) {
+            return;
+        }
+        // Not in the dock yet: the window's setup sizes it once it is (`window.rs`).
+        if left_dock.read(cx).panel::<Self>().is_none() {
             return;
         }
         let panel = cx.entity();

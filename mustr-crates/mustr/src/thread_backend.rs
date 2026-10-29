@@ -556,7 +556,7 @@ mod tests {
         let reason = |what: &str, scope: &str| {
             format!(
                 "mustr's pairing with T3 can't {what} (it lacks {scope}). Pair again from the \
-                 home view: {}",
+                 Inbox: {}",
                 crate::t3_connection::pairing_command()
             )
         };

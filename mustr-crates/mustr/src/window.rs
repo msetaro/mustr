@@ -132,6 +132,10 @@ pub fn init(cx: &mut App) {
         // WP6, terminals and worktrees:
         crate::terminal_panel::add_panel(workspace, &workspace_handle, window, cx);
         workspace.finish_dock_restoration(cx);
+        let left_dock = workspace.left_dock().clone();
+        nav_panel.update(cx, |nav_panel, cx| {
+            nav_panel.added_to_dock(&left_dock, window, cx)
+        });
         // The review's toggle shows or hides its files.
         let weak_nav_panel = nav_panel.downgrade();
         workspace.register_action(move |_, _: &ToggleFileTree, window, cx| {
@@ -174,6 +178,8 @@ pub fn init(cx: &mut App) {
 pub struct StartupThreads {
     pub open_thread: Option<String>,
     pub new_thread: bool,
+    /// A folder to open in Edit.
+    pub edit_folder: Option<std::path::PathBuf>,
 }
 
 impl Global for StartupThreads {}
@@ -205,6 +211,9 @@ pub fn open_home_window(app_state: Arc<AppState>, cx: &mut App) {
             if startup_threads.new_thread {
                 thread_chat::ThreadView::open_new(workspace, window, cx);
             }
+            if let Some(folder) = startup_threads.edit_folder {
+                crate::edit_area::open_folder(folder, workspace, window, cx);
+            }
         },
     );
     cx.spawn(async move |cx| {
@@ -216,6 +225,8 @@ pub fn open_home_window(app_state: Arc<AppState>, cx: &mut App) {
         }
         // Zed has restored the window's docks.
         cx.update(crate::terminal_panel::finish_launch);
+        // The areas learn what the window opened while it was being made.
+        cx.update(crate::areas::Areas::sync_all);
     })
     .detach();
 }

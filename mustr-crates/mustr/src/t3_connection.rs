@@ -99,7 +99,7 @@ pub fn pairing_command() -> String {
 /// Why mustr can't do `what` ("drive agents"): its pairing lacks `scope`.
 pub fn missing_scope_reason(scope: Scope, what: &str) -> String {
     format!(
-        "mustr's pairing with T3 can't {what} (it lacks {}). Pair again from the home view: {}",
+        "mustr's pairing with T3 can't {what} (it lacks {}). Pair again from the Inbox: {}",
         scope.as_str(),
         pairing_command()
     )
@@ -2105,7 +2105,7 @@ mod tests {
         assert_eq!(
             missing_scope_reason(Scope::SettingsWrite, "change T3's settings"),
             "mustr's pairing with T3 can't change T3's settings (it lacks settings:write). Pair \
-             again from the home view: t3 auth pairing create --scope orchestration:read \
+             again from the Inbox: t3 auth pairing create --scope orchestration:read \
              --scope orchestration:operate --scope source-control:write --scope filesystem:read \
              --scope terminal:read --scope terminal:operate --scope settings:write \
              --scope providers:manage --scope diagnostics:read --label mustr"

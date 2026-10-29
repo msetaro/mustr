@@ -541,7 +541,8 @@ pub struct EditTree {
     /// The file the active editor shows, in the folder.
     selected: Option<Arc<RelPath>>,
     scroll: UniformListScrollHandle,
-    _worktree: Option<Subscription>,
+    /// The worktree the rows are of.
+    showing: Option<EntityId>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -553,8 +554,17 @@ impl EditTree {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let project = folder.read(cx).project.clone();
         let subscriptions = vec![
             cx.observe(&folder, |this, _, cx| this.folder_changed(cx)),
+            // The folder's files as Zed scans them, and as they change.
+            cx.subscribe(&project, |this, _, event: &project::Event, cx| {
+                if let project::Event::WorktreeUpdatedEntries(worktree_id, _) = event
+                    && this.folder.read(cx).worktree_id(cx) == Some(*worktree_id)
+                {
+                    this.rebuild(cx);
+                }
+            }),
             cx.subscribe_in(
                 workspace,
                 window,
@@ -577,7 +587,7 @@ impl EditTree {
             rows: Vec::new(),
             selected: None,
             scroll: UniformListScrollHandle::new(),
-            _worktree: None,
+            showing: None,
             _subscriptions: subscriptions,
         };
         this.folder_changed(cx);
@@ -599,14 +609,11 @@ impl EditTree {
     }
 
     fn folder_changed(&mut self, cx: &mut Context<Self>) {
-        let worktree = self.worktree(cx);
-        let watching = self._worktree.is_some().then(|| worktree.clone()).flatten();
-        if watching.is_none() || self.rows.is_empty() {
+        let worktree_id = self.worktree(cx).map(|worktree| worktree.entity_id());
+        if worktree_id != self.showing {
+            self.showing = worktree_id;
             self.expanded.clear();
             self.selected = None;
-            self._worktree = worktree
-                .as_ref()
-                .map(|worktree| cx.observe(worktree, |this, _, cx| this.rebuild(cx)));
         }
         self.rebuild(cx);
     }
@@ -962,6 +969,7 @@ impl Render for EditHome {
 /// ⌘P in Edit: finds a file in Edit's folder.
 pub struct EditFileFinder {
     picker: Entity<Picker<FileFinderDelegate>>,
+    _dismiss: Subscription,
 }
 
 impl EditFileFinder {
@@ -982,8 +990,12 @@ impl EditFileFinder {
                 selected: 0,
                 cancel: Arc::new(AtomicBool::new(false)),
             };
+            let picker = cx.new(|cx| Picker::uniform_list(delegate, window, cx));
+            // The picker's Escape and choosing a file close the finder.
+            let dismiss = cx.subscribe(&picker, |_, _, _: &DismissEvent, cx| cx.emit(DismissEvent));
             Self {
-                picker: cx.new(|cx| Picker::uniform_list(delegate, window, cx)),
+                picker,
+                _dismiss: dismiss,
             }
         });
     }
@@ -1003,7 +1015,6 @@ impl Render for EditFileFinder {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .key_context("MustrEditFileFinder")
-            .w(scaled(px(560.)))
             .child(self.picker.clone())
             .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(DismissEvent)))
     }
