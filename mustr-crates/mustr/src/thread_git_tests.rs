@@ -510,6 +510,8 @@ fn payloads_match_t3s() {
         project_id: "project-1".to_string(),
         cwd: WORKTREE.to_string(),
         branch: Some("t3/retry-backoff".to_string()),
+        worktree_path: Some(WORKTREE.to_string()),
+        project_root: Some("/src/api".to_string()),
     };
     let input = |action, options| {
         serde_json::to_value(stacked_action_input(
@@ -679,6 +681,8 @@ async fn the_status_follows_the_checkout(cx: &mut TestAppContext) {
                 project_id: "project-1".to_string(),
                 cwd: WORKTREE.to_string(),
                 branch: Some("t3/retry-backoff".to_string()),
+                worktree_path: Some(WORKTREE.to_string()),
+                project_root: Some("/src/api".to_string()),
             })
         );
         assert_eq!(git.quick_action().label, "Commit, push & PR");
@@ -1120,4 +1124,227 @@ async fn running_actions_outlive_their_views(cx: &mut TestAppContext) {
     cx.run_until_parked();
     let git = cx.update(|cx| ThreadGit::for_thread(THREAD, cx));
     assert_ne!(git.entity_id(), id);
+}
+
+fn git_ref(name: &str, worktree_path: Option<&str>, is_default: bool) -> VcsRef {
+    serde_json::from_value(json!({
+        "name": name, "current": false, "isDefault": is_default, "worktreePath": worktree_path
+    }))
+    .unwrap()
+}
+
+#[test]
+fn picking_a_branch_moves_the_thread_as_t3s_picker_does() {
+    let target = |worktree: Option<&str>, git_ref: &VcsRef| {
+        let target = branch_selection_target("/src/api", worktree, git_ref);
+        (
+            target.checkout_cwd,
+            target.worktree_path,
+            target.reuse_existing_worktree,
+        )
+    };
+    let elsewhere = git_ref("t3/other", Some("/tmp/worktrees/other"), false);
+    let in_root = git_ref("main", Some("/src/api"), true);
+    let default = git_ref("main", None, true);
+    let feature = git_ref("feature", None, false);
+    // A branch in another worktree moves the thread there, from anywhere.
+    for worktree in [None, Some(WORKTREE)] {
+        assert_eq!(
+            target(worktree, &elsewhere),
+            (
+                "/tmp/worktrees/other".to_string(),
+                Some("/tmp/worktrees/other".to_string()),
+                true
+            )
+        );
+    }
+    // The project's own branch, or the default branch, takes a worktree's thread back home.
+    assert_eq!(
+        target(Some(WORKTREE), &in_root),
+        ("/src/api".to_string(), None, true)
+    );
+    assert_eq!(
+        target(Some(WORKTREE), &default),
+        ("/src/api".to_string(), None, false)
+    );
+    // Other branches switch where the thread is.
+    assert_eq!(
+        target(Some(WORKTREE), &feature),
+        (WORKTREE.to_string(), Some(WORKTREE.to_string()), false)
+    );
+    assert_eq!(
+        target(None, &default),
+        ("/src/api".to_string(), None, false)
+    );
+
+    // Moving home sends `worktreePath: null`, against the worktree T3 had.
+    assert_eq!(
+        move_thread_command(THREAD, Some("main"), None, Some(WORKTREE), "c1".into()),
+        json!({
+            "type": "thread.metadata.update", "commandId": "c1", "threadId": THREAD,
+            "branch": "main", "worktreePath": null, "expectedWorktreePath": WORKTREE
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(create_worktree_input("/src/api", "main", "t3/queue")).unwrap(),
+        json!({
+            "cwd": "/src/api", "refName": "main", "newRefName": "t3/queue",
+            "baseRefName": "main", "path": null
+        })
+    );
+}
+
+fn writes(backend: &RecordingBackend) -> Vec<Call> {
+    backend
+        .calls
+        .lock()
+        .iter()
+        .filter(|call| {
+            !matches!(
+                call.tag.as_str(),
+                "subscribeVcsStatus" | "vcs.refreshStatus"
+            )
+        })
+        .cloned()
+        .collect()
+}
+
+#[gpui::test]
+async fn threads_move_between_worktrees_and_the_projects_checkout(cx: &mut TestAppContext) {
+    let backend = RecordingBackend::with_shell(shell(vec![shell_thread(json!({}))]));
+    backend.respond("vcs.switchRef", Ok(json!({ "refName": "main" })));
+    let git = thread_git(&backend, cx).await;
+
+    // Into a worktree another branch is checked out in: no git, just the thread.
+    git.update(cx, |git, cx| {
+        git.select_ref(git_ref("t3/other", Some("/tmp/worktrees/other"), false), cx)
+    });
+    cx.run_until_parked();
+    // Back to the project's checkout, on its default branch.
+    git.update(cx, |git, cx| {
+        git.select_ref(git_ref("main", None, true), cx)
+    });
+    cx.run_until_parked();
+
+    let calls = writes(&backend);
+    let command = |call: &Call| call.payload.clone();
+    assert_eq!(calls.len(), 3, "{calls:#?}");
+    assert_eq!(calls[0].tag, "orchestration.dispatchCommand");
+    assert_eq!(calls[0].access, Access::Operate);
+    assert_eq!(
+        command(&calls[0]),
+        json!({
+            "type": "thread.metadata.update", "commandId": command(&calls[0])["commandId"],
+            "threadId": THREAD, "branch": "t3/other", "worktreePath": "/tmp/worktrees/other",
+            "expectedWorktreePath": WORKTREE
+        })
+    );
+    assert_eq!(
+        calls[1],
+        Call {
+            tag: "vcs.switchRef".to_string(),
+            payload: json!({ "cwd": "/src/api", "refName": "main" }),
+            access: Access::SourceControlWrite,
+        }
+    );
+    assert_eq!(
+        command(&calls[2]),
+        json!({
+            "type": "thread.metadata.update", "commandId": command(&calls[2])["commandId"],
+            "threadId": THREAD, "branch": "main", "worktreePath": null,
+            "expectedWorktreePath": WORKTREE
+        })
+    );
+    git.read_with(cx, |git, _| {
+        assert_eq!(
+            git.notice(),
+            Some(&Notice::Done(
+                "Moved the thread to the project's checkout, on main".into()
+            ))
+        )
+    });
+}
+
+#[gpui::test]
+async fn a_local_thread_moves_to_a_new_worktree(cx: &mut TestAppContext) {
+    let backend = RecordingBackend::with_shell(shell(vec![shell_thread(
+        json!({ "worktreePath": null, "branch": "main" }),
+    )]));
+    backend.respond(
+        "vcs.createWorktree",
+        Ok(json!({ "worktree": { "path": "/tmp/worktrees/queue", "refName": "t3/queue" } })),
+    );
+    let git = thread_git(&backend, cx).await;
+    git.update(cx, |git, cx| {
+        git.move_to_new_worktree(" t3/queue ".to_string(), cx)
+    });
+    cx.run_until_parked();
+    let calls = writes(&backend);
+    assert_eq!(
+        calls[0],
+        Call {
+            tag: "vcs.createWorktree".to_string(),
+            payload: json!({
+                "cwd": "/src/api", "refName": "main", "newRefName": "t3/queue",
+                "baseRefName": "main", "path": null
+            }),
+            access: Access::SourceControlWrite,
+        }
+    );
+    let command = calls[1].payload.clone();
+    assert_eq!(
+        command,
+        json!({
+            "type": "thread.metadata.update", "commandId": command["commandId"],
+            "threadId": THREAD, "branch": "t3/queue", "worktreePath": "/tmp/worktrees/queue",
+            "expectedWorktreePath": null
+        })
+    );
+    assert_eq!(calls.len(), 2);
+
+    // When T3 refuses the move, the new worktree goes again.
+    backend.respond(
+        "vcs.createWorktree",
+        Ok(json!({ "worktree": { "path": "/tmp/worktrees/queue-2", "refName": "t3/queue-2" } })),
+    );
+    backend.respond(
+        "orchestration.dispatchCommand",
+        Err("Thread thread-1 worktree changed before the metadata update could be applied."),
+    );
+    git.update(cx, |git, cx| {
+        git.move_to_new_worktree("t3/queue-2".to_string(), cx)
+    });
+    cx.run_until_parked();
+    let calls = writes(&backend);
+    assert_eq!(
+        calls.last().unwrap(),
+        &Call {
+            tag: "vcs.removeWorktree".to_string(),
+            payload: json!({ "cwd": "/src/api", "path": "/tmp/worktrees/queue-2", "force": true }),
+            access: Access::SourceControlWrite,
+        }
+    );
+    git.read_with(cx, |git, _| {
+        assert!(matches!(git.notice(), Some(Notice::Error(error)) if error.contains("moving the thread")))
+    });
+}
+
+#[gpui::test]
+async fn a_working_thread_doesnt_move(cx: &mut TestAppContext) {
+    let backend =
+        RecordingBackend::with_shell(shell(vec![shell_thread(json!({ "activeRunId": "run-2" }))]));
+    let git = thread_git(&backend, cx).await;
+    git.update(cx, |git, cx| {
+        git.select_ref(git_ref("main", None, true), cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(writes(&backend), []);
+    git.read_with(cx, |git, _| {
+        assert_eq!(
+            git.notice(),
+            Some(&Notice::Error(
+                "Stop the agent's run before moving the thread.".into()
+            ))
+        )
+    });
 }

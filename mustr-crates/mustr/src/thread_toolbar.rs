@@ -1384,7 +1384,12 @@ impl ThreadToolbar {
         };
         let mut tooltip = git
             .checkout()
-            .map(|checkout| format!("{branch}\n{} · switch or create a branch", checkout.cwd))
+            .map(|checkout| {
+                format!(
+                    "{branch}\n{} · switch or create a branch, or move the thread",
+                    checkout.cwd
+                )
+            })
             .unwrap_or_else(|| format!("{branch}\nSwitch or create a branch"));
         if let Some(summary) = git_summary(&thread.git, cx) {
             tooltip.push_str(&format!("\n{summary}"));

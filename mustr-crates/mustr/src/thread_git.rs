@@ -43,8 +43,9 @@ use t3_client::t3_api::{
         EditorId, GitActionProgressPhase, GitRunStackedActionInput, GitRunStackedActionResult,
         GitRunStackedActionResultBranchStatus, GitRunStackedActionResultPrStatus, GitStackedAction,
         LaunchEditorInput, OrchestrationV2CommandThreadMetadataUpdate,
-        OrchestrationV2CommandThreadMetadataUpdateType, VcsCreateRefInput, VcsListRefsInput,
-        VcsPullInput, VcsRef, VcsRefreshStatusPayload, VcsStatusLocalResult, VcsStatusRemoteResult,
+        OrchestrationV2CommandThreadMetadataUpdateType, VcsCreateRefInput,
+        VcsCreateWorktreePayload, VcsListRefsInput, VcsPullInput, VcsRef, VcsRefreshStatusPayload,
+        VcsRemoveWorktreeInput, VcsStatusLocalResult, VcsStatusRemoteResult,
         VcsStatusRemoteResultPrState, VcsStatusSubscriptionInput, VcsSwitchRefInput,
     },
 };
@@ -72,6 +73,11 @@ pub struct Checkout {
     pub cwd: String,
     /// The branch T3 recorded for the thread.
     pub branch: Option<String>,
+    /// The thread's own worktree, when it has one; `None` when it works in the project's
+    /// checkout.
+    pub worktree_path: Option<String>,
+    /// The project's checkout (`workspaceRoot`), while T3 lists the project.
+    pub project_root: Option<String>,
 }
 
 impl Checkout {
@@ -79,21 +85,22 @@ impl Checkout {
     /// `workspaceRoot` (as T3's `gitCwd`).
     pub fn of_thread(shell: &Shell, thread_id: &str) -> Option<Self> {
         let thread = shell.threads.get(thread_id)?;
-        let cwd = thread
+        let worktree_path = thread
             .worktree_path
             .clone()
-            .filter(|path| !path.trim().is_empty())
-            .or_else(|| {
-                shell
-                    .projects
-                    .get(&thread.project_id)
-                    .map(|project| project.workspace_root.clone())
-            })?;
+            .filter(|path| !path.trim().is_empty());
+        let project_root = shell
+            .projects
+            .get(&thread.project_id)
+            .map(|project| project.workspace_root.clone());
+        let cwd = worktree_path.clone().or_else(|| project_root.clone())?;
         Some(Self {
             thread_id: thread.id.clone(),
             project_id: thread.project_id.clone(),
             cwd,
             branch: thread.branch.clone().filter(|branch| !branch.is_empty()),
+            worktree_path,
+            project_root,
         })
     }
 }
@@ -517,6 +524,79 @@ pub fn branch_update(
         type_: OrchestrationV2CommandThreadMetadataUpdateType::ThreadMetadataUpdate,
         worktree_path: None,
     })
+}
+
+/// Where picking a branch takes the thread (`resolveBranchSelectionTarget` in T3's
+/// `BranchToolbar.logic.ts`): a branch checked out in a worktree moves the thread into that
+/// worktree, or back to the project's checkout when that's where it's checked out; the default
+/// branch picked in a worktree moves the thread back to the project's checkout; any other branch
+/// is checked out where the thread works.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchTarget {
+    /// Where the branch is checked out (`vcs.switchRef`), unless it already is.
+    pub checkout_cwd: String,
+    /// The thread's worktree afterwards; `None` for the project's checkout.
+    pub worktree_path: Option<String>,
+    /// Whether the branch is already checked out there, so only the thread moves.
+    pub reuse_existing_worktree: bool,
+}
+
+pub fn branch_selection_target(
+    project_root: &str,
+    worktree_path: Option<&str>,
+    git_ref: &VcsRef,
+) -> BranchTarget {
+    if let Some(ref_worktree) = git_ref.worktree_path.as_deref() {
+        return BranchTarget {
+            checkout_cwd: ref_worktree.to_string(),
+            worktree_path: (ref_worktree != project_root).then(|| ref_worktree.to_string()),
+            reuse_existing_worktree: true,
+        };
+    }
+    let worktree_path = worktree_path.filter(|_| !git_ref.is_default);
+    BranchTarget {
+        checkout_cwd: worktree_path.unwrap_or(project_root).to_string(),
+        worktree_path: worktree_path.map(str::to_string),
+        reuse_existing_worktree: false,
+    }
+}
+
+/// Moves a thread to another worktree, or to its project's checkout (`worktree_path` `None`),
+/// on `branch` (`thread.metadata.update`), refused if the thread moved meanwhile
+/// (`expectedWorktreePath`). It's raw JSON because moving to the project's checkout sends
+/// `worktreePath: null`, which the typed command leaves out. T3 detaches the thread's agent
+/// sessions itself when its worktree changes, so its next message starts in the new folder.
+pub fn move_thread_command(
+    thread_id: &str,
+    branch: Option<&str>,
+    worktree_path: Option<&str>,
+    expected_worktree_path: Option<&str>,
+    command_id: String,
+) -> serde_json::Value {
+    json!({
+        "type": "thread.metadata.update",
+        "commandId": command_id,
+        "threadId": thread_id,
+        "branch": branch,
+        "worktreePath": worktree_path,
+        "expectedWorktreePath": expected_worktree_path,
+    })
+}
+
+/// Creates a worktree for the new branch `branch`, from `base`, in the project's checkout
+/// (`vcs.createWorktree`, where T3 picks the folder), as T3's `t3_worktree_handoff` does.
+pub fn create_worktree_input(
+    project_root: &str,
+    base: &str,
+    branch: &str,
+) -> VcsCreateWorktreePayload {
+    VcsCreateWorktreePayload {
+        base_ref_name: Some(base.to_string()),
+        cwd: project_root.to_string(),
+        new_ref_name: Some(branch.to_string()),
+        path: (),
+        ref_name: base.to_string(),
+    }
 }
 
 pub fn list_refs_input(cwd: &str, query: &str) -> VcsListRefsInput {
@@ -1362,6 +1442,184 @@ impl ThreadGit {
                 Err(error) => this.end_busy(Err(error.context("creating the branch")), cx),
             })
             .ok();
+        }));
+    }
+
+    /// Why the thread can't move to another folder now, if it can't: its agent is working, or
+    /// mustr can't change the thread or its checkout.
+    pub fn move_blocked_reason(&self, cx: &mut App) -> Option<String> {
+        let backend = self.backend.as_ref()?;
+        let working = ThreadShells::global(cx)
+            .read(cx)
+            .thread(&self.thread_id)
+            .is_some_and(|thread| thread.active_run_id.is_some());
+        if working {
+            return Some("Stop the agent's run before moving the thread.".to_string());
+        }
+        backend
+            .blocked_reason(Access::Operate)
+            .or_else(|| backend.blocked_reason(Access::SourceControlWrite))
+    }
+
+    /// Picks `git_ref` in the branch picker, as T3's branch picker does: a branch checked out in
+    /// a worktree moves the thread there, the default branch picked in a worktree checks it out
+    /// in the project's checkout and moves the thread back there, and any other branch is checked
+    /// out where the thread works ([`branch_selection_target`]).
+    pub fn select_ref(&mut self, git_ref: VcsRef, cx: &mut Context<Self>) {
+        let name = local_ref_name(&git_ref);
+        let Some(checkout) = self.checkout.clone() else {
+            self.switch_ref(name, cx);
+            return;
+        };
+        let project_root = checkout
+            .project_root
+            .clone()
+            .unwrap_or_else(|| checkout.cwd.clone());
+        let target =
+            branch_selection_target(&project_root, checkout.worktree_path.as_deref(), &git_ref);
+        if target.worktree_path == checkout.worktree_path {
+            if !target.reuse_existing_worktree {
+                self.switch_ref(name, cx);
+            }
+            return;
+        }
+        if let Some(reason) = self.move_blocked_reason(cx) {
+            self.set_notice(Notice::Error(reason.into()), cx);
+            return;
+        }
+        let destination = target
+            .worktree_path
+            .clone()
+            .unwrap_or_else(|| "the project's checkout".to_string());
+        let Some((backend, checkout)) =
+            self.start_busy(format!("Moving the thread to {destination}…"), cx)
+        else {
+            return;
+        };
+        let switch = (!target.reuse_existing_worktree).then(|| {
+            backend.call::<rpc::VcsSwitchRef>(
+                VcsSwitchRefInput {
+                    cwd: target.checkout_cwd.clone(),
+                    ref_name: name.clone(),
+                },
+                Access::SourceControlWrite,
+            )
+        });
+        let thread_id = self.thread_id.clone();
+        self._tasks.push(cx.spawn(async move |this, cx| {
+            let result = async {
+                let branch = match switch {
+                    Some(switch) => switch
+                        .await
+                        .context("switching the branch")?
+                        .ref_name
+                        .unwrap_or(name),
+                    None => name,
+                };
+                backend
+                    .call_raw(
+                        rpc::OrchestrationDispatchCommand::TAG,
+                        move_thread_command(
+                            &thread_id,
+                            Some(&branch),
+                            target.worktree_path.as_deref(),
+                            checkout.worktree_path.as_deref(),
+                            thread_chat::commands::new_id(),
+                        ),
+                        Access::Operate,
+                    )
+                    .await
+                    .context("moving the thread")?;
+                anyhow::Ok(format!("Moved the thread to {destination}, on {branch}"))
+            }
+            .await;
+            this.update(cx, |this, cx| this.end_busy(result, cx)).ok();
+        }));
+    }
+
+    /// Moves a thread that works in its project's checkout to a new worktree, on the new branch
+    /// `name` from the checkout's branch, as T3's `t3_worktree_handoff` does: creates the
+    /// worktree (`vcs.createWorktree`), then moves the thread there (`thread.metadata.update`),
+    /// removing the worktree again if T3 refuses the move.
+    pub fn move_to_new_worktree(&mut self, name: String, cx: &mut Context<Self>) {
+        let name = name.trim().to_string();
+        let Some(checkout) = self.checkout.clone().filter(|_| !name.is_empty()) else {
+            return;
+        };
+        if checkout.worktree_path.is_some() {
+            self.set_notice(
+                Notice::Error("The thread already works in a worktree.".into()),
+                cx,
+            );
+            return;
+        }
+        let base = self
+            .status
+            .as_ref()
+            .and_then(GitStatus::branch)
+            .map(str::to_string)
+            .or_else(|| checkout.branch.clone());
+        let Some(base) = base else {
+            self.set_notice(
+                Notice::Error("The project's checkout isn't on a branch to start from.".into()),
+                cx,
+            );
+            return;
+        };
+        if let Some(reason) = self.move_blocked_reason(cx) {
+            self.set_notice(Notice::Error(reason.into()), cx);
+            return;
+        }
+        let Some((backend, checkout)) =
+            self.start_busy(format!("Creating a worktree for {name}…"), cx)
+        else {
+            return;
+        };
+        let project_root = checkout.project_root.clone().unwrap_or(checkout.cwd);
+        let create = backend.call::<rpc::VcsCreateWorktree>(
+            create_worktree_input(&project_root, &base, &name),
+            Access::SourceControlWrite,
+        );
+        let thread_id = self.thread_id.clone();
+        self._tasks.push(cx.spawn(async move |this, cx| {
+            let result = async {
+                let created = create.await.context("creating the worktree")?.worktree;
+                let moved = backend
+                    .call_raw(
+                        rpc::OrchestrationDispatchCommand::TAG,
+                        move_thread_command(
+                            &thread_id,
+                            Some(&created.ref_name),
+                            Some(&created.path),
+                            None,
+                            thread_chat::commands::new_id(),
+                        ),
+                        Access::Operate,
+                    )
+                    .await;
+                if let Err(error) = moved {
+                    let remove = backend.call::<rpc::VcsRemoveWorktree>(
+                        VcsRemoveWorktreeInput {
+                            cwd: project_root,
+                            force: Some(true),
+                            path: created.path,
+                        },
+                        Access::SourceControlWrite,
+                    );
+                    if let Err(error) = remove.await {
+                        log::warn!(
+                            "couldn't remove the worktree the thread didn't move to: {error:#}"
+                        );
+                    }
+                    return Err(error.context("moving the thread"));
+                }
+                anyhow::Ok(format!(
+                    "Moved the thread to a new worktree on {}",
+                    created.ref_name
+                ))
+            }
+            .await;
+            this.update(cx, |this, cx| this.end_busy(result, cx)).ok();
         }));
     }
 
@@ -2275,24 +2533,60 @@ impl Render for GitActionDialog {
 enum BranchEntry {
     Ref(VcsRef),
     Create(String),
+    /// A new branch in a new worktree, which the thread moves to.
+    CreateInWorktree(String),
 }
 
-/// Picks a branch to switch the checkout to, or names a new one (T3's branch picker).
+/// Picks a branch to switch the checkout to, or names a new one (T3's branch picker). Picking
+/// a branch checked out in a worktree moves the thread there, and a thread in the project's
+/// checkout can move to a new worktree on a new branch ([`ThreadGit::select_ref`],
+/// [`ThreadGit::move_to_new_worktree`]).
 pub struct BranchPickerDelegate {
     git: Entity<ThreadGit>,
+    /// The thread's checkout when the picker opened.
+    checkout: Option<Checkout>,
     entries: Vec<BranchEntry>,
     selected: usize,
     error: Option<SharedString>,
 }
 
 impl BranchPickerDelegate {
-    pub fn new(git: Entity<ThreadGit>) -> Self {
+    pub fn new(git: Entity<ThreadGit>, cx: &App) -> Self {
+        let checkout = git.read(cx).checkout().cloned();
         Self {
             git,
+            checkout,
             entries: Vec::new(),
             selected: 0,
             error: None,
         }
+    }
+
+    /// Whether `entry` can be picked: not the branch the thread is on.
+    fn selectable(&self, entry: &BranchEntry) -> bool {
+        match entry {
+            BranchEntry::Ref(git_ref) => {
+                !git_ref.current
+                    && git_ref.worktree_path.as_deref()
+                        != self.checkout.as_ref().map(|checkout| checkout.cwd.as_str())
+            }
+            BranchEntry::Create(_) | BranchEntry::CreateInWorktree(_) => true,
+        }
+    }
+
+    /// What picking `git_ref` does besides switching branches, if it moves the thread.
+    fn moves_thread(&self, git_ref: &VcsRef) -> Option<&'static str> {
+        let checkout = self.checkout.as_ref()?;
+        let project_root = checkout.project_root.as_deref().unwrap_or(&checkout.cwd);
+        let target =
+            branch_selection_target(project_root, checkout.worktree_path.as_deref(), git_ref);
+        if target.worktree_path == checkout.worktree_path {
+            return None;
+        }
+        Some(match target.worktree_path {
+            Some(_) => "moves the thread to its worktree",
+            None => "moves the thread to the project's checkout",
+        })
     }
 
     /// Opens the picker over `workspace`.
@@ -2304,8 +2598,9 @@ impl BranchPickerDelegate {
     ) {
         git.update(cx, |git, cx| git.refresh(cx));
         workspace.toggle_modal(window, cx, |window, cx| {
-            Picker::uniform_list(Self::new(git), window, cx)
-                .initial_width(tokens::modal_width(rems(28.), window))
+            let delegate = Self::new(git, cx);
+            Picker::uniform_list(delegate, window, cx)
+                .initial_width(tokens::modal_width(rems(32.), window))
         });
     }
 }
@@ -2330,11 +2625,9 @@ impl PickerDelegate for BranchPickerDelegate {
     }
 
     fn can_select(&self, ix: usize, _: &mut Window, _: &mut Context<Picker<Self>>) -> bool {
-        match self.entries.get(ix) {
-            Some(BranchEntry::Ref(git_ref)) => !git_ref.current && git_ref.worktree_path.is_none(),
-            Some(BranchEntry::Create(_)) => true,
-            None => false,
-        }
+        self.entries
+            .get(ix)
+            .is_some_and(|entry| self.selectable(entry))
     }
 
     fn placeholder_text(&self, _: &mut Window, _: &mut App) -> Arc<str> {
@@ -2371,6 +2664,15 @@ impl PickerDelegate for BranchPickerDelegate {
                                 delegate
                                     .entries
                                     .push(BranchEntry::Create(query.to_string()));
+                                let local = delegate
+                                    .checkout
+                                    .as_ref()
+                                    .is_some_and(|checkout| checkout.worktree_path.is_none());
+                                if local {
+                                    delegate
+                                        .entries
+                                        .push(BranchEntry::CreateInWorktree(query.to_string()));
+                                }
                             }
                         }
                         Err(error) => {
@@ -2381,12 +2683,7 @@ impl PickerDelegate for BranchPickerDelegate {
                     delegate.selected = delegate
                         .entries
                         .iter()
-                        .position(|entry| match entry {
-                            BranchEntry::Ref(git_ref) => {
-                                !git_ref.current && git_ref.worktree_path.is_none()
-                            }
-                            BranchEntry::Create(_) => true,
-                        })
+                        .position(|entry| delegate.selectable(entry))
                         .unwrap_or(0);
                     cx.notify();
                 })
@@ -2395,17 +2692,25 @@ impl PickerDelegate for BranchPickerDelegate {
     }
 
     fn confirm(&mut self, _secondary: bool, _: &mut Window, cx: &mut Context<Picker<Self>>) {
-        match self.entries.get(self.selected).cloned() {
-            Some(BranchEntry::Ref(git_ref))
-                if !git_ref.current && git_ref.worktree_path.is_none() =>
-            {
-                let name = local_ref_name(&git_ref);
-                self.git.update(cx, |git, cx| git.switch_ref(name, cx));
+        let Some(entry) = self
+            .entries
+            .get(self.selected)
+            .cloned()
+            .filter(|entry| self.selectable(entry))
+        else {
+            return;
+        };
+        match entry {
+            BranchEntry::Ref(git_ref) => {
+                self.git.update(cx, |git, cx| git.select_ref(git_ref, cx));
             }
-            Some(BranchEntry::Create(name)) => {
+            BranchEntry::Create(name) => {
                 self.git.update(cx, |git, cx| git.create_ref(name, cx));
             }
-            _ => return,
+            BranchEntry::CreateInWorktree(name) => {
+                self.git
+                    .update(cx, |git, cx| git.move_to_new_worktree(name, cx));
+            }
         }
         cx.emit(DismissEvent);
     }
@@ -2424,10 +2729,10 @@ impl PickerDelegate for BranchPickerDelegate {
         let entry = self.entries.get(ix)?;
         let (icon, label, badge) = match entry {
             BranchEntry::Ref(git_ref) => {
-                let badge = if git_ref.current {
+                let kind = if git_ref.current {
                     Some("current")
                 } else if git_ref.worktree_path.is_some() {
-                    Some("in another worktree")
+                    Some("worktree")
                 } else if git_ref.is_default {
                     Some("default")
                 } else if git_ref.is_remote == Some(true) {
@@ -2435,11 +2740,20 @@ impl PickerDelegate for BranchPickerDelegate {
                 } else {
                     None
                 };
+                let badge = match (kind, self.moves_thread(git_ref)) {
+                    (Some(kind), Some(moves)) => Some(format!("{kind} · {moves}")),
+                    (kind, moves) => kind.or(moves).map(str::to_string),
+                };
                 (IconName::GitBranch, git_ref.name.clone(), badge)
             }
             BranchEntry::Create(name) => (IconName::Plus, format!("Create branch “{name}”"), None),
+            BranchEntry::CreateInWorktree(name) => (
+                IconName::GitBranchPlus,
+                format!("Create “{name}” in a new worktree"),
+                Some("moves the thread there".to_string()),
+            ),
         };
-        let muted = matches!(entry, BranchEntry::Ref(git_ref) if git_ref.current || git_ref.worktree_path.is_some());
+        let muted = !self.selectable(entry);
         Some(
             ListItem::new(ix)
                 .inset(true)
