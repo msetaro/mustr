@@ -56,6 +56,7 @@ pub use mentions::set_local_folders;
 mod worktree_setup;
 // WP12, composer and timeline:
 mod find_bar;
+pub use mentions::{context_reference_and_record, message_context_of};
 // WP13, thread list and navigation:
 mod snooze;
 pub use new_thread::{ToggleWorkspacePicker, UsePreviousWorktree};
@@ -111,6 +112,7 @@ pub fn init(cx: &mut App) {
     usage::init(cx);
     // WP11, terminals, worktrees and the PR flow:
     // WP12, composer and timeline:
+    mentions::init(cx);
     // WP13, thread list and navigation:
     snooze::init(cx);
     // WP14, agent setup and T3's settings:
@@ -146,7 +148,14 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-alt-k", SearchThreads, Some("Workspace")),
         KeyBinding::new("escape", menu::Cancel, Some("ThreadsSidebar > Editor")),
         // WP11, terminals, worktrees and the PR flow:
-        // WP12, composer and timeline:
+        // WP12, composer and timeline: T3's `mod+shift+v` pastes text as text, however big.
+        KeyBinding::new("secondary-shift-v", composer::PasteAsText, composer),
+        // Find in thread: Zed binds `mod+f` in full editors only, and the composer isn't one.
+        KeyBinding::new(
+            "secondary-f",
+            zed_actions::buffer_search::Deploy::find(),
+            Some("ThreadView"),
+        ),
         // WP13, thread list and navigation: T3's `mod+shift+[` and `]` (previous and next
         // thread, over Zed's tab switching and Fold in a thread), `mod+shift+x` (where a new
         // thread works), `mod+shift+l` (its previous worktree, over the composer's Select All
