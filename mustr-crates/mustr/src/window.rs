@@ -96,6 +96,9 @@ pub fn init(cx: &mut App) {
             log::info!("Using GPU: {specs:?}");
         }
         let center_pane = workspace.active_pane().clone();
+        // An empty center pane shows Zed's "Welcome to Zed" page, with Zed's onboarding.
+        // mustr's home is the Home tab, which the rail reopens.
+        center_pane.update(cx, |pane, _| pane.set_should_display_welcome_page(false));
         add_toolbar_items(workspace, &center_pane, window, cx);
         let workspace_handle = cx.entity();
 
