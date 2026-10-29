@@ -731,3 +731,34 @@ async fn scripts_run_in_a_new_terminal_on_t3s_machine(cx: &mut TestAppContext) {
     assert_eq!(backend.typed(), " npm test\r");
     assert_eq!(remote_terminals(&panel, cx).len(), 1);
 }
+
+/// The worktree setup card's Open terminal shows the terminal T3 runs the setup script in.
+#[gpui::test]
+async fn the_setup_scripts_terminal_opens_from_its_card(cx: &mut TestAppContext) {
+    let backend = TerminalBackend::new(json!([]));
+    let (_workspace, panel, cx) = panel_for(backend.clone(), cx).await;
+    let open = thread_chat::OpenSetupTerminal {
+        thread_id: "a".into(),
+        terminal_id: "setup-install".into(),
+        cwd: Some("/wt/a".into()),
+    };
+    cx.dispatch_action(open.clone());
+    cx.run_until_parked();
+    assert_eq!(
+        backend.attach_payloads(),
+        vec![json!({
+            "threadId": "a", "terminalId": "setup-install", "cwd": "/wt/a", "worktreePath": "/wt/a",
+            "env": { "T3CODE_PROJECT_ROOT": "/src/api", "T3CODE_WORKTREE_PATH": "/wt/a" },
+            "restartIfNotRunning": true
+        })]
+    );
+    backend.send(0, snapshot("setup-install", "pnpm install\r\n", "Install"));
+    cx.run_until_parked();
+    assert_eq!(remote_terminals(&panel, cx).len(), 1);
+
+    // Again, it shows the same tab.
+    cx.dispatch_action(open);
+    cx.run_until_parked();
+    assert_eq!(backend.attach_payloads().len(), 1);
+    assert_eq!(remote_terminals(&panel, cx).len(), 1);
+}

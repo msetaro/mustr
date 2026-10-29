@@ -15,6 +15,9 @@
 //!   finds it. Zed's own terminal panel loads asynchronously, which is why mustr doesn't use it.
 //!   Terminals start later, when a thread first wants one.
 //!
+//! [`OpenSetupTerminal`] (the worktree setup card's Open terminal) shows the terminal T3 runs a
+//! thread's setup script in: T3's own terminal, on whichever machine T3 runs.
+//!
 //! [`OpenThreadTerminal`] (the thread toolbar's Terminal button) opens a thread's terminals,
 //! [`ToggleThreadTerminal`] (`secondary-j`, as in T3, and Zed's `ctrl-\``) shows or hides the
 //! active thread's, and [`NewThreadTerminal`] adds one. [`AddTerminalSelectionToChat`] (the
@@ -50,8 +53,8 @@ use t3_client::t3_api::{
 };
 use terminal_view::TerminalView;
 use thread_chat::{
-    Access, AddComposerContext, ComposerContext, OpenThreadTerminal, ThreadBackendExt as _,
-    ThreadShells, ThreadView, actions::TerminalContext,
+    Access, AddComposerContext, ComposerContext, OpenSetupTerminal, OpenThreadTerminal,
+    ThreadBackendExt as _, ThreadShells, ThreadView, actions::TerminalContext,
 };
 use ui::{ContextMenu, Tooltip, prelude::*};
 use workspace::{
@@ -100,6 +103,9 @@ pub fn init(cx: &mut App) {
         });
         workspace.register_action(|workspace, _: &ToggleThreadTerminal, window, cx| {
             toggle_terminals(workspace, window, cx);
+        });
+        workspace.register_action(|workspace, action: &OpenSetupTerminal, window, cx| {
+            open_setup_terminal(workspace, action, window, cx);
         });
         workspace.register_action(|workspace, _: &NewThreadTerminal, window, cx| {
             open_terminals(workspace, None, window, cx);
@@ -163,6 +169,23 @@ fn open_terminals(
         panel.focus_on_start = !panel.has_terminals();
     });
     // Opening the dock calls `set_active`, which records that this thread's terminals show.
+    workspace.focus_panel::<ThreadTerminalPanel>(window, cx);
+}
+
+/// Shows the terminal T3 runs a thread's setup script in, attaching to it the first time.
+fn open_setup_terminal(
+    workspace: &mut Workspace,
+    action: &OpenSetupTerminal,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some(panel) = workspace.panel::<ThreadTerminalPanel>(cx) else {
+        return;
+    };
+    panel.update(cx, |panel, cx| {
+        panel.show_thread(action.thread_id.clone(), window, cx);
+        panel.show_t3_terminal(action, window, cx);
+    });
     workspace.focus_panel::<ThreadTerminalPanel>(window, cx);
 }
 
@@ -875,6 +898,90 @@ impl ThreadTerminalPanel {
                     terminals.error = Some(
                         format!("Couldn't start a terminal on T3's machine: {error:#}").into(),
                     );
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    /// Shows one of T3's terminals for the thread the panel shows, such as its setup script's:
+    /// the tab already showing it, or a new one attached to it.
+    fn show_t3_terminal(
+        &mut self,
+        action: &OpenSetupTerminal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let thread_id = action.thread_id.clone();
+        let shown = self.threads.get(&thread_id).and_then(|terminals| {
+            terminals
+                .terminals
+                .iter()
+                .position(|hosted| hosted.remote_id(cx) == Some(action.terminal_id.as_str()))
+        });
+        if let Some(index) = shown {
+            self.activate_terminal(index, window, cx);
+            return;
+        }
+        let project_root = match self.location(&thread_id, cx) {
+            TerminalLocation::Remote(folder) => folder.project_root,
+            TerminalLocation::Local(path) => path.to_string_lossy().to_string(),
+            _ => String::new(),
+        };
+        let project_root = self
+            .shells
+            .as_ref()
+            .and_then(|(shells, _)| {
+                let shell = shells.read(cx).shell()?;
+                let thread = shell.threads.get(&thread_id)?;
+                Some(
+                    shell
+                        .projects
+                        .get(&thread.project_id)?
+                        .workspace_root
+                        .clone(),
+                )
+            })
+            .unwrap_or(project_root);
+        let cwd = action.cwd.clone().unwrap_or_else(|| project_root.clone());
+        let launch = Launch {
+            thread_id: thread_id.clone(),
+            terminal_id: action.terminal_id.clone(),
+            worktree_path: action.cwd.clone(),
+            cwd,
+            project_root,
+        };
+        let size = self.grid_size(cx);
+        let open = RemoteTerminal::open(
+            launch,
+            size,
+            self.workspace.clone(),
+            &self.project,
+            window,
+            cx,
+        );
+        self.focus_on_start = true;
+        let terminals = self.threads.entry(thread_id.clone()).or_default();
+        terminals.error = None;
+        terminals.starting = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = open.await;
+            this.update_in(cx, |this, window, cx| {
+                match result {
+                    Ok(remote) => this.add_remote_terminal(&thread_id, remote, window, cx),
+                    Err(error) => {
+                        log::error!("couldn't show T3's setup terminal: {error:#}");
+                        if let Some(terminals) = this.threads.get_mut(&thread_id) {
+                            terminals.error = Some(
+                                format!("Couldn't show the setup script's terminal: {error:#}")
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+                if let Some(terminals) = this.threads.get_mut(&thread_id) {
+                    terminals.starting = None;
                 }
                 cx.notify();
             })

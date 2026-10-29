@@ -10,6 +10,13 @@
 //! - Cancel sends `worktreeSetup.cancel`. Retry sends `prepared-run.retry` for the run whose
 //!   preparation failed; T3's app offers it on that run's error row, and since T3 forgets a
 //!   setup 30 seconds after it ends, the card stays for such a run even without a snapshot.
+//! - Open terminal shows the terminal T3 runs the setup script in, once the script has started
+//!   ([`OpenSetupTerminal`], which the terminal panel handles).
+//! - Work locally, while a thread's first run waits for its worktree, gives up on the worktree
+//!   and sends the message again in the project's checkout, as T3's does: it cancels the setup
+//!   (`worktreeSetup.cancel`, after which T3 removes the worktree and moves the thread back to
+//!   the checkout), waits until the thread has no worktree, then sends the message's text again
+//!   (`message.dispatch`).
 //! - Debug builds can play setup snapshots from a file into every thread's card
 //!   (`MUSTR_DEBUG_WORKTREE_SETUP=<snapshots.json>`, a snapshot or a list played two seconds
 //!   apart), to look at the card without launching a thread, which would start an agent.
@@ -17,15 +24,20 @@
 use crate::{
     backend::{Access, ThreadBackend, ThreadBackendExt as _, is_unsupported_rpc},
     commands,
+    model::{ItemKind, ThreadState},
+    shell::ThreadShells,
     thread_view::{CONTENT_MAX_WIDTH, ThreadView},
 };
 use futures::StreamExt as _;
+use gpui::Action;
 use gpui::{
     AnyElement, App, Context, FontWeight, Hsla, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled as _,
     Subscription, Task, WeakEntity, Window, div, px,
 };
 use mustr_ui::{Card, TextButton, palette, tokens, tokens::scaled};
+use schemars::JsonSchema;
+use serde::Deserialize;
 use std::{sync::Arc, time::Duration};
 use t3_api::{
     rpc,
@@ -39,6 +51,66 @@ use t3_api::{
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use ui::{Color, Icon, IconName, IconSize, Label, LabelCommon as _, LabelSize, prelude::*};
+
+/// Shows the terminal T3 runs a thread's setup script in. Handled by the terminal panel
+/// (`mustr/src/terminal_panel.rs`).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Action)]
+#[action(namespace = thread_chat)]
+#[serde(deny_unknown_fields)]
+pub struct OpenSetupTerminal {
+    pub thread_id: String,
+    /// T3's id for it (`setup-<script>`).
+    pub terminal_id: String,
+    /// The worktree it runs in.
+    #[serde(default)]
+    pub cwd: Option<String>,
+}
+
+/// How long Work locally waits for T3 to move the thread back to its project's checkout.
+const WORK_LOCALLY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// A message Work locally sends again, once the thread is back in its project's checkout.
+#[derive(Clone, Debug, PartialEq)]
+struct Resend {
+    run_id: String,
+    text: String,
+}
+
+/// The thread's first run, while T3 prepares its worktree, and the text of the message that
+/// started it: what Work locally sends again. Only a thread's first run moves to the checkout,
+/// as T3 offers it only for a thread just sent from a draft.
+fn first_run_message(state: &ThreadState) -> Option<Resend> {
+    let run = state.latest_executed_run()?;
+    if run.status != OrchestrationV2RunStatus::Preparing
+        || state.runs().iter().any(|other| other.ordinal < run.ordinal)
+    {
+        return None;
+    }
+    let text = state.items().iter().find_map(|item| match &item.kind {
+        ItemKind::UserMessage { text, .. } if item.run_id.as_deref() == Some(run.id.as_str()) => {
+            Some(text.clone())
+        }
+        _ => None,
+    })?;
+    (!text.trim().is_empty()).then(|| Resend {
+        run_id: run.id.clone(),
+        text,
+    })
+}
+
+/// Whether Work locally can send its message again: the run gave up on its worktree, and T3's
+/// shell has the thread in its project's checkout (`worktree` is the shell's `worktreePath`,
+/// `None` while the shell doesn't list the thread).
+fn back_in_checkout(
+    resend: &Resend,
+    state: Option<&ThreadState>,
+    worktree: Option<Option<&str>>,
+) -> bool {
+    let run_settled = state
+        .and_then(|state| state.run_by_id(&resend.run_id))
+        .is_some_and(|run| run.status != OrchestrationV2RunStatus::Preparing);
+    run_settled && matches!(worktree, Some(None) | Some(Some("")))
+}
 
 /// The most of the window's height the card takes.
 const MAX_HEIGHT_SHARE: f32 = 0.3;
@@ -58,6 +130,11 @@ pub struct WorktreeSetupCard {
     /// A Cancel or Retry on its way.
     sending: bool,
     error: Option<SharedString>,
+    /// What Work locally can send again, while the thread's first run waits for its worktree.
+    first_message: Option<Resend>,
+    /// The message Work locally sends again once T3 has moved the thread to its checkout.
+    resend: Option<Resend>,
+    _resend_timeout: Option<Task<()>>,
     _follow: Option<Task<()>>,
     /// Redraws the elapsed times each second while the setup runs.
     _tick: Option<Task<()>>,
@@ -75,6 +152,9 @@ impl WorktreeSetupCard {
             if let Some(view) = this.thread_view.upgrade() {
                 this._subscriptions
                     .push(cx.observe(&view, |this, _, cx| this.refresh(cx)));
+                let shells = ThreadShells::global(cx);
+                this._subscriptions
+                    .push(cx.observe(&shells, |this, _, cx| this.refresh(cx)));
                 this.refresh(cx);
             }
         });
@@ -87,6 +167,9 @@ impl WorktreeSetupCard {
             show_details: false,
             sending: false,
             error: None,
+            first_message: None,
+            resend: None,
+            _resend_timeout: None,
             _follow: None,
             _tick: None,
             _subscriptions: Vec::new(),
@@ -98,6 +181,7 @@ impl WorktreeSetupCard {
         let Some(view) = self.thread_view.upgrade() else {
             return;
         };
+        let shells = ThreadShells::global(cx);
         let view = view.read(cx);
         let backend = view.backend.clone();
         let thread_id = view.thread_id().map(str::to_string);
@@ -107,6 +191,23 @@ impl WorktreeSetupCard {
         let preparing =
             latest_run.is_some_and(|run| run.status == OrchestrationV2RunStatus::Preparing);
         let failed_run = latest_run.and_then(failed_preparation).map(str::to_string);
+        let first_message = view.thread_state().and_then(first_run_message);
+        // Work locally's message goes again once the run gave up on its worktree and T3 moved
+        // the thread back to its project's checkout.
+        let back_in_checkout = self.resend.as_ref().is_some_and(|resend| {
+            let worktree = thread_id
+                .as_deref()
+                .and_then(|thread_id| shells.read(cx).thread(thread_id))
+                .map(|thread| thread.worktree_path.as_deref());
+            back_in_checkout(resend, view.thread_state(), worktree)
+        });
+        if first_message != self.first_message {
+            self.first_message = first_message;
+            cx.notify();
+        }
+        if back_in_checkout && let Some(thread_id) = thread_id.clone() {
+            self.send_again(backend.clone(), thread_id, cx);
+        }
         if thread_id != self.thread_id {
             self.thread_id = thread_id;
             self.following = false;
@@ -258,6 +359,110 @@ impl WorktreeSetupCard {
         cx.notify();
     }
 
+    /// Work locally: cancels the setup, then sends the first message again in the project's
+    /// checkout once T3 has moved the thread there.
+    pub(crate) fn work_locally(&mut self, cx: &mut Context<Self>) {
+        let (Some(backend), Some(thread_id), Some(message)) = (
+            self.backend(cx),
+            self.thread_id.clone(),
+            self.first_message.clone(),
+        ) else {
+            return;
+        };
+        self.sending = true;
+        self.error = None;
+        let call = backend.call::<rpc::WorktreeSetupCancel>(
+            WorktreeSetupCancelInput { thread_id },
+            Access::Operate,
+        );
+        cx.spawn(async move |this, cx| {
+            let result = call.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(result) if result.cancelled => {
+                        this.resend = Some(message);
+                        this._resend_timeout = Some(cx.spawn(async move |this, cx| {
+                            cx.background_executor().timer(WORK_LOCALLY_TIMEOUT).await;
+                            this.update(cx, |this, cx| {
+                                if this.resend.take().is_some() {
+                                    this.sending = false;
+                                    this.error = Some(
+                                        "T3 cancelled the setup but didn't move the thread to \
+                                         its project's checkout. Send the message again there."
+                                            .into(),
+                                    );
+                                    cx.notify();
+                                }
+                            })
+                            .ok();
+                        }));
+                        this.refresh(cx);
+                    }
+                    Ok(_) => {
+                        this.sending = false;
+                        this.error =
+                            Some("The setup is past the point where it can be cancelled.".into());
+                    }
+                    Err(error) => {
+                        this.sending = false;
+                        this.error = Some(format!("Couldn't cancel the setup: {error:#}").into());
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn send_again(
+        &mut self,
+        backend: Arc<dyn ThreadBackend>,
+        thread_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(resend) = self.resend.take() else {
+            return;
+        };
+        self._resend_timeout = None;
+        let dispatch = backend.dispatch(commands::send_message(
+            &thread_id,
+            &resend.text,
+            commands::Delivery::Auto,
+            commands::CommandIds::new(),
+        ));
+        cx.spawn(async move |this, cx| {
+            let result = dispatch.await;
+            this.update(cx, |this, cx| {
+                this.sending = false;
+                if let Err(error) = result {
+                    this.error = Some(format!("Couldn't send the message again: {error:#}").into());
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn open_terminal(&self, window: &mut Window, cx: &mut App) {
+        let (Some(thread_id), Some(setup)) = (self.thread_id.clone(), self.setup.as_ref()) else {
+            return;
+        };
+        let Some(script) = &setup.setup_script else {
+            return;
+        };
+        window.dispatch_action(
+            Box::new(OpenSetupTerminal {
+                thread_id,
+                terminal_id: script.terminal_id.clone(),
+                cwd: setup.worktree_path.clone(),
+            }),
+            cx,
+        );
+    }
+
     fn retry(&mut self, cx: &mut Context<Self>) {
         let (Some(backend), Some(thread_id), Some(run_id)) = (
             self.backend(cx),
@@ -317,6 +522,8 @@ impl WorktreeSetupCard {
         });
         let blocked = self.write_blocked(cx);
         let running = setup.is_some_and(|setup| setup.phase == WorktreeSetupPhase::Running);
+        let has_terminal = setup.is_some_and(setup_terminal_started);
+        let can_work_locally = running && self.first_message.is_some();
         let header = h_flex()
             .flex_none()
             .gap_2()
@@ -408,6 +615,27 @@ impl WorktreeSetupCard {
                         .disabled(self.sending || blocked.is_some())
                         .when_some(blocked.clone(), |button, reason| button.tooltip(reason))
                         .on_click(cx.listener(|this, _, _, cx| this.retry(cx))),
+                )
+            })
+            .when(has_terminal, |this| {
+                this.child(
+                    TextButton::new("worktree-setup-terminal", "Open terminal")
+                        .tooltip("Show the terminal T3 runs the setup script in")
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.open_terminal(window, cx)),
+                        ),
+                )
+            })
+            .when(can_work_locally, |this| {
+                this.child(
+                    TextButton::new("worktree-setup-work-locally", "Work locally")
+                        .disabled(self.sending || blocked.is_some())
+                        .tooltip(blocked.clone().unwrap_or_else(|| {
+                            "Skip the worktree: cancel its setup and send the message again in \
+                             the project's checkout"
+                                .to_string()
+                        }))
+                        .on_click(cx.listener(|this, _, _, cx| this.work_locally(cx))),
                 )
             })
             .when(running, |this| {
@@ -517,6 +745,16 @@ fn debug_snapshots() -> Option<Vec<Option<WorktreeSetupSnapshot>>> {
         .collect::<Result<_, _>>()
         .inspect_err(|error| log::error!("{} isn't worktree setups: {error}", path.display()))
         .ok()
+}
+
+/// Whether the setup script's terminal is worth opening: T3 named it, and the script has started
+/// (T3's `WorktreeSetupCard.tsx`).
+pub(crate) fn setup_terminal_started(setup: &WorktreeSetupSnapshot) -> bool {
+    setup.setup_script.is_some()
+        && setup.stages.iter().any(|stage| {
+            stage.id == WorktreeSetupStageId::SetupScript
+                && stage.status != WorktreeSetupStageStatus::Pending
+        })
 }
 
 /// `prepared-run.retry`, as T3's app sends it from a failed preparation's error row.

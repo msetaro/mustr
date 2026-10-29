@@ -54,6 +54,7 @@ mod slash_commands;
 pub use mentions::set_local_folders;
 // WP11, terminals, worktrees and the PR flow:
 mod worktree_setup;
+pub use worktree_setup::OpenSetupTerminal;
 // WP12, composer and timeline:
 mod find_bar;
 pub use mentions::{context_reference_and_record, message_context_of};
