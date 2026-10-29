@@ -1589,7 +1589,8 @@ fn show_archived_threads(
             blocked: blocked_reason(cx),
             _load: Task::ready(()),
         };
-        let mut picker = Picker::uniform_list(delegate, window, cx).initial_width(rems(34.));
+        let mut picker = Picker::uniform_list(delegate, window, cx)
+            .initial_width(mustr_ui::tokens::modal_width(rems(34.), window));
         let load = backend.call::<t3_api::rpc::OrchestrationGetArchivedShellSnapshot>(
             t3_api::types::OrchestrationGetArchivedShellSnapshotPayload(Default::default()),
             Access::Read,
