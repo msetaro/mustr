@@ -66,6 +66,8 @@ pub use organize::{
 pub use sidebar::{NextThread, PreviousThread, RowPullRequest};
 pub use snooze::SnoozeThread;
 // WP14, agent setup and T3's settings:
+// WP15, timeline and composer:
+mod file_links;
 
 #[cfg(test)]
 mod tests;

@@ -739,19 +739,33 @@ impl ThreadView {
             .into_any_element()
     }
 
-    fn render_markdown(&self, id: &str, muted: bool, window: &Window, cx: &App) -> AnyElement {
-        match self.markdown.get(id) {
-            Some(markdown) => MarkdownElement::new(
-                markdown.clone(),
-                if muted {
-                    muted_markdown_style(window, cx)
-                } else {
-                    markdown_style(window, cx)
-                },
-            )
-            .into_any_element(),
-            None => div().into_any_element(),
-        }
+    /// An item's Markdown. Its links open as T3's do (`file_links.rs`): files in mustr's
+    /// editor, pages in the browser, and paths in inline code become links to their files.
+    fn render_markdown(
+        &self,
+        id: &str,
+        muted: bool,
+        window: &Window,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let Some(markdown) = self.markdown.get(id) else {
+            return div().into_any_element();
+        };
+        let view = cx.weak_entity();
+        MarkdownElement::new(
+            markdown.clone(),
+            if muted {
+                muted_markdown_style(window, cx)
+            } else {
+                markdown_style(window, cx)
+            },
+        )
+        .on_url_click(move |url, window, cx| {
+            view.update(cx, |view, cx| view.open_link(&url, window, cx))
+                .ok();
+        })
+        .on_code_span_link(|code, _| crate::file_links::inline_code_link(code).map(Into::into))
+        .into_any_element()
     }
 
     fn render_item(

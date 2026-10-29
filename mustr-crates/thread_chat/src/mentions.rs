@@ -282,7 +282,7 @@ pub(crate) fn file_link(path: &str) -> String {
 }
 
 /// Undoes [`file_link`]'s encoding.
-fn percent_decode(text: &str) -> Option<String> {
+pub(crate) fn percent_decode(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -1465,7 +1465,7 @@ impl RenderOnce for MentionChip {
 
 impl ThreadView {
     /// The folder `@` searches: the thread's, or a draft's project's.
-    fn mention_folder(&self, cx: &mut Context<Self>) -> Folder {
+    pub(crate) fn mention_folder(&self, cx: &mut Context<Self>) -> Folder {
         let local = folders_are_local(cx);
         if let Some(form) = &self.new_thread {
             let Ok(new_thread) = form.read(cx).new_thread("@", cx) else {
