@@ -15,6 +15,8 @@
 //! until T3's shell catches up. The search finds threads by title, branch, project or pull
 //! request at once, then threads whose messages match, from `orchestration.searchThreads`.
 //! [`PreviousThread`] and [`NextThread`] move through the threads in the order they show.
+//! Mod-click and shift-click select rows, as in T3, and right-clicking one of them, or the
+//! selection's "…", acts on them all (`bulk.rs`).
 
 use crate::{
     backend::{Access, ThreadBackendExt as _},
@@ -1153,6 +1155,10 @@ pub struct ThreadsSidebar {
     generation: usize,
     /// The last drop check: for (generation, dragged thread, row), whether it can drop there.
     drop_check: RefCell<Option<(usize, String, usize, bool)>>,
+    /// The rows selected with mod-click and shift-click, for acting on them all (`bulk.rs`), and
+    /// the row a shift-click selects from (T3's `threadSelectionStore.ts`).
+    selected: HashSet<String>,
+    anchor: Option<String>,
     _subscriptions: Vec<Subscription>,
     _clock: Task<()>,
 }
@@ -1177,7 +1183,11 @@ impl ThreadsSidebar {
                 this.rebuild(cx);
                 this.visit_active(cx);
             }),
-            cx.observe_global::<ThreadListFilter>(|this, cx| this.rebuild(cx)),
+            cx.observe_global::<ThreadListFilter>(|this, cx| {
+                // A selection made in one project can hold threads another hides, as in T3.
+                this.clear_selection(cx);
+                this.rebuild(cx);
+            }),
             cx.subscribe(&search, |this, search, event: &EditorEvent, cx| {
                 if let EditorEvent::BufferEdited = event {
                     this.query = search.read(cx).text(cx);
@@ -1220,6 +1230,8 @@ impl ThreadsSidebar {
             pending_drop: None,
             generation: 0,
             drop_check: RefCell::new(None),
+            selected: HashSet::default(),
+            anchor: None,
             _subscriptions: subscriptions,
             _clock: clock,
         };
@@ -1229,8 +1241,12 @@ impl ThreadsSidebar {
 
     /// The thread before or after `current` in the order the sidebar shows them.
     fn adjacent(&self, current: Option<&str>, direction: Direction) -> Option<&ThreadEntry> {
-        let order = self
-            .items
+        adjacent_in(&self.shown_threads(), current, direction)
+    }
+
+    /// The threads the sidebar shows, in order.
+    fn shown_threads(&self) -> Vec<&ThreadEntry> {
+        self.items
             .iter()
             .filter_map(|item| match item {
                 Item::Thread(section, index) | Item::Found(section, index) => {
@@ -1241,8 +1257,71 @@ impl ThreadsSidebar {
                 }
                 _ => None,
             })
-            .collect::<Vec<_>>();
-        adjacent_in(&order, current, direction)
+            .collect()
+    }
+
+    /// The selected rows, in the order the sidebar shows them.
+    pub(crate) fn selected_threads(&self) -> Vec<ThreadEntry> {
+        let mut seen = HashSet::default();
+        self.shown_threads()
+            .into_iter()
+            .filter(|thread| self.selected.contains(&thread.id) && seen.insert(thread.id.clone()))
+            .cloned()
+            .collect()
+    }
+
+    /// A click on a row (`handleThreadClick` in T3's sidebar): mod-click adds it to the selection
+    /// or takes it out, shift-click selects the rows from the last one clicked, and a plain click
+    /// opens the thread and clears the selection.
+    pub(crate) fn click_row(
+        &mut self,
+        thread: &ThreadEntry,
+        modifiers: gpui::Modifiers,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if modifiers.secondary() {
+            if !self.selected.remove(&thread.id) {
+                self.selected.insert(thread.id.clone());
+                self.anchor = Some(thread.id.clone());
+            }
+            cx.notify();
+            return;
+        }
+        if modifiers.shift {
+            let order = self
+                .shown_threads()
+                .into_iter()
+                .map(|thread| thread.id.clone())
+                .collect::<Vec<_>>();
+            let target = order.iter().position(|id| *id == thread.id);
+            let anchor = self
+                .anchor
+                .as_ref()
+                .and_then(|anchor| order.iter().position(|id| id == anchor));
+            match (anchor, target) {
+                (Some(anchor), Some(target)) => {
+                    let range = anchor.min(target)..=anchor.max(target);
+                    self.selected.extend(order[range].iter().cloned());
+                }
+                _ => {
+                    self.selected.insert(thread.id.clone());
+                    self.anchor = Some(thread.id.clone());
+                }
+            }
+            cx.notify();
+            return;
+        }
+        self.clear_selection(cx);
+        self.anchor = Some(thread.id.clone());
+        self.open(thread, window, cx);
+    }
+
+    pub(crate) fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        if !self.selected.is_empty() {
+            self.selected.clear();
+            cx.notify();
+        }
     }
 
     /// Asks T3 for the threads whose messages match the search, once the user stops typing for
@@ -1739,6 +1818,8 @@ impl ThreadsSidebar {
         }
         self.items = items;
         self.keys = keys;
+        let list = &self.list;
+        self.selected.retain(|id| list.find(id).is_some());
         cx.notify();
     }
 
@@ -1878,13 +1959,29 @@ impl ThreadsSidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let menu = organize::thread_menu(
-            thread,
-            self.workspace.clone(),
-            self.focus_handle.clone(),
-            window,
-            cx,
-        );
+        let menu = if self.selected.contains(&thread.id) {
+            let sidebar = cx.entity().downgrade();
+            crate::bulk::bulk_menu(
+                self.selected_threads(),
+                self.workspace.clone(),
+                self.focus_handle.clone(),
+                std::rc::Rc::new(move |cx| {
+                    sidebar
+                        .update(cx, |sidebar, cx| sidebar.clear_selection(cx))
+                        .ok();
+                }),
+                window,
+                cx,
+            )
+        } else {
+            organize::thread_menu(
+                thread,
+                self.workspace.clone(),
+                self.focus_handle.clone(),
+                window,
+                cx,
+            )
+        };
         window.focus(&menu.focus_handle(cx), cx);
         let subscription = cx.subscribe(&menu, |this, _, _: &DismissEvent, cx| {
             this.context_menu.take();
@@ -1901,7 +1998,16 @@ impl ThreadsSidebar {
         window.defer(cx, move |window, cx| window.focus(&focus, cx));
     }
 
-    fn clear_search(&mut self, _: &menu::Cancel, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn clear_search(
+        &mut self,
+        _: &menu::Cancel,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.selected.is_empty() {
+            self.clear_selection(cx);
+            return;
+        }
         if self.query.is_empty() {
             return;
         }
@@ -2050,6 +2156,7 @@ impl ThreadsSidebar {
     ) -> AnyElement {
         let palette = palette(cx);
         let active = self.active_thread_id.as_deref() == Some(thread.id.as_str());
+        let selected = self.selected.contains(&thread.id);
         let settled = thread.section == Section::Settled;
         let dot = match thread.status {
             Some(status) => status.color(cx),
@@ -2108,7 +2215,13 @@ impl ThreadsSidebar {
             .py_1()
             .rounded(scaled(tokens::CONTROL_RADIUS))
             .cursor_pointer()
+            .border_1()
+            .border_color(gpui::transparent_black())
             .when(active, |this| this.bg(palette.accent_soft.hsla()))
+            .when(selected, |this| {
+                this.bg(palette.accent.hsla().opacity(0.14))
+                    .border_color(palette.accent.hsla().opacity(0.6))
+            })
             .hover(|style| style.bg(palette.surface_2.hsla()))
             .when_some(dragged, |this, dragged| {
                 this.on_drag(dragged, move |dragged, _, _, cx| {
@@ -2127,91 +2240,162 @@ impl ThreadsSidebar {
         } else {
             self.drop_zone(row, index, cx)
         };
-        row.on_click(cx.listener(move |this, _, window, cx| this.open(&open_thread, window, cx)))
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    cx.stop_propagation();
-                    this.deploy_context_menu(event.position, menu_thread.clone(), window, cx)
-                }),
-            )
-            .child(
-                v_flex()
-                    .min_w_0()
-                    .child(
-                        h_flex()
-                            .gap_1p5()
-                            .child(Indicator::dot().color(Color::Custom(dot)))
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    Label::new(thread.title.clone())
-                                        .size(LabelSize::Small)
-                                        .when(thread.unread, |label| {
-                                            label.weight(FontWeight::SEMIBOLD)
-                                        })
-                                        .when(settled && !active, |label| label.color(Color::Muted))
-                                        .truncate(),
+        row.on_click(
+            cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                this.click_row(&open_thread, event.modifiers(), window, cx)
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                this.deploy_context_menu(event.position, menu_thread.clone(), window, cx)
+            }),
+        )
+        .child(
+            v_flex()
+                .min_w_0()
+                .child(
+                    h_flex()
+                        .gap_1p5()
+                        .map(|this| {
+                            if selected {
+                                this.child(
+                                    Icon::new(IconName::Check)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Accent),
+                                )
+                            } else {
+                                this.child(Indicator::dot().color(Color::Custom(dot)))
+                            }
+                        })
+                        .child(
+                            div().flex_1().min_w_0().child(
+                                Label::new(thread.title.clone())
+                                    .size(LabelSize::Small)
+                                    .when(thread.unread, |label| label.weight(FontWeight::SEMIBOLD))
+                                    .when(settled && !active, |label| label.color(Color::Muted))
+                                    .truncate(),
+                            ),
+                        )
+                        .when(can_write, |this| {
+                            this.child(
+                                div().visible_on_hover(group.clone()).child(
+                                    IconButton::new(
+                                        ("settle", index),
+                                        if settled {
+                                            IconName::Undo
+                                        } else {
+                                            IconName::Check
+                                        },
+                                    )
+                                    .icon_size(IconSize::XSmall)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(move |_, cx| {
+                                        if settled {
+                                            Tooltip::simple("Un-settle", cx)
+                                        } else {
+                                            Tooltip::for_action("Settle", &SettleThread, cx)
+                                        }
+                                    })
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            this.settle_or_unsettle(&action_thread, window, cx)
+                                        },
+                                    )),
                                 ),
                             )
-                            .when(can_write, |this| {
-                                this.child(
-                                    div().visible_on_hover(group.clone()).child(
-                                        IconButton::new(
-                                            ("settle", index),
-                                            if settled {
-                                                IconName::Undo
-                                            } else {
-                                                IconName::Check
-                                            },
-                                        )
-                                        .icon_size(IconSize::XSmall)
-                                        .icon_color(Color::Muted)
-                                        .tooltip(move |_, cx| {
-                                            if settled {
-                                                Tooltip::simple("Un-settle", cx)
-                                            } else {
-                                                Tooltip::for_action("Settle", &SettleThread, cx)
-                                            }
-                                        })
-                                        .on_click(
-                                            cx.listener(move |this, _, window, cx| {
-                                                this.settle_or_unsettle(&action_thread, window, cx)
-                                            }),
-                                        ),
+                        }),
+                )
+                .child(
+                    h_flex()
+                        .gap_1p5()
+                        .pl(scaled(px(12.)))
+                        .child(div().flex_1().min_w_0().child(details_line))
+                        .when_some(pull_request, |this, pull_request| {
+                            this.child(pull_request_chip(index, &pull_request, cx))
+                        })
+                        .when_some(snoozed, |this, until| {
+                            this.child(
+                                h_flex()
+                                    .gap_0p5()
+                                    .child(
+                                        Icon::new(IconName::Clock)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(
+                                        Label::new(until)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
                                     ),
-                                )
-                            }),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1p5()
-                            .pl(scaled(px(12.)))
-                            .child(div().flex_1().min_w_0().child(details_line))
-                            .when_some(pull_request, |this, pull_request| {
-                                this.child(pull_request_chip(index, &pull_request, cx))
-                            })
-                            .when_some(snoozed, |this, until| {
-                                this.child(
-                                    h_flex()
-                                        .gap_0p5()
-                                        .child(
-                                            Icon::new(IconName::Clock)
-                                                .size(IconSize::XSmall)
-                                                .color(Color::Muted),
-                                        )
-                                        .child(
-                                            Label::new(until)
-                                                .size(LabelSize::XSmall)
-                                                .color(Color::Muted),
-                                        ),
-                                )
-                            })
-                            .when_some(thread.status, |this, status| {
-                                this.child(Pill::tinted(status.label(), status.color(cx)))
-                            }),
+                            )
+                        })
+                        .when_some(thread.status, |this, status| {
+                            this.child(Pill::tinted(status.label(), status.color(cx)))
+                        }),
+                ),
+        )
+        .into_any_element()
+    }
+
+    /// While rows are selected: how many, the actions for them all, and Clear.
+    fn render_selection_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.selected.is_empty() {
+            return None;
+        }
+        let threads = self.selected_threads();
+        let workspace = self.workspace.clone();
+        let focus = self.focus_handle.clone();
+        let sidebar = cx.entity().downgrade();
+        Some(
+            h_flex()
+                .flex_none()
+                .mx_2()
+                .mb_1()
+                .pl_2()
+                .gap_1()
+                .rounded(scaled(tokens::CONTROL_RADIUS))
+                .bg(palette(cx).accent.hsla().opacity(0.14))
+                .child(
+                    div().flex_1().min_w_0().child(
+                        Label::new(format!("{} selected", threads.len()))
+                            .size(LabelSize::XSmall)
+                            .truncate(),
                     ),
-            )
-            .into_any_element()
+                )
+                .child(
+                    PopoverMenu::new("thread-selection-actions")
+                        .trigger_with_tooltip(
+                            IconButton::new("thread-selection-actions-button", IconName::Ellipsis)
+                                .icon_size(IconSize::Small),
+                            Tooltip::text("Actions for the selected threads"),
+                        )
+                        .anchor(gpui::Anchor::TopRight)
+                        .menu(move |window, cx| {
+                            let sidebar = sidebar.clone();
+                            Some(crate::bulk::bulk_menu(
+                                threads.clone(),
+                                workspace.clone(),
+                                focus.clone(),
+                                std::rc::Rc::new(move |cx| {
+                                    sidebar
+                                        .update(cx, |sidebar, cx| sidebar.clear_selection(cx))
+                                        .ok();
+                                }),
+                                window,
+                                cx,
+                            ))
+                        }),
+                )
+                .child(
+                    Button::new("thread-selection-clear", "Clear")
+                        .style(ButtonStyle::Subtle)
+                        .label_size(LabelSize::XSmall)
+                        .on_click(cx.listener(|this, _, _, cx| this.clear_selection(cx))),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_project_filter(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2432,6 +2616,7 @@ impl Render for ThreadsSidebar {
                     )
                     .child(div().flex_1().min_w_0().child(self.search.clone())),
             )
+            .children(self.render_selection_bar(cx))
             .when_some(filtered_project, |this, project| {
                 this.child(
                     h_flex().flex_none().px_2().pb_1().child(

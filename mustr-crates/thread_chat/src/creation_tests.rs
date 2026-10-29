@@ -180,6 +180,11 @@ impl Recorder {
         Arc::new(recorder)
     }
 
+    /// Puts `threads` in the shell, before it's followed.
+    pub(crate) fn set_threads(&self, threads: Vec<Value>) {
+        self.shell.lock()["threads"] = Value::Array(threads);
+    }
+
     pub(crate) fn respond(&self, tag: &str, response: Value) {
         self.responses.lock().insert(tag.into(), response);
     }

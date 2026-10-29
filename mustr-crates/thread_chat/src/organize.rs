@@ -1461,22 +1461,39 @@ pub(crate) fn thread_menu(
         if let Some(pull_request) = &thread.pull_request {
             menu = menu.item(copy("Copy PR Link", pull_request.url.clone()));
         }
-        menu.separator().item({
-            let (workspace, focus) = (workspace.clone(), remove_focus);
-            entry("Archive Thread", IconName::Archive)
-                .disabled(!can_write || thread.running)
-                .handler(move |window, cx| {
-                    let open_view = open_view_of(&workspace, &id, cx);
-                    archive_thread(
-                        id.clone(),
-                        open_view,
-                        focus.clone(),
-                        workspace.clone(),
-                        window,
-                        cx,
-                    );
-                })
-        })
+        let delete_id = id.clone();
+        menu.separator()
+            .item({
+                let (workspace, focus) = (workspace.clone(), remove_focus.clone());
+                entry("Archive Thread", IconName::Archive)
+                    .disabled(!can_write || thread.running)
+                    .handler(move |window, cx| {
+                        let open_view = open_view_of(&workspace, &id, cx);
+                        archive_thread(
+                            id.clone(),
+                            open_view,
+                            focus.clone(),
+                            workspace.clone(),
+                            window,
+                            cx,
+                        );
+                    })
+            })
+            .item({
+                // WP17: T3's Delete, after asking (`bulk.rs`).
+                let (workspace, focus) = (workspace.clone(), remove_focus.clone());
+                entry("Delete Thread…", IconName::Trash)
+                    .disabled(!can_write || thread.running)
+                    .handler(move |window, cx| {
+                        crate::bulk::delete_threads(
+                            vec![delete_id.clone()],
+                            focus.clone(),
+                            workspace.clone(),
+                            window,
+                            cx,
+                        );
+                    })
+            })
     })
 }
 
