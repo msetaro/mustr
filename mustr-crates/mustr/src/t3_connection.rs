@@ -6,9 +6,9 @@
 //! mustr asks for exactly [`SCOPES`]: reading orchestration (pull requests, threads), driving
 //! agents (messages, approvals, new threads), writing to pull requests (comments, reviews,
 //! viewed marks), reading files on T3's machine (the composer's `@`, for a thread whose folder
-//! isn't on this one), following and driving T3's terminals, changing T3's settings, and
-//! installing and signing in to agents. A stored token that lacks one of them is replaced by
-//! pairing again.
+//! isn't on this one), following and driving T3's terminals, changing T3's settings,
+//! installing and signing in to agents, and reading T3's usage summary. A stored token that lacks
+//! one of them is replaced by pairing again.
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use futures::{AsyncReadExt as _, FutureExt as _, future::BoxFuture};
@@ -50,7 +50,7 @@ pub const SERVER_URL_ENV: &str = "MUSTR_T3_SERVER";
 pub const CREDENTIALS_FILE_ENV: &str = "MUSTR_CREDENTIALS_FILE";
 
 /// The scopes mustr asks T3 for. Never `access:*` or `relay:*`.
-pub const SCOPES: [Scope; 8] = [
+pub const SCOPES: [Scope; 9] = [
     Scope::OrchestrationRead,
     Scope::OrchestrationOperate,
     Scope::SourceControlWrite,
@@ -59,6 +59,7 @@ pub const SCOPES: [Scope; 8] = [
     Scope::TerminalOperate,
     Scope::SettingsWrite,
     Scope::ProvidersManage,
+    Scope::DiagnosticsRead,
 ];
 const PAIRING_LABEL: &str = "mustr";
 const PAIRING_TTL: &str = "5m";
@@ -1930,7 +1931,8 @@ mod tests {
                 "terminal:read",
                 "terminal:operate",
                 "settings:write",
-                "providers:manage"
+                "providers:manage",
+                "diagnostics:read"
             ]
         );
         assert_eq!(
@@ -1938,7 +1940,7 @@ mod tests {
             "t3 auth pairing create --scope orchestration:read --scope orchestration:operate \
              --scope source-control:write --scope filesystem:read --scope terminal:read \
              --scope terminal:operate --scope settings:write --scope providers:manage \
-             --label mustr"
+             --scope diagnostics:read --label mustr"
         );
         assert_eq!(
             missing_scopes("orchestration:read".split_whitespace()),
@@ -1949,11 +1951,13 @@ mod tests {
                 Scope::TerminalRead,
                 Scope::TerminalOperate,
                 Scope::SettingsWrite,
-                Scope::ProvidersManage
+                Scope::ProvidersManage,
+                Scope::DiagnosticsRead
             ]
         );
         assert!(
             missing_scopes([
+                "diagnostics:read",
                 "providers:manage",
                 "source-control:write",
                 "terminal:operate",
@@ -1971,7 +1975,7 @@ mod tests {
              again from the home view: t3 auth pairing create --scope orchestration:read \
              --scope orchestration:operate --scope source-control:write --scope filesystem:read \
              --scope terminal:read --scope terminal:operate --scope settings:write \
-             --scope providers:manage --label mustr"
+             --scope providers:manage --scope diagnostics:read --label mustr"
         );
     }
 
@@ -1992,7 +1996,7 @@ mod tests {
             scopes: scopes.map(|scopes| scopes.iter().map(|scope| scope.to_string()).collect()),
         };
         let all = "orchestration:read orchestration:operate source-control:write filesystem:read \
-                   terminal:read terminal:operate settings:write providers:manage";
+                   terminal:read terminal:operate settings:write providers:manage diagnostics:read";
         assert_eq!(
             stored_token_use(&check(true, None), all),
             (StoredTokenUse::Use, all.to_string())
@@ -2017,8 +2021,15 @@ mod tests {
                 Scope::TerminalRead,
                 Scope::TerminalOperate,
                 Scope::SettingsWrite,
-                Scope::ProvidersManage
+                Scope::ProvidersManage,
+                Scope::DiagnosticsRead
             ]
+        );
+        // A token from before wave 4's usage dashboard.
+        let wave_3 = all.replace(" diagnostics:read", "");
+        assert_eq!(
+            stored_token_use(&check(true, None), &wave_3),
+            (StoredTokenUse::PairAgain, wave_3.clone())
         );
         // Missing any one of them is enough to pair again.
         for scope in [
@@ -2026,6 +2037,7 @@ mod tests {
             "terminal:operate",
             "settings:write",
             "providers:manage",
+            "diagnostics:read",
         ] {
             let without = all.replace(scope, "");
             assert_eq!(
@@ -2091,7 +2103,7 @@ mod tests {
         // What T3 0.1.3 answers for mustr's session now: `scopes` lists only the scopes older
         // clients know (`authScopeResponse`), `permissions` the full grant.
         let session = parse_session_check(
-            br#"{"authenticated":true,"auth":{},"scopes":["orchestration:read","orchestration:operate","terminal:operate"],"permissions":["orchestration:read","orchestration:operate","source-control:write","filesystem:read","terminal:read","terminal:operate","settings:write","providers:manage"],"sessionMethod":"bearer-access-token"}"#,
+            br#"{"authenticated":true,"auth":{},"scopes":["orchestration:read","orchestration:operate","terminal:operate"],"permissions":["orchestration:read","orchestration:operate","source-control:write","filesystem:read","terminal:read","terminal:operate","settings:write","providers:manage","diagnostics:read"],"sessionMethod":"bearer-access-token"}"#,
         )
         .unwrap();
         assert_eq!(stored_token_use(&session, wave_2).0, StoredTokenUse::Use);
