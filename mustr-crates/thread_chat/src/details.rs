@@ -125,7 +125,11 @@ pub(crate) fn thread_details(
             .or_else(|| project.map(|project| project.workspace_root.clone())),
         in_worktree: worktree.is_some(),
         branch: thread.branch.clone().filter(|branch| !branch.is_empty()),
-        model: format!("{model_name} · {agent_name}"),
+        // Without the agent in T3's config, its model's id alone.
+        model: match provider {
+            Some(_) => format!("{model_name} · {agent_name}"),
+            None => model_name,
+        },
         permission_mode: thread_settings::runtime_mode_label(&thread.runtime_mode).to_string(),
         status: crate::sidebar::ShellStatus::from_shell(thread).map(|status| status.label().into()),
         created: organize::time_ago(&thread.created_at, now),

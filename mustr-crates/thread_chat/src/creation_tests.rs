@@ -960,10 +960,10 @@ async fn cloning_adds_the_project_and_opens_a_thread_in_it(cx: &mut TestAppConte
     cx.run_until_parked();
     let modal = clone_modal(&workspace, cx).expect("the clone modal is open");
     let (repository, destination) = modal.read_with(cx, |modal, _| modal.editors());
-    repository.update_in(cx, |editor, window, cx| {
-        editor.set_text("https://example.com/acme/widgets.git", window, cx)
-    });
-    // The folder follows the repository, in `~/` without T3's base folder.
+    // Typed a key at a time, the folder follows the repository, in `~/` without T3's base
+    // folder.
+    cx.focus(&repository);
+    cx.simulate_input("https://example.com/acme/widgets.git");
     assert_eq!(
         destination.read_with(cx, |editor, cx| editor.text(cx)),
         "~/widgets"

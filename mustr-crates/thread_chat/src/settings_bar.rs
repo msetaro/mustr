@@ -682,6 +682,12 @@ fn model_menu(
             None => (current_agent.clone(), current_model.clone()),
         };
         let this_menu = cx.weak_entity();
+        // At the top, as the list of models is long.
+        if can_start_several {
+            menu = menu
+                .label("Shift-click to start a thread with each of several models.")
+                .separator();
+        }
         for (index, agent) in agents.iter().enumerate() {
             if index > 0 {
                 menu = menu.separator();
@@ -735,11 +741,6 @@ fn model_menu(
         }
         for reason in [agent_locked, model_locked].into_iter().flatten() {
             menu = menu.separator().label(reason);
-        }
-        if can_start_several {
-            menu = menu
-                .separator()
-                .label("Shift-click to start a thread with each of several models.");
         }
         menu
     };

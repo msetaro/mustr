@@ -336,8 +336,8 @@ async fn thread_details_show_where_and_how_it_works(cx: &mut TestAppContext) {
             path: Some("/wt/charlie".into()),
             in_worktree: true,
             branch: Some("t3/retries".into()),
-            // Without the server config's agents, their ids.
-            model: "claude-opus-4-7 · claudeAgent".into(),
+            // Without the server config's agents, the model's id.
+            model: "claude-opus-4-7".into(),
             permission_mode: "Full access".into(),
             status: None,
             created: None,

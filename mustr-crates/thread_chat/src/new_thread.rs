@@ -1326,10 +1326,15 @@ impl Render for NewThreadForm {
             _ => None,
         };
         let summary = self.summary();
-        let background = (self.several.is_none())
-            .then(|| ui::text_for_action(&crate::launch::StartInBackground, window, cx))
-            .flatten()
-            .map(|keys| format!("{keys} starts it in the background and keeps this draft."));
+        // The keys bound where the user types, so a rebinding shows.
+        let background = window
+            .focused(cx)
+            .filter(|_| self.several.is_none())
+            .map(|focus| {
+                ui::KeyBinding::for_action_in(&crate::launch::StartInBackground, &focus, cx)
+                    .size(rems_from_px(10_f32))
+            })
+            .filter(|keys| keys.has_binding(window));
         Card::new()
             .gap_3()
             .px(scaled(px(14.)))
@@ -1357,11 +1362,13 @@ impl Render for NewThreadForm {
                         .color(Color::Muted),
                 )
             })
-            .when_some(background, |this, background| {
+            .when_some(background, |this, keys| {
                 this.child(
-                    Label::new(background)
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                    h_flex().gap_1().child(keys).child(
+                        Label::new("starts it in the background and keeps this draft.")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
                 )
             })
     }

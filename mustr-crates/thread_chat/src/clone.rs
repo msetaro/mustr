@@ -20,7 +20,7 @@ use gpui::{
     FontWeight, IntoElement, ParentElement as _, Render, SharedString, Styled as _, Subscription,
     Task, WeakEntity, Window, actions, div, px,
 };
-use mustr_ui::{palette, tokens, tokens::scaled};
+use mustr_ui::{ButtonStyle as MustrButtonStyle, TextButton, palette, tokens, tokens::scaled};
 use std::{sync::Arc, time::Duration};
 use t3_api::{
     rpc,
@@ -29,7 +29,7 @@ use t3_api::{
         ProjectCloneStartInput, ProjectCloneSubscribeInput,
     },
 };
-use ui::{Button, ButtonStyle, Color, Label, LabelCommon as _, LabelSize, prelude::*};
+use ui::{Color, Label, LabelCommon as _, LabelSize, prelude::*};
 use workspace::{ModalView, Workspace};
 
 actions!(
@@ -180,8 +180,9 @@ pub(crate) struct CloneRepositoryModal {
     base: Option<String>,
     /// Whether the user edited the folder, so the repository no longer names it.
     destination_edited: bool,
-    /// Set while mustr fills in the folder, so its edit isn't the user's.
-    filling_destination: bool,
+    /// The folder mustr filled in last, so its own edit isn't taken for the user's (the
+    /// editor's events come after the edit).
+    filled_destination: Option<String>,
     state: CloneState,
     _follow: Option<Task<()>>,
     _tasks: Vec<Task<()>>,
@@ -224,20 +225,23 @@ impl CloneRepositoryModal {
                         } else {
                             default_destination(this.base.as_deref(), &text)
                         };
-                        this.filling_destination = true;
+                        this.filled_destination = Some(destination.clone());
                         this.destination
                             .update(cx, |editor, cx| editor.set_text(destination, window, cx));
-                        this.filling_destination = false;
                     }
                 },
             ),
-            cx.subscribe(&destination, |this, _, event: &EditorEvent, _| {
-                if let EditorEvent::BufferEdited = event
-                    && !this.filling_destination
-                {
-                    this.destination_edited = true;
-                }
-            }),
+            cx.subscribe(
+                &destination,
+                |this, destination, event: &EditorEvent, cx| {
+                    if let EditorEvent::BufferEdited = event
+                        && this.filled_destination.as_deref()
+                            != Some(destination.read(cx).text(cx).as_str())
+                    {
+                        this.destination_edited = true;
+                    }
+                },
+            ),
         ];
         Self {
             backend,
@@ -246,7 +250,7 @@ impl CloneRepositoryModal {
             destination,
             base,
             destination_edited: false,
-            filling_destination: false,
+            filled_destination: None,
             state: CloneState::Idle,
             _follow: None,
             _tasks: Vec::new(),
@@ -591,14 +595,12 @@ impl Render for CloneRepositoryModal {
                     .justify_end()
                     .gap_2()
                     .child(
-                        Button::new("clone-repository-cancel", "Cancel")
-                            .style(ButtonStyle::Subtle)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.cancel(&menu::Cancel, window, cx)
-                            })),
+                        TextButton::new("clone-repository-cancel", "Cancel").on_click(cx.listener(
+                            |this, _, window, cx| this.cancel(&menu::Cancel, window, cx),
+                        )),
                     )
                     .child(
-                        Button::new(
+                        TextButton::new(
                             "clone-repository-clone",
                             if busy {
                                 "Cloning…"
@@ -608,7 +610,7 @@ impl Render for CloneRepositoryModal {
                                 "Clone"
                             },
                         )
-                        .style(ButtonStyle::Filled)
+                        .style(MustrButtonStyle::Primary)
                         .disabled(busy)
                         .on_click(
                             cx.listener(|this, _, window, cx| this.clone_repository(window, cx)),

@@ -2241,13 +2241,16 @@ impl ThreadsSidebar {
                     cx.new(|_| dragged.clone())
                 })
             });
-        // T3's hover card, built when it shows (`details.rs`).
+        // T3's hover card, built when it shows (`details.rs`), but not over a menu or a drag.
         let hover_thread = thread.clone();
-        let row = row.tooltip(move |_, cx| {
-            let details = crate::details::thread_details(&hover_thread.id, now(), cx)
-                .unwrap_or_else(|| crate::details::ThreadDetails::of_row(&hover_thread));
-            cx.new(|_| crate::details::ThreadHoverCard { details })
-                .into()
+        let quiet = self.context_menu.is_some() || self.dragging.is_some();
+        let row = row.when(!quiet, |row| {
+            row.tooltip(move |_, cx| {
+                let details = crate::details::thread_details(&hover_thread.id, now(), cx)
+                    .unwrap_or_else(|| crate::details::ThreadDetails::of_row(&hover_thread));
+                cx.new(|_| crate::details::ThreadHoverCard { details })
+                    .into()
+            })
         });
         let row = if found {
             row
@@ -2372,7 +2375,7 @@ impl ThreadsSidebar {
             h_flex()
                 .flex_none()
                 .mx_2()
-                .mb_1()
+                .my_1()
                 .pl_2()
                 .gap_1()
                 .rounded(scaled(tokens::CONTROL_RADIUS))
@@ -2646,7 +2649,6 @@ impl Render for ThreadsSidebar {
                     )
                     .child(div().flex_1().min_w_0().child(self.search.clone())),
             )
-            .children(self.render_selection_bar(cx))
             .when_some(filtered_project, |this, project| {
                 this.child(
                     h_flex().flex_none().px_2().pb_1().child(
@@ -2658,6 +2660,8 @@ impl Render for ThreadsSidebar {
                 )
             })
             .child(body)
+            // Under the list, so selecting doesn't move the rows.
+            .children(self.render_selection_bar(cx))
             .children(self.context_menu.as_ref().map(|(menu, position, _)| {
                 deferred(
                     anchored()
