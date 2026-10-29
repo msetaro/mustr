@@ -246,7 +246,7 @@ fn main() {
         t3_engine::T3Mode::default()
     });
     let t3_server_url = t3_connection::resolve_server_url(args.t3_server, settings_text.as_deref());
-    // WP18: the server picked last in the title bar's menu, unless something above picks one.
+    // WP18: the server picked last (Settings › Connection), unless something above picks one.
     let (t3_mode, t3_server_url) = servers::remembered_target(
         args.t3_mode.as_deref(),
         server_url_given,
