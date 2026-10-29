@@ -39,6 +39,7 @@ Ignore the rest of `.rules`, which is for Zed's own repository: the README banne
     - There's no pairing: it signs in with the desktop bootstrap token (`t3_runtime::engine`).
     - It's also the fallback when the installed T3 Code can't be used ("Use mustr's own engine").
   - `external`: `--t3-server <url>` (or `MUSTR_T3_SERVER`, or `"t3": {"url"}`) connects to that server, paired by pasting a credential.
+  - **Saved servers** (`mustr-crates/mustr/src/servers.rs`): the title bar's connection chip switches between the installed T3 Code, mustr's own engine, and servers saved by name and URL (one connection at a time). Each server keeps its own token under its URL. The last pick is kept in `<data dir>/config/servers.json` and used at launch unless a flag, an environment variable, or `"t3": {"mode"}` picks the mode, so test runs that pass `--t3-mode` aren't affected by it.
 - `mustr-crates/t3_runtime` gets and runs T3 releases: it picks the asset, checks `SHA256SUMS`, installs with T3's installer layout, and manages the engine process, the user's install, and its service.
   - Its `real_engine` test is ignored by default. It downloads the pinned release (about 100 MB) into a temp dir, starts it, and signs in: `cargo test -p t3_runtime --test real_engine -- --ignored --nocapture`.
   - `MUSTR_T3_TEST_VERSIONS_DIR=<dir>` keeps the download between runs. `MUSTR_T3_RELEASE_BASE_URL` points downloads at a mirror.

@@ -450,7 +450,13 @@ impl HomeView {
                         ),
                         EngineKind::External => (
                             Color::Success,
-                            format!("Connected to {environment}").into(),
+                            format!(
+                                "Connected to {}",
+                                crate::servers::saved_name(cx)
+                                    .as_deref()
+                                    .unwrap_or(environment)
+                            )
+                            .into(),
                             Some(format!("{version} at {server}").into()),
                         ),
                     }
@@ -614,6 +620,19 @@ impl HomeView {
                     .child(Indicator::dot().color(color))
                     .child(Label::new(title).weight(gpui::FontWeight::MEDIUM))
                     .child(div().flex_1())
+                    .child(
+                        div().debug_selector(|| "home-servers".into()).child(
+                            Button::new("home-servers", "Servers…")
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::Small)
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(
+                                        Box::new(crate::servers::ManageServers),
+                                        cx,
+                                    )
+                                }),
+                        ),
+                    )
                     .when(can_retry, |this| {
                         this.child(
                             Button::new("reconnect", retry_label)

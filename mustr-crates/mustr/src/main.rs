@@ -53,6 +53,7 @@ mod t3_settings;
 // WP18, settings, usage, accounts and servers:
 #[cfg(test)]
 mod fake_t3;
+mod servers;
 mod usage_page;
 // Zoom:
 mod zoom;
@@ -213,6 +214,13 @@ fn main() {
         t3_engine::T3Mode::default()
     });
     let t3_server_url = t3_connection::resolve_server_url(args.t3_server, settings_text.as_deref());
+    // WP18: the server picked last in the title bar's menu, unless something above picks one.
+    let (t3_mode, t3_server_url) = servers::remembered_target(
+        args.t3_mode.as_deref(),
+        server_url_given,
+        settings_text.as_deref(),
+    )
+    .unwrap_or((t3_mode, t3_server_url));
     match (t3_mode, &t3_server_url) {
         (t3_engine::T3Mode::External, Ok(url)) => log::info!("T3: external server {url}"),
         (t3_engine::T3Mode::External, Err(error)) => log::error!("{error:#}"),
@@ -488,6 +496,7 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     t3_settings::init(cx);
     // WP18, settings, usage, accounts and servers:
     usage_page::init(cx);
+    servers::init(cx);
     // Zoom:
     zoom::init(cx);
     // Releases and self-update:

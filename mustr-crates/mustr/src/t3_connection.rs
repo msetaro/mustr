@@ -39,6 +39,7 @@ use util::ResultExt as _;
 use crate::{
     inbox::PullRequestList,
     review_backend,
+    servers::ServerTarget,
     t3_engine::{EmbeddedEngine, EngineState, T3Mode, executor_sleep},
 };
 
@@ -122,7 +123,7 @@ pub fn resolve_server_url(cli_flag: Option<String>, settings_text: Option<&str>)
     parse_server_url(&url)
 }
 
-fn parse_server_url(url: &str) -> Result<Url> {
+pub(crate) fn parse_server_url(url: &str) -> Result<Url> {
     let parsed =
         Url::parse(url.trim()).with_context(|| format!("{url:?} isn't a valid T3 server URL"))?;
     match parsed.scheme() {
@@ -745,6 +746,10 @@ pub struct T3Connection {
     engine_run: Option<usize>,
     /// mustr started the installed T3's service once already this launch.
     service_started: bool,
+    /// Tests switch servers without connecting to any, so nothing reaches a T3 (or the user's
+    /// installed one).
+    #[cfg(test)]
+    offline: bool,
     _engine_subscription: Option<Subscription>,
 }
 
@@ -782,6 +787,20 @@ struct GlobalT3Connection(Entity<T3Connection>);
 
 impl Global for GlobalT3Connection {}
 
+/// The app's connection for tests, which never connects: switching servers only changes what it
+/// would connect to.
+#[cfg(test)]
+pub fn init_for_test(mode: T3Mode, cx: &mut App) -> Entity<T3Connection> {
+    let connection = cx.new(|cx| {
+        let mut connection = T3Connection::new(mode, Err(anyhow!("tests connect to no T3 server")));
+        connection.offline = true;
+        connection.connect(None, cx);
+        connection
+    });
+    cx.set_global(GlobalT3Connection(connection.clone()));
+    connection
+}
+
 pub fn init(mode: T3Mode, external_url: Result<Url>, cx: &mut App) {
     let connection = cx.new(|cx| {
         let mut connection = T3Connection::new(mode, external_url);
@@ -818,6 +837,8 @@ impl T3Connection {
             engine: None,
             engine_run: None,
             service_started: false,
+            #[cfg(test)]
+            offline: false,
             _engine_subscription: None,
         }
     }
@@ -879,6 +900,51 @@ impl T3Connection {
             engine.update(cx, |engine, cx| engine.restart(cx));
         }
         self.connect(None, cx);
+    }
+
+    /// The server in use: the installed T3 Code, mustr's own engine (also when the installed one
+    /// fell back to it), or a server at a URL.
+    pub fn target(&self) -> ServerTarget {
+        match self.effective_mode() {
+            T3Mode::Installed => ServerTarget::Installed,
+            T3Mode::Embedded => ServerTarget::Embedded,
+            T3Mode::External => match &self.external_url {
+                Ok(url) => ServerTarget::Url {
+                    url: url.as_str().to_string(),
+                },
+                Err(_) => ServerTarget::Url { url: String::new() },
+            },
+        }
+    }
+
+    /// Leaves the server in use for `target`, and connects to it. mustr's own engine keeps running
+    /// when mustr switches away from it, so its agents aren't stopped and switching back is quick;
+    /// it stops when mustr quits.
+    pub fn switch_to(&mut self, target: ServerTarget, cx: &mut Context<Self>) {
+        self.fallback = false;
+        self.server_url = None;
+        match target {
+            ServerTarget::Installed => self.mode = T3Mode::Installed,
+            ServerTarget::Embedded => self.mode = T3Mode::Embedded,
+            ServerTarget::Url { url } => {
+                self.mode = T3Mode::External;
+                self.external_url =
+                    parse_server_url(&url).map_err(|error| format!("{error:#}").into());
+            }
+        }
+        log::info!("T3: switching to the {} engine", self.mode.as_str());
+        self.connect(None, cx);
+    }
+
+    /// Deletes the token stored for `server_url`, when the user removes that server.
+    pub fn forget_token(&mut self, server_url: Url, cx: &mut Context<Self>) {
+        cx.spawn(async move |_, cx| {
+            CredentialStore::from_env()
+                .delete(&server_url, cx)
+                .await
+                .log_err();
+        })
+        .detach();
     }
 
     pub fn pair_with_credential(&mut self, credential: String, cx: &mut Context<Self>) {
@@ -995,6 +1061,16 @@ impl T3Connection {
     }
 
     fn connect(&mut self, pasted_credential: Option<String>, cx: &mut Context<Self>) {
+        #[cfg(test)]
+        if self.offline {
+            self.begin_attempt(cx);
+            self.server_url = match self.effective_mode() {
+                T3Mode::External => self.external_url.clone().ok(),
+                _ => None,
+            };
+            self.set_status(ConnectionStatus::Connecting("Offline in tests".into()), cx);
+            return;
+        }
         let generation = self.begin_attempt(cx);
         let http = cx.http_client();
         match self.effective_mode() {
