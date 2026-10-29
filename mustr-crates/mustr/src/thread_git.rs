@@ -26,7 +26,10 @@ use gpui::{
     Render, SharedString, Styled as _, Subscription, Task, WeakEntity, Window, anchored, deferred,
     div, px, rems,
 };
-use mustr_ui::{ButtonStyle, Chip, SplitButton, TextButton, palette, tokens, tokens::scaled};
+use mustr_ui::{
+    ButtonStyle, Chip, OverflowItem, OverflowRow, SplitButton, TextButton, overflow, palette,
+    tokens, tokens::scaled,
+};
 use picker::{Picker, PickerDelegate};
 use serde_json::json;
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -1540,12 +1543,28 @@ pub enum ControlsPlacement {
     ReviewHeader,
 }
 
+/// Which of its buttons a [`ThreadGitControls`] draws. The thread toolbar draws each on its own,
+/// so that Open in can go into the toolbar's "…" menu when the window is narrow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ControlsParts {
+    Both,
+    /// Open in ▾.
+    OpenIn,
+    /// Commit ▾ (or whatever the branch needs next), with what the last action did.
+    GitAction,
+}
+
 /// A thread's Open in ▾ and Commit ▾ buttons, with what the last action did.
 pub struct ThreadGitControls {
     git: Entity<ThreadGit>,
     editors: Entity<Editors>,
     workspace: WeakEntity<Workspace>,
     placement: ControlsPlacement,
+    parts: ControlsParts,
+    /// Measures the buttons, when drawn together in a review's header.
+    overflow: OverflowRow,
+    /// Whether Open in didn't fit when last drawn, so Commit ▾'s menu offers the editors.
+    open_in_hidden: bool,
     menu: MenuSlot,
     _subscriptions: [Subscription; 2],
 }
@@ -1567,8 +1586,17 @@ impl ThreadGitControls {
             editors,
             workspace,
             placement,
+            parts: ControlsParts::Both,
+            overflow: OverflowRow::new(),
+            open_in_hidden: false,
             menu: MenuSlot::default(),
         }
+    }
+
+    /// Draws only some of the buttons.
+    pub fn parts(mut self, parts: ControlsParts) -> Self {
+        self.parts = parts;
+        self
     }
 
     /// Runs the main button's action, asking first when it would push to the default branch.
@@ -1621,7 +1649,32 @@ impl ThreadGitControls {
         let actions = self.git.read(cx).menu_actions();
         let this = cx.weak_entity();
         let git = self.git.clone();
+        let editors = self
+            .open_in_hidden
+            .then(|| {
+                let editors = self.editors.read(cx);
+                (editors.available().to_vec(), editors.preferred())
+            })
+            .filter(|(available, _)| !available.is_empty());
         let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            // Open in, when there was no room for it next to the button.
+            if let Some((available, preferred)) = editors {
+                for editor in available {
+                    let git = git.clone();
+                    let checked = preferred.as_ref() == Some(&editor);
+                    menu = menu.toggleable_entry(
+                        format!("Open in {}", editor_label(&editor)),
+                        checked,
+                        IconPosition::Start,
+                        None,
+                        move |_, cx| {
+                            let editor = editor.clone();
+                            git.update(cx, |git, cx| git.open_in_editor(Some(editor), cx))
+                        },
+                    );
+                }
+                menu = menu.separator();
+            }
             if actions.is_empty() {
                 return menu.label("Git status isn't available yet");
             }
@@ -1722,7 +1775,7 @@ impl ThreadGitControls {
 }
 
 impl Render for ThreadGitControls {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let git = self.git.read(cx);
         let has_checkout = git.checkout().is_some();
         let quick = git.quick_action();
@@ -1758,62 +1811,111 @@ impl Render for ThreadGitControls {
         let editor_this = this.clone();
         let git = self.git.clone();
 
-        h_flex()
-            .id("thread-git-controls")
-            .flex_none()
-            .gap(scaled(px(6.)))
-            .children(notice)
-            .when(has_checkout, |this| {
-                this.child(
-                    SplitButton::new("thread-open-in", open_label)
-                        .disabled(preferred.is_none())
-                        .tooltip(
-                            preferred
-                                .as_ref()
-                                .map_or("T3 found no editors".to_string(), |_| {
-                                    "Open the thread's checkout in an editor".to_string()
-                                }),
-                        )
-                        .menu_tooltip("Choose an editor")
-                        .on_click(move |_, _, cx| {
-                            git.update(cx, |git, cx| git.open_in_editor(None, cx))
-                        })
-                        .on_menu_click(move |event, window, cx| {
-                            editor_this
-                                .update(cx, |this, cx| this.deploy_editor_menu(event, window, cx))
-                                .ok();
+        let parts = self.parts;
+        let open_in = (has_checkout && parts != ControlsParts::GitAction).then(|| {
+            SplitButton::new("thread-open-in", open_label)
+                .disabled(preferred.is_none())
+                .tooltip(
+                    preferred
+                        .as_ref()
+                        .map_or("T3 found no editors".to_string(), |_| {
+                            "Open the thread's checkout in an editor".to_string()
                         }),
                 )
-            })
-            .child(
-                SplitButton::new(
-                    "thread-git-action",
-                    running_label.unwrap_or_else(|| quick.label.clone()),
-                )
-                .style(if main_disabled {
-                    ButtonStyle::Default
-                } else {
-                    ButtonStyle::Primary
-                })
-                .disabled(!has_checkout || (main_disabled && self.git.read(cx).is_busy()))
-                .tooltip(main_tooltip)
-                .menu_tooltip("More git actions")
-                .on_click(move |_, window, cx| {
-                    if main_disabled {
-                        return;
-                    }
-                    this.update(cx, |this, cx| this.run_quick_action(window, cx))
-                        .ok();
-                })
+                .menu_tooltip("Choose an editor")
+                .on_click(move |_, _, cx| git.update(cx, |git, cx| git.open_in_editor(None, cx)))
                 .on_menu_click(move |event, window, cx| {
-                    menu_this
-                        .update(cx, |this, cx| this.deploy_commit_menu(event, window, cx))
+                    editor_this
+                        .update(cx, |this, cx| this.deploy_editor_menu(event, window, cx))
                         .ok();
-                }),
+                })
+                .into_any_element()
+        });
+        let action = (parts != ControlsParts::OpenIn).then(|| {
+            SplitButton::new(
+                "thread-git-action",
+                running_label.unwrap_or_else(|| quick.label.clone()),
             )
-            .children(self.menu.render())
+            .style(if main_disabled {
+                ButtonStyle::Default
+            } else {
+                ButtonStyle::Primary
+            })
+            .disabled(!has_checkout || (main_disabled && self.git.read(cx).is_busy()))
+            .tooltip(main_tooltip)
+            .menu_tooltip("More git actions")
+            .on_click(move |_, window, cx| {
+                if main_disabled {
+                    return;
+                }
+                this.update(cx, |this, cx| this.run_quick_action(window, cx))
+                    .ok();
+            })
+            .on_menu_click(move |event, window, cx| {
+                menu_this
+                    .update(cx, |this, cx| this.deploy_commit_menu(event, window, cx))
+                    .ok();
+            })
+            .into_any_element()
+        });
+        let notice = notice.filter(|_| parts != ControlsParts::OpenIn);
+        let gap = scaled(px(6.));
+        if parts != ControlsParts::Both {
+            return h_flex()
+                .id("thread-git-controls")
+                .flex_none()
+                .gap(gap)
+                .children(notice)
+                .children(open_in)
+                .children(action)
+                .children(self.menu.render())
+                .into_any_element();
+        }
+
+        // Both, in a review's header: with no room for Open in, its editors go into Commit ▾'s
+        // menu, and the notice goes before them.
+        let children = [
+            (CONTROLS_NOTICE, 2, notice),
+            (CONTROLS_OPEN_IN, 1, open_in),
+            (CONTROLS_ACTION, overflow::ALWAYS, action),
+        ]
+        .into_iter()
+        .filter_map(|(key, priority, child)| Some((OverflowItem::new(key, priority), child?)))
+        .collect::<Vec<_>>();
+        let items = children
+            .iter()
+            .map(|(item, _)| item.clone())
+            .collect::<Vec<_>>();
+        let gap_pixels = gap.to_pixels(window.rem_size());
+        let visible = self.overflow.visible(&items, gap_pixels, px(0.));
+        self.open_in_hidden = items
+            .iter()
+            .zip(&visible)
+            .any(|(item, visible)| item.key == CONTROLS_OPEN_IN && !visible);
+        let natural = self.overflow.natural_width(&items, gap_pixels);
+        let min = self.overflow.min_width(&items, gap_pixels, px(0.));
+        let children = children
+            .into_iter()
+            .zip(visible)
+            .filter(|(_, visible)| *visible)
+            .map(|((item, child), _)| (Some(item.key), child))
+            .chain(self.menu.render().map(|menu| (None, menu)));
+        self.overflow
+            .render(children, window)
+            .gap(gap)
+            .map(|row| match natural {
+                Some(natural) => row.w(natural),
+                None => row.w_auto(),
+            })
+            .when_some(min, |row, min| row.min_w(min))
+            .flex_shrink_1()
+            .into_any_element()
     }
 }
+
+const CONTROLS_NOTICE: &str = "thread-git-notice";
+const CONTROLS_OPEN_IN: &str = "thread-open-in";
+const CONTROLS_ACTION: &str = "thread-git-action";
 
 /// A running or finished action's steps, under the thread toolbar: `✓ Commit › Push… › PR`,
 /// with the error under the step that failed.
@@ -2059,7 +2161,7 @@ impl Focusable for GitActionDialog {
 }
 
 impl Render for GitActionDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = palette(cx);
         let git = self.git.read(cx);
         let pr = git.change_request();
@@ -2083,7 +2185,7 @@ impl Render for GitActionDialog {
         v_flex()
             .key_context("GitActionDialog")
             .on_action(cx.listener(|_, _: &menu::Cancel, _, cx| cx.emit(DismissEvent)))
-            .w(rems(32.))
+            .w(tokens::modal_width(rems(32.), window))
             .p_4()
             .gap_3()
             .rounded(scaled(tokens::CORNER_RADIUS))
@@ -2202,7 +2304,8 @@ impl BranchPickerDelegate {
     ) {
         git.update(cx, |git, cx| git.refresh(cx));
         workspace.toggle_modal(window, cx, |window, cx| {
-            Picker::uniform_list(Self::new(git), window, cx).initial_width(rems(28.))
+            Picker::uniform_list(Self::new(git), window, cx)
+                .initial_width(tokens::modal_width(rems(28.), window))
         });
     }
 }

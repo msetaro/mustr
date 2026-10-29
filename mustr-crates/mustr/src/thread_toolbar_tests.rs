@@ -564,3 +564,135 @@ async fn the_palette_offers_the_toolbar_on_the_focused_thread(cx: &mut TestAppCo
             .is_some()
     );
 }
+
+/// The toolbar's items that show at `width`, after the toolbar has measured itself, at mustr's
+/// default size (26), and what its "…" menu offers.
+fn toolbar_at(
+    toolbar: &Entity<ThreadToolbar>,
+    width: f32,
+    cx: &mut VisualTestContext,
+) -> (Vec<&'static str>, Vec<OverflowEntry>) {
+    cx.simulate_resize(gpui::size(px(width), px(200.)));
+    cx.run_until_parked();
+    let keys = [
+        ToolbarItem::Branch,
+        ToolbarItem::GitSummary,
+        ToolbarItem::PullRequest,
+        ToolbarItem::Checks,
+        ToolbarItem::LinkPullRequest,
+        ToolbarItem::ReviewChanges,
+        ToolbarItem::Terminal,
+        ToolbarItem::OpenIn,
+        ToolbarItem::GitAction,
+    ]
+    .map(ToolbarItem::key);
+    let mut shown = Vec::new();
+    for key in keys.into_iter().chain(["thread-toolbar-more"]) {
+        if let Some(bounds) = cx.debug_bounds(key) {
+            assert!(
+                bounds.right() <= px(width) + px(0.5),
+                "{key} sticks out of the toolbar at {width}: {bounds:?}"
+            );
+            shown.push(key);
+        }
+    }
+    let entries = toolbar.read_with(cx, |toolbar, cx| toolbar.overflow_entries(cx));
+    (shown, entries)
+}
+
+/// In a MacBook-sized window at mustr's default size, the toolbar doesn't fit: Link PR,
+/// Terminal, and Open in go into its "…" menu first, then the git status, while Review changes
+/// and Commit stay, and the branch shrinks.
+#[gpui::test]
+async fn the_toolbar_moves_what_doesnt_fit_into_its_menu(cx: &mut TestAppContext) {
+    let backend = RecordingBackend::with_shell(shell(vec![shell_thread(json!({}))]));
+    backend.respond(
+        "server.getConfig",
+        Ok(json!({ "availableEditors": ["vscode", "zed"] })),
+    );
+    init_test(backend.clone(), cx);
+    cx.update(init);
+    let (workspace, cx) = workspace(cx).await;
+    let view = cx.new_window_entity(|window, cx| {
+        ThreadView::new(
+            backend.clone(),
+            None,
+            Some(THREAD.to_string()),
+            "Add retries".into(),
+            window,
+            cx,
+        )
+    });
+    let (toolbar, cx) =
+        cx.add_window_view(|window, cx| ThreadToolbar::new(workspace.downgrade(), window, cx));
+    cx.update(|window, cx| {
+        window.set_rem_size(px(26.));
+        crate::thread_git::Editors::global(cx);
+    });
+    toolbar.update_in(cx, |toolbar, window, cx| {
+        toolbar.set_active_pane_item(Some(&view), window, cx)
+    });
+    cx.run_until_parked();
+
+    // Room for everything.
+    let (shown, entries) = toolbar_at(&toolbar, 3000., cx);
+    assert_eq!(
+        shown,
+        [
+            "thread-toolbar-branch",
+            "thread-toolbar-git-summary",
+            "thread-toolbar-link-pull-request",
+            "thread-toolbar-review-changes",
+            "thread-toolbar-terminal",
+            "thread-toolbar-open-in",
+            "thread-toolbar-git-action",
+        ]
+    );
+    assert_eq!(entries, []);
+
+    // A 14" MacBook's window with the threads beside the thread: the actions that matter least
+    // go into the menu. Terminal is narrow enough to stay where Open in isn't.
+    let (shown, entries) = toolbar_at(&toolbar, 1000., cx);
+    assert_eq!(
+        shown,
+        [
+            "thread-toolbar-branch",
+            "thread-toolbar-git-summary",
+            "thread-toolbar-review-changes",
+            "thread-toolbar-terminal",
+            "thread-toolbar-git-action",
+            "thread-toolbar-more",
+        ]
+    );
+    // In the toolbar's order.
+    assert_eq!(
+        entries,
+        [OverflowEntry::LinkPullRequest, OverflowEntry::OpenIn]
+    );
+
+    // Narrower still, the git status goes too, and says what it is in the menu.
+    let (shown, entries) = toolbar_at(&toolbar, 700., cx);
+    assert_eq!(
+        shown,
+        [
+            "thread-toolbar-branch",
+            "thread-toolbar-review-changes",
+            "thread-toolbar-git-action",
+            "thread-toolbar-more",
+        ]
+    );
+    assert!(matches!(entries[0], OverflowEntry::Text(_)), "{entries:?}");
+    assert_eq!(
+        entries[1..],
+        [
+            OverflowEntry::LinkPullRequest,
+            OverflowEntry::Terminal,
+            OverflowEntry::OpenIn,
+        ]
+    );
+
+    // Wider again, they come back.
+    let (shown, _) = toolbar_at(&toolbar, 3000., cx);
+    assert!(shown.contains(&"thread-toolbar-terminal"));
+    assert!(!shown.contains(&"thread-toolbar-more"));
+}
