@@ -166,7 +166,7 @@ impl ThreadView {
     }
 
     /// Keeps the composer's text as the thread's draft; an empty composer forgets it.
-    fn save_draft(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn save_draft(&mut self, cx: &mut Context<Self>) {
         let Some(thread_id) = self.thread_id.clone() else {
             return;
         };

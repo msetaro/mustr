@@ -1306,3 +1306,5 @@ async fn running_commands_stream_their_output(cx: &mut TestAppContext) {
 
 // Files and big pastes.
 mod files;
+// Terminal and review-comment chips.
+mod context;

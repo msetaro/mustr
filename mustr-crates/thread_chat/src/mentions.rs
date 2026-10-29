@@ -12,6 +12,9 @@
 //!   `[label](t3-context://v1/<kind>/<id>)`, and a record in `message.dispatch`'s `context`
 //!   (`threadContextRecord`, and `buildPullRequestReferenceContext` as a `review-comment`).
 //!   T3 expands the record for the agent.
+//! - A terminal excerpt or a review comment that another part of mustr adds
+//!   ([`AddComposerContext`]) is the same: a reference at the cursor, or at the end, drawn as a
+//!   chip, and its record (`terminalContextRecord`, `reviewCommentContextRecord`).
 //!
 //! Files are found on this machine when the thread's folder is here, with Zed's fuzzy path
 //! matcher over the folder's files (respecting `.gitignore`), so mustr needs no `filesystem:read`
@@ -19,6 +22,7 @@
 //! `pullRequests.list`.
 
 use crate::{
+    actions::{AddComposerContext, ComposerContext},
     backend::{Access, ThreadBackend},
     shell::ThreadShells,
     slash_commands::{self, SlashItem},
@@ -31,8 +35,8 @@ use editor::{
 };
 use fuzzy::{CharBag, PathMatchCandidate};
 use gpui::{
-    AnyElement, App, Context, FontWeight, Hsla, IntoElement, ParentElement as _, RenderOnce,
-    ScrollHandle, SharedString, Styled as _, Task, Window, div, px,
+    AnyElement, App, Context, Focusable as _, FontWeight, Hsla, IntoElement, ParentElement as _,
+    RenderOnce, ScrollHandle, SharedString, Styled as _, Task, Window, div, px,
 };
 use mustr_ui::{palette, tokens, tokens::scaled};
 use serde::Deserialize;
@@ -626,12 +630,12 @@ pub(crate) fn file_links(text: &str) -> Vec<FileLink> {
     links
 }
 
-/// The records of the context references `text` still has, once each, pull requests before
-/// threads as T3 orders them (`buildMessageContext`).
+/// The records of the context references `text` still has, once each: terminal excerpts, then
+/// review comments and pull requests, then threads, as T3 orders them (`buildMessageContext`).
 pub(crate) fn referenced_records(text: &str, records: &[(String, Value)]) -> Vec<(String, Value)> {
     let referenced = context_references(text);
     let mut picked: Vec<(String, Value)> = Vec::new();
-    for kind in ["review-comment", "thread"] {
+    for kind in ["terminal", "review-comment", "thread"] {
         for (context_id, record) in records {
             if record["kind"] == kind
                 && referenced
@@ -651,16 +655,12 @@ pub(crate) fn message_context(
     text: &str,
     records: &[(String, Value)],
 ) -> Option<OrchestrationMessageContext> {
-    let picked = referenced_records(text, records);
-    if picked.is_empty() {
-        return None;
-    }
-    Some(OrchestrationMessageContext {
-        guest: None,
-        records: picked.into_iter().map(|(_, record)| record).collect(),
-        version: OrchestrationMessageContextVersion::try_from(1.)
-            .expect("T3's context version is 1"),
-    })
+    message_context_of(
+        referenced_records(text, records)
+            .into_iter()
+            .map(|(_, record)| record)
+            .collect(),
+    )
 }
 
 // Ranking, as T3's search ranks names (`scoreQueryMatch` in T3's
@@ -1261,7 +1261,118 @@ enum ChipKind {
     Thread,
     /// A pull request, by state (`open`, `draft`, `merged` or `closed`).
     PullRequest(String),
+    /// Lines from a terminal.
+    Terminal,
+    /// A comment on a diff.
+    ReviewComment,
     Other,
+}
+
+impl ChipKind {
+    /// The chip for a context record of `kind`.
+    fn for_record(kind: &str, record: Option<&Value>) -> Self {
+        match (kind, record) {
+            ("thread", _) => Self::Thread,
+            ("terminal", _) => Self::Terminal,
+            ("review-comment", Some(record)) if record["pullRequest"].is_object() => {
+                Self::PullRequest(pull_request_state(
+                    record["pullRequest"]["state"].as_str().unwrap_or("open"),
+                    record["pullRequest"]["isDraft"].as_bool().unwrap_or(false),
+                ))
+            }
+            ("review-comment", _) => Self::ReviewComment,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// What a chip's tooltip says about its record: a thread's or pull request's title, a
+/// terminal's lines, or a review comment's place and text.
+fn record_tooltip(record: &Value, label: &str) -> String {
+    let field = |name: &str| record[name].as_str().unwrap_or_default();
+    match field("kind") {
+        "terminal" => {
+            let first_line = field("text").lines().next().unwrap_or_default().trim();
+            format!("{label}\n{first_line}").trim().to_string()
+        }
+        "review-comment" if !record["pullRequest"].is_object() => {
+            let comment = field("text").trim();
+            format!("{} {}\n{comment}", field("filePath"), field("rangeLabel"))
+                .trim()
+                .to_string()
+        }
+        _ => record["title"]
+            .as_str()
+            .or(record["pullRequest"]["title"].as_str())
+            .map_or_else(|| label.to_string(), str::to_string),
+    }
+}
+
+/// The context id and label a record of another part of mustr gets, as T3 makes them: ids
+/// are letters, digits, `_` and `-` (anything else is hashed, `toComposerContextId`), and labels
+/// are one line of at most 200 characters (`sanitizeComposerContextLabel`).
+fn normalized_record(context: &ComposerContext) -> Option<Value> {
+    let mut record = context.to_record().ok()?;
+    let kind = record["kind"].as_str()?.to_string();
+    let context_id = record["contextId"].as_str()?.to_string();
+    let context_id = if is_context_id(&context_id) {
+        context_id
+    } else {
+        self::context_id(&context_id)
+    };
+    let label = sanitize_label(record["label"].as_str().unwrap_or_default(), &kind);
+    let fields = record.as_object_mut()?;
+    fields.insert("contextId".into(), context_id.into());
+    fields.insert("label".into(), label.into());
+    Some(record)
+}
+
+/// A terminal excerpt or a review comment as a message carries it: the reference for its text
+/// and the record for its `context`, with T3's id and label rules. For the parts of mustr that
+/// send context themselves, such as the agent review's Send to agent.
+pub fn context_reference_and_record(context: &ComposerContext) -> Option<(String, Value)> {
+    let record = normalized_record(context)?;
+    let reference = context_reference(
+        record["kind"].as_str()?,
+        record["contextId"].as_str()?,
+        record["label"].as_str()?,
+    );
+    Some((reference, record))
+}
+
+/// The `context` of a message that carries `records`, in T3's version 1, or `None` without any.
+pub fn message_context_of(records: Vec<Value>) -> Option<OrchestrationMessageContext> {
+    (!records.is_empty()).then(|| OrchestrationMessageContext {
+        guest: None,
+        records,
+        version: OrchestrationMessageContextVersion::try_from(1.)
+            .expect("T3's context version is 1"),
+    })
+}
+
+/// Registers the handler of [`AddComposerContext`] on every workspace: it opens the thread (or
+/// shows it), and adds the context to its composer.
+pub(crate) fn init(cx: &mut App) {
+    cx.observe_new(|workspace: &mut workspace::Workspace, _, _| {
+        workspace.register_action(|workspace, action: &AddComposerContext, window, cx| {
+            let title = ThreadShells::global(cx)
+                .read(cx)
+                .thread(&action.thread_id)
+                .map(|thread| SharedString::from(thread.title.clone()))
+                .unwrap_or_else(|| "Agent thread".into());
+            let Some(view) =
+                ThreadView::open(action.thread_id.clone(), title, workspace, window, cx)
+            else {
+                log::error!("couldn't open the agent thread to add context to");
+                return;
+            };
+            let context = action.context.clone();
+            view.update(cx, |view, cx| {
+                view.add_composer_context(context, window, cx)
+            });
+        });
+    })
+    .detach();
 }
 
 /// What a chip in the composer shows: its kind, its label, and its tooltip.
@@ -1288,6 +1399,8 @@ impl RenderOnce for MentionChip {
             ChipKind::Folder => (IconName::Folder, palette.accent.hsla()),
             ChipKind::Thread => (IconName::Thread, palette.agent.hsla()),
             ChipKind::PullRequest(state) => (IconName::PullRequest, pull_request_tint(state, cx)),
+            ChipKind::Terminal => (IconName::Terminal, palette.text_muted.hsla()),
+            ChipKind::ReviewComment => (IconName::Chat, palette.warning.hsla()),
             ChipKind::Other => (IconName::Paperclip, palette.text_muted.hsla()),
         };
         let height = window.line_height() - scaled(px(2.)).to_pixels(window.rem_size());
@@ -2056,25 +2169,11 @@ impl ThreadView {
                 .iter()
                 .find(|(id, _)| *id == reference.context_id)
                 .map(|(_, record)| record.clone());
-            let kind = match (reference.kind.as_str(), &record) {
-                ("thread", _) => ChipKind::Thread,
-                ("review-comment", Some(record)) if record["pullRequest"].is_object() => {
-                    ChipKind::PullRequest(pull_request_state(
-                        record["pullRequest"]["state"].as_str().unwrap_or("open"),
-                        record["pullRequest"]["isDraft"].as_bool().unwrap_or(false),
-                    ))
-                }
-                _ => ChipKind::Other,
-            };
-            let tooltip = record
-                .as_ref()
-                .and_then(|record| {
-                    record["title"]
-                        .as_str()
-                        .or(record["pullRequest"]["title"].as_str())
-                        .map(str::to_string)
-                })
-                .unwrap_or_else(|| reference.label.clone());
+            let kind = ChipKind::for_record(&reference.kind, record.as_ref());
+            let tooltip = record.as_ref().map_or_else(
+                || reference.label.clone(),
+                |record| record_tooltip(record, &reference.label),
+            );
             let chip = Chip {
                 kind,
                 label: reference.label,
@@ -2082,6 +2181,72 @@ impl ThreadView {
             };
             self.add_chip(reference.range, chip, window, cx);
         }
+    }
+
+    /// Adds a terminal excerpt or a review comment to the composer (`addTerminalContext` and
+    /// `addReviewComment` in T3's `composerDraftStore.ts`): its reference goes at the cursor
+    /// when the composer has focus, or at the end, drawn as a chip, and the next message
+    /// carries its record. Adding the same context again only refreshes its record.
+    pub(crate) fn add_composer_context(
+        &mut self,
+        context: ComposerContext,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(record) = normalized_record(&context) else {
+            return;
+        };
+        let kind = record["kind"].as_str().unwrap_or_default().to_string();
+        let context_id = record["contextId"].as_str().unwrap_or_default().to_string();
+        let label = record["label"].as_str().unwrap_or_default().to_string();
+        let tooltip = record_tooltip(&record, &label);
+        let chip_kind = ChipKind::for_record(&kind, Some(&record));
+        self.composer_state.menu.remember_record(record);
+        let text = self.composer.read(cx).text(cx);
+        let present = context_references(&text)
+            .iter()
+            .any(|reference| reference.context_id == context_id);
+        if !present {
+            let reference = context_reference(&kind, &context_id, &label);
+            let focused = self.composer.focus_handle(cx).is_focused(window);
+            let at = match self.composer_cursor(cx) {
+                Some((_, cursor)) if focused => cursor,
+                _ => text.len(),
+            };
+            let before = if text[..at]
+                .chars()
+                .next_back()
+                .is_some_and(|c| !c.is_whitespace())
+            {
+                " "
+            } else {
+                ""
+            };
+            let after = if text[at..].starts_with(char::is_whitespace) {
+                ""
+            } else {
+                " "
+            };
+            let start = self.replace_in_composer(
+                at..at,
+                &format!("{before}{reference}{after}"),
+                window,
+                cx,
+            ) + before.len();
+            self.add_chip(
+                start..start + reference.len(),
+                Chip {
+                    kind: chip_kind,
+                    label,
+                    tooltip,
+                },
+                window,
+                cx,
+            );
+        }
+        self.save_draft(cx);
+        window.focus(&self.composer.focus_handle(cx), cx);
+        cx.notify();
     }
 
     /// Removes every chip, for an empty composer or before drawing them again.

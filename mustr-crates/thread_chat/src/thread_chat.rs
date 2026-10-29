@@ -56,6 +56,7 @@ pub use mentions::set_local_folders;
 mod worktree_setup;
 // WP12, composer and timeline:
 mod find_bar;
+pub use mentions::{context_reference_and_record, message_context_of};
 // WP13, thread list and navigation:
 // WP14, agent setup and T3's settings:
 
@@ -104,6 +105,7 @@ pub fn init(cx: &mut App) {
     usage::init(cx);
     // WP11, terminals, worktrees and the PR flow:
     // WP12, composer and timeline:
+    mentions::init(cx);
     // WP13, thread list and navigation:
     // WP14, agent setup and T3's settings:
 }
