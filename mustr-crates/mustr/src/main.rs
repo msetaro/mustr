@@ -51,6 +51,7 @@ mod remote_terminal;
 mod agent_setup;
 mod t3_settings;
 // WP18, settings, usage, accounts and servers:
+mod auth_terminal;
 #[cfg(test)]
 mod fake_t3;
 mod project_settings;

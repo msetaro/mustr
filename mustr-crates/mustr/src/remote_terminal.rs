@@ -20,7 +20,7 @@
 //! - Ids are T3's (`term-1`, `term-2`, …: `packages/shared/src/terminalLabels.ts`), so mustr and
 //!   T3's app share a thread's terminals.
 
-mod keys;
+pub(crate) mod keys;
 
 use anyhow::{Context as _, Result, anyhow};
 use futures::{StreamExt as _, channel::mpsc, channel::oneshot};

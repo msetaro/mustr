@@ -5,7 +5,7 @@
 
 use super::*;
 use anyhow::anyhow;
-use futures::{channel::mpsc, stream::BoxStream};
+use futures::{FutureExt as _, channel::mpsc, stream::BoxStream};
 use gpui::{TestAppContext, VisualTestContext};
 use parking_lot::Mutex;
 use pretty_assertions::assert_eq;
@@ -621,7 +621,7 @@ async fn terminals_codes_and_credentials_answer_the_sign_in(cx: &mut TestAppCont
         "output": "\u{1b}[1mWelcome\u{1b}[0m\r\nPaste the code: "
     }));
     backend.play("provider.auth.subscribe", "codex", terminal_state.clone());
-    for _ in 0..3 {
+    for _ in 0..4 {
         backend.answer("provider.auth.respond", terminal_state.clone());
     }
     cx.run_until_parked();
@@ -634,6 +634,11 @@ async fn terminals_codes_and_credentials_answer_the_sign_in(cx: &mut TestAppCont
     let long = "x".repeat(TERMINAL_CHUNK + 10);
     view.update(cx, |view, cx| {
         view.type_in_terminal("codex".into(), long, cx)
+    });
+    cx.run_until_parked();
+    // The terminal's grid size goes with an empty response.
+    view.update(cx, |view, cx| {
+        view.resize_terminal("codex".into(), 100, 30, cx)
     });
     cx.run_until_parked();
     let terminal = |data: String| {
@@ -651,6 +656,13 @@ async fn terminals_codes_and_credentials_answer_the_sign_in(cx: &mut TestAppCont
             terminal("abc\r".into()),
             terminal("x".repeat(TERMINAL_CHUNK)),
             terminal("x".repeat(10)),
+            manage(
+                "provider.auth.respond",
+                json!({
+                    "instanceId": "codex", "flowId": "flow-1", "interactionId": "terminal-1",
+                    "response": { "type": "terminal", "data": "", "size": { "cols": 100, "rows": 30 } }
+                }),
+            ),
         ]
     );
 
@@ -666,7 +678,7 @@ async fn terminals_codes_and_credentials_answer_the_sign_in(cx: &mut TestAppCont
     cx.run_until_parked();
     click("agent-copy-code-codex", cx);
     assert_eq!(clipboard(cx).as_deref(), Some("ABCD-1234"));
-    assert_eq!(backend.commands().len(), 3);
+    assert_eq!(backend.commands().len(), 4);
 
     backend.play(
         "provider.auth.subscribe",
@@ -1046,14 +1058,7 @@ fn cli_agents_get_t3s_commands() {
 }
 
 #[test]
-fn sign_in_terminals_read_as_plain_lines() {
-    assert_eq!(
-        terminal_text(
-            "\u{1b}[1;32mWelcome\u{1b}[0m to Codex\r\n\u{1b}]0;title\u{7}Loading…\rReady.\n\
-             Paste the code: \u{1b}[K"
-        ),
-        "Welcome to Codex\nReady.\nPaste the code:"
-    );
+fn sign_in_input_goes_in_t3s_pieces() {
     assert_eq!(terminal_chunks(""), [String::new()]);
     assert_eq!(terminal_chunks("abc"), ["abc".to_string()]);
 }

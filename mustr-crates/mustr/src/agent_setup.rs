@@ -20,19 +20,24 @@
 #[cfg(test)]
 mod tests;
 
-use crate::nav_panel::register_rail_entry;
+use crate::{
+    auth_terminal::{AuthTerminal, SendInput, SendSize},
+    nav_panel::register_rail_entry,
+};
 use anyhow::Result;
 use editor::Editor;
-use futures::{FutureExt as _, StreamExt as _, future::BoxFuture};
+use futures::{StreamExt as _, future::BoxFuture};
 use gpui::{
     AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, FocusHandle,
     Focusable, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Subscription, Task, Window, div, px, relative,
+    SharedString, Styled as _, Subscription, Task, WeakEntity, Window, div, px, relative,
 };
 use mustr_ui::{ButtonStyle, Card, Pill, TextButton, palette, tokens, tokens::scaled};
+use project::Project;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
+    rc::Rc,
     sync::Arc,
     time::Duration,
 };
@@ -49,11 +54,12 @@ use t3_client::{
             ProviderAuthRespondInput, ProviderAuthResponseBrowser,
             ProviderAuthResponseBrowserAction, ProviderAuthResponseBrowserType,
             ProviderAuthResponseCredentials, ProviderAuthResponseCredentialsType,
-            ProviderAuthResponseTerminal, ProviderAuthResponseTerminalType, ProviderAuthStartInput,
-            ProviderAuthState, ProviderAuthStatePhase, ProviderInstallCancelInput,
-            ProviderInstallState, ProviderInstallStatePhase, ProviderInstanceConfig,
-            ProviderSetupInput, ServerProvider, ServerProviderAuthStatus, ServerProviderSetup,
-            ServerProviderState, ServerSettings, ServerSettingsPatch, ServerUpdateSettingsPayload,
+            ProviderAuthResponseTerminal, ProviderAuthResponseTerminalSize,
+            ProviderAuthResponseTerminalType, ProviderAuthStartInput, ProviderAuthState,
+            ProviderAuthStatePhase, ProviderInstallCancelInput, ProviderInstallState,
+            ProviderInstallStatePhase, ProviderInstanceConfig, ProviderSetupInput, ServerProvider,
+            ServerProviderAuthStatus, ServerProviderSetup, ServerProviderState, ServerSettings,
+            ServerSettingsPatch, ServerUpdateSettingsPayload,
             ServerUpdateSettingsPayloadProviderInstanceMutationUpsert,
             ServerUpdateSettingsPayloadProviderInstanceMutationUpsertOperation,
         },
@@ -73,8 +79,8 @@ use workspace::{
 };
 
 const CONTENT_MAX_WIDTH: f32 = 880.;
-/// The last lines of a sign-in terminal shown.
-const TERMINAL_LINES: usize = 14;
+/// A sign-in terminal's height, about T3's (`h-64`).
+const TERMINAL_HEIGHT: f32 = 220.;
 /// T3 takes a terminal's input in pieces of at most this many characters.
 const TERMINAL_CHUNK: usize = 4_096;
 /// The agents T3's onboarding offers first (`PRIMARY_AGENT_DRIVERS`).
@@ -131,8 +137,23 @@ pub fn show(
         return;
     }
     let backend = thread_chat::backend(cx);
-    let view = cx.new(|cx| AgentSetupView::new(backend, focus, cx));
+    let handle = workspace.weak_handle();
+    let project = workspace.project().downgrade();
+    let view = cx.new(|cx| {
+        let mut view = AgentSetupView::new(backend, focus, cx);
+        view.workspace = handle;
+        view.project = Some(project);
+        view
+    });
     workspace.add_item_to_active_pane(Box::new(view), None, true, window, cx);
+}
+
+/// A sign-in terminal's queue: responses wait for the one before them, as T3's app sends them.
+struct TerminalInput {
+    /// The sign-in flow and the terminal it's for.
+    key: (String, String),
+    sender: futures::channel::mpsc::UnboundedSender<ProviderAuthResponseTerminal>,
+    _task: Task<()>,
 }
 
 // What the page says, from T3's provider status.
@@ -463,50 +484,6 @@ fn quote_binary(path: &str, fallback: &str, os: Option<&ExecutionEnvironmentPlat
     }
 }
 
-/// A sign-in terminal's output as plain lines: escape sequences dropped, and each line as the
-/// last carriage return left it.
-pub(crate) fn terminal_text(output: &str) -> String {
-    let mut text = String::with_capacity(output.len());
-    let mut chars = output.chars().peekable();
-    while let Some(char) = chars.next() {
-        match char {
-            '\u{1b}' => match chars.next() {
-                // CSI: parameters, then a final byte from @ to ~.
-                Some('[') => {
-                    for next in chars.by_ref() {
-                        if ('@'..='~').contains(&next) {
-                            break;
-                        }
-                    }
-                }
-                // OSC: up to BEL or ESC \.
-                Some(']') => {
-                    while let Some(next) = chars.next() {
-                        if next == '\u{7}' {
-                            break;
-                        }
-                        if next == '\u{1b}' {
-                            chars.next_if_eq(&'\\');
-                            break;
-                        }
-                    }
-                }
-                _ => {}
-            },
-            '\n' | '\r' | '\t' => text.push(char),
-            char if char.is_control() => {}
-            char => text.push(char),
-        }
-    }
-    text.split('\n')
-        .map(|line| {
-            let line = line.strip_suffix('\r').unwrap_or(line);
-            line.rsplit('\r').next().unwrap_or(line).trim_end()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// The settings change that lets T3 manage Codex itself (T3's `setupMode: "managed"`), so it can
 /// install Codex and sign in with ChatGPT.
 pub(crate) fn managed_codex(
@@ -722,6 +699,11 @@ struct AgentSetup {
 pub struct AgentSetupView {
     focus_handle: FocusHandle,
     backend: Option<Arc<dyn ThreadBackend>>,
+    /// For sign-in terminals, which Zed's terminal view shows in the workspace's project.
+    workspace: WeakEntity<Workspace>,
+    project: Option<WeakEntity<Project>>,
+    /// What's typed into each sign-in terminal, sent in order, one response at a time.
+    terminal_input: HashMap<String, TerminalInput>,
     configs: Entity<ServerConfigs>,
     agents: HashMap<String, AgentSetup>,
     /// The agent the page was opened for, listed first.
@@ -751,6 +733,9 @@ impl AgentSetupView {
         let mut this = Self {
             focus_handle: cx.focus_handle(),
             backend,
+            workspace: WeakEntity::new_invalid(),
+            project: None,
+            terminal_input: HashMap::default(),
             configs,
             agents: HashMap::default(),
             focused,
@@ -763,7 +748,36 @@ impl AgentSetupView {
             _subscriptions: subscriptions,
         };
         this.follow_agents(cx);
+        #[cfg(debug_assertions)]
+        this.preview_sign_in_terminal();
         this
+    }
+
+    /// For screenshots of the sign-in terminal without starting a sign-in: in debug builds,
+    /// `MUSTR_PREVIEW_SIGN_IN_TERMINAL=<agent>` shows a sample terminal on that agent, as if T3
+    /// waited on it. With `MUSTR_DRY_RUN_WRITES`, what's typed into it is refused locally.
+    #[cfg(debug_assertions)]
+    fn preview_sign_in_terminal(&mut self) {
+        let Some(instance_id) = std::env::var("MUSTR_PREVIEW_SIGN_IN_TERMINAL")
+            .ok()
+            .filter(|id| !id.trim().is_empty())
+        else {
+            return;
+        };
+        let output = "\u{1b}[1mSign in\u{1b}[0m\r\n\r\nOpen this page in your browser:\r\n  \
+                      \u{1b}[4;34mhttps://example.com/device\u{1b}[0m\r\n\r\nThen enter the \
+                      code it shows.\r\n\r\n\u{1b}[32m?\u{1b}[0m \u{1b}[1mCode:\u{1b}[0m ";
+        let state = serde_json::json!({
+            "instanceId": instance_id, "phase": "waiting", "flowId": "preview",
+            "authorizationUrl": null, "expiresAt": null, "message": null, "methods": [],
+            "interaction": {
+                "type": "terminal", "id": "terminal", "output": output,
+                "outputOffset": output.encode_utf16().count()
+            }
+        });
+        if let Ok(state) = serde_json::from_value::<ProviderAuthState>(state) {
+            self.agents.entry(instance_id).or_default().auth = Some(state);
+        }
     }
 
     fn providers<'a>(&self, cx: &'a App) -> Option<&'a [ServerProvider]> {
@@ -1041,45 +1055,115 @@ impl AgentSetupView {
         self.run(&instance_id, "Sending", call, set_auth, cx);
     }
 
-    /// Types `data` into the sign-in terminal, in the pieces T3 takes, one after another.
+    /// Types `data` into the sign-in terminal, in the pieces T3 takes, after what was typed
+    /// before.
     pub(crate) fn type_in_terminal(
         &mut self,
         instance_id: String,
         data: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(backend) = self.backend() else {
-            return;
-        };
-        let Some((flow_id, interaction_id)) = self.waiting_on(&instance_id) else {
-            return;
-        };
-        let calls = terminal_chunks(&data)
-            .into_iter()
-            .map(|data| ProviderAuthRespondInput {
-                flow_id: flow_id.clone(),
-                instance_id: instance_id.clone(),
-                interaction_id: interaction_id.clone(),
-                response: ProviderAuthResponse::Terminal(ProviderAuthResponseTerminal {
+        for data in terminal_chunks(&data) {
+            self.send_to_terminal(
+                &instance_id,
+                ProviderAuthResponseTerminal {
                     data,
                     size: None,
                     type_: ProviderAuthResponseTerminalType::Terminal,
-                }),
-            })
-            .collect::<Vec<_>>();
-        let call = async move {
-            let mut state = None;
-            for input in calls {
-                state = Some(
-                    backend
-                        .call::<rpc::ProviderAuthRespond>(input, Access::ProvidersManage)
-                        .await?,
-                );
-            }
-            state.ok_or_else(|| anyhow::anyhow!("nothing to send"))
+                },
+                cx,
+            );
         }
-        .boxed();
-        self.run(&instance_id, "Sending", call, set_auth, cx);
+    }
+
+    /// Tells the sign-in the terminal's size, as T3's app does when its grid changes.
+    pub(crate) fn resize_terminal(
+        &mut self,
+        instance_id: String,
+        cols: i64,
+        rows: i64,
+        cx: &mut Context<Self>,
+    ) {
+        self.send_to_terminal(
+            &instance_id,
+            ProviderAuthResponseTerminal {
+                data: String::new(),
+                size: Some(ProviderAuthResponseTerminalSize { cols, rows }),
+                type_: ProviderAuthResponseTerminalType::Terminal,
+            },
+            cx,
+        );
+    }
+
+    fn send_to_terminal(
+        &mut self,
+        instance_id: &str,
+        response: ProviderAuthResponseTerminal,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(backend) = self.backend() else {
+            return;
+        };
+        let Some(key) = self.waiting_on(instance_id) else {
+            return;
+        };
+        if let Some(reason) = backend.blocked_reason(Access::ProvidersManage) {
+            // A size alone isn't worth an error; what the user types is.
+            if !response.data.is_empty() {
+                let agent = self.agents.entry(instance_id.to_string()).or_default();
+                agent.error = Some(reason.into());
+                cx.notify();
+            }
+            return;
+        }
+        let current = self
+            .terminal_input
+            .get(instance_id)
+            .is_some_and(|input| input.key == key);
+        if !current {
+            let (sender, mut receiver) =
+                futures::channel::mpsc::unbounded::<ProviderAuthResponseTerminal>();
+            let (flow_id, interaction_id) = key.clone();
+            let instance = instance_id.to_string();
+            let task = cx.spawn(async move |this, cx| {
+                while let Some(response) = receiver.next().await {
+                    let input = ProviderAuthRespondInput {
+                        flow_id: flow_id.clone(),
+                        instance_id: instance.clone(),
+                        interaction_id: interaction_id.clone(),
+                        response: ProviderAuthResponse::Terminal(response),
+                    };
+                    let result = backend
+                        .call::<rpc::ProviderAuthRespond>(input, Access::ProvidersManage)
+                        .await;
+                    let updated = this.update(cx, |this, cx| {
+                        let agent = this.agents.entry(instance.clone()).or_default();
+                        match result {
+                            Ok(state) => set_auth(agent, state),
+                            Err(error) => {
+                                log::warn!("couldn't type into {instance}'s sign-in: {error:#}");
+                                agent.error = Some(format!("{error:#}").into());
+                            }
+                        }
+                        cx.notify();
+                    });
+                    if updated.is_err() {
+                        return;
+                    }
+                }
+            });
+            self.terminal_input.insert(
+                instance_id.to_string(),
+                TerminalInput {
+                    key,
+                    sender,
+                    _task: task,
+                },
+            );
+        }
+        if let Some(input) = self.terminal_input.get(instance_id) {
+            input.sender.unbounded_send(response).ok();
+        }
     }
 
     pub(crate) fn submit_credentials(
@@ -2068,18 +2152,34 @@ impl AgentSetupView {
                 );
             }
             Some(ProviderAuthInteraction::Terminal(terminal)) => {
-                let text = terminal_text(&terminal.output);
-                let lines = text.lines().collect::<Vec<_>>();
-                let shown = lines[lines.len().saturating_sub(TERMINAL_LINES)..].join("\n");
-                let input = window.use_keyed_state(
+                let this = cx.entity().downgrade();
+                let (workspace, project) = (self.workspace.clone(), self.project.clone());
+                let instance = id.to_string();
+                let auth_terminal = window.use_keyed_state(
                     SharedString::from(format!("agent-terminal-{id}-{flow}-{}", terminal.id)),
                     cx,
-                    |window, cx| {
-                        let mut editor = Editor::single_line(window, cx);
-                        editor.set_placeholder_text("Type here, then Send", window, cx);
-                        editor
+                    move |window, cx| {
+                        let send_input: SendInput = Rc::new({
+                            let (this, instance) = (this.clone(), instance.clone());
+                            move |data, cx| {
+                                this.update(cx, |this, cx| {
+                                    this.type_in_terminal(instance.clone(), data, cx)
+                                })
+                                .ok();
+                            }
+                        });
+                        let send_size: SendSize = Rc::new(move |cols, rows, cx| {
+                            this.update(cx, |this, cx| {
+                                this.resize_terminal(instance.clone(), cols, rows, cx)
+                            })
+                            .ok();
+                        });
+                        AuthTerminal::new(workspace, project, send_input, send_size, window, cx)
                     },
                 );
+                auth_terminal.update(cx, |auth_terminal, cx| {
+                    auth_terminal.sync(&terminal.output, terminal.output_offset, cx)
+                });
                 body.push(
                     div()
                         .debug_selector({
@@ -2087,40 +2187,19 @@ impl AgentSetupView {
                             move || format!("agent-terminal-{id}")
                         })
                         .w_full()
-                        .px_2()
-                        .py_1p5()
+                        .h(scaled(px(TERMINAL_HEIGHT)))
+                        .p(scaled(px(6.)))
                         .rounded(scaled(tokens::CONTROL_RADIUS))
                         .border(tokens::BORDER_WIDTH)
                         .border_color(palette.border.hsla())
                         .bg(palette.background.hsla())
-                        .font_family(tokens::CODE_FONT_FAMILY)
-                        .text_size(tokens::text_size(tokens::TEXT_SIZE_XSMALL))
-                        .text_color(palette.text.hsla())
-                        .whitespace_normal()
-                        .children(shown.lines().map(|line| div().child(line.to_string())))
+                        .overflow_hidden()
+                        .child(auth_terminal)
                         .into_any_element(),
                 );
-                let send = {
-                    let (id, input) = (id.to_string(), input.clone());
-                    self.button(
-                        format!("agent-send-{id}"),
-                        "Send",
-                        ButtonStyle::Default,
-                        blocked.clone(),
-                        cx,
-                        move |this, window, cx| {
-                            let text = input.read(cx).text(cx);
-                            input.update(cx, |input, cx| input.clear(window, cx));
-                            this.type_in_terminal(id.clone(), format!("{text}\r"), cx);
-                        },
-                    )
-                };
                 body.push(
-                    h_flex()
-                        .w_full()
-                        .gap_2()
-                        .child(field_box(input.into_any_element(), cx))
-                        .child(send)
+                    muted("Click the terminal to type in it. mod-v pastes.")
+                        .size(LabelSize::XSmall)
                         .into_any_element(),
                 );
             }

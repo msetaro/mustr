@@ -763,9 +763,7 @@ impl ProjectSettingsView {
             .id("project-settings-workspace-wrapper")
             .debug_selector(|| "project-settings-workspace".into())
             .when(disabled, |this| this.opacity(0.55))
-            .when_some(blocked, |this, reason| {
-                this.tooltip(Tooltip::text(reason))
-            })
+            .when_some(blocked, |this, reason| this.tooltip(Tooltip::text(reason)))
             .child(
                 SegmentedControl::new("project-settings-workspace")
                     .segment("T3's default")
