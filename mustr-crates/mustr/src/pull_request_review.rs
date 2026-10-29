@@ -18,6 +18,7 @@
 use crate::{
     inbox::{self, decode_each},
     nav_panel::NavPanel,
+    pull_request_details::{PullRequestDetails, PullRequestMetadata},
     review_backend::{self, DryRunRpc, PullRequestRpc, T3ReviewBackend},
     review_drafts::{self, DraftStore},
     t3_connection::T3Connection,
@@ -495,6 +496,8 @@ pub struct PullRequestReviewData {
     pub permissions: ReviewPermissions,
     /// What can be done to the pull request itself, once its details have loaded.
     pub capabilities: Option<PullRequestCapabilities>,
+    /// Its reviewers, labels, and what may be changed about them (`pull_request_details.rs`).
+    pub metadata: Option<PullRequestMetadata>,
     pub problems: Vec<String>,
 }
 
@@ -529,8 +532,15 @@ pub async fn load(
     );
 
     let mut tracks_viewed_files = true;
-    match detail.and_then(parse_detail) {
-        Ok(detail) => {
+    let detail = detail.and_then(|value| {
+        let metadata = PullRequestMetadata::parse(&value)
+            .inspect_err(|error| log::warn!("couldn't read the pull request's metadata: {error:#}"))
+            .ok();
+        parse_detail(value).map(|detail| (detail, metadata))
+    });
+    match detail {
+        Ok((detail, metadata)) => {
+            data.metadata = metadata;
             tracks_viewed_files = detail.tracks_viewed_files;
             data.header = Some(detail.header);
             data.permissions = detail.permissions;
@@ -726,6 +736,7 @@ pub fn open_review(
         permissions.blocked = session.write_blocked_reason().map(Into::into);
         let header = review_data.header.clone();
         let capabilities = review_data.capabilities.clone();
+        let metadata = review_data.metadata.clone();
         let contents = ReviewContents {
             header: review_data.header.map(ReviewHeader::PullRequest),
             worktree: None,
@@ -761,7 +772,7 @@ pub fn open_review(
         workspace.update_in(cx, |workspace, window, cx| {
             let actions = cx.new(|cx| {
                 PullRequestActions::new(
-                    reference,
+                    reference.clone(),
                     header,
                     capabilities.unwrap_or_default(),
                     review.downgrade(),
@@ -769,8 +780,15 @@ pub fn open_review(
                     cx,
                 )
             });
+            let details = metadata.map(|metadata| {
+                let reference = reference.clone();
+                let workspace = workspace.weak_handle();
+                let review = review.downgrade();
+                cx.new(|cx| PullRequestDetails::new(reference, metadata, review, workspace, cx))
+            });
             review.update(cx, |review, cx| {
-                review.set_header_actions(Some(actions.into()), cx)
+                review.set_header_actions(Some(actions.into()), cx);
+                review.set_header_details(details.map(Into::into), cx);
             });
             workspace.open_panel::<NavPanel>(window, cx);
             if !review_data.problems.is_empty() {

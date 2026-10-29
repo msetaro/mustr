@@ -306,6 +306,9 @@ pub struct ReviewView {
     /// The app's actions for what's under review, at the start of the header's actions: for
     /// example, merging the pull request, or committing the agent's work.
     header_actions: Option<AnyView>,
+    /// The app's details of what's under review, below the header's details line: for example,
+    /// a pull request's reviewers and labels.
+    header_details: Option<AnyView>,
     /// The project's worktrees, when the review shows real files: Zed's Restricted Mode applies
     /// to them.
     worktree_store: Option<Entity<WorktreeStore>>,
@@ -634,6 +637,7 @@ impl ReviewView {
             blocks: ThreadBlocks::default(),
             toolbar,
             header_actions: None,
+            header_details: None,
             save_task: None,
             reload_task: None,
             _subscriptions: subscriptions,
@@ -755,6 +759,25 @@ impl ReviewView {
     pub fn set_header_actions(&mut self, actions: Option<AnyView>, cx: &mut Context<Self>) {
         self.header_actions = actions;
         cx.notify();
+    }
+
+    /// Puts the app's own details under the header's details line (`None` removes them).
+    pub fn set_header_details(&mut self, details: Option<AnyView>, cx: &mut Context<Self>) {
+        self.header_details = details;
+        cx.notify();
+    }
+
+    /// Changes the pull request's header, such as after its title was edited; the tab follows.
+    pub fn update_pull_request_header(
+        &mut self,
+        update: impl FnOnce(&mut PullRequestHeader),
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ReviewHeader::PullRequest(header)) = &mut self.header {
+            update(header);
+            cx.emit(EditorEvent::TitleChanged);
+            cx.notify();
+        }
     }
 
     /// Whether this is a review of an agent's work, whose comments go to the agent rather than
@@ -1989,14 +2012,17 @@ impl Render for ReviewView {
         let compact_header = window.viewport_size().width
             < tokens::scaled(header::COMPACT_BELOW_WIDTH).to_pixels(window.rem_size());
         let submit_form = self.render_submit_form(cx);
-        let extra = (unshown_threads.is_some() || submit_form.is_some()).then(|| {
-            v_flex()
-                .gap_2()
-                .pt_1()
-                .children(unshown_threads)
-                .children(submit_form)
-                .into_any_element()
-        });
+        let details = self.header_details.clone();
+        let extra =
+            (details.is_some() || unshown_threads.is_some() || submit_form.is_some()).then(|| {
+                v_flex()
+                    .gap_2()
+                    .pt_1()
+                    .children(details)
+                    .children(unshown_threads)
+                    .children(submit_form)
+                    .into_any_element()
+            });
         let colors = cx.theme().colors();
         let notice = self.notice.clone().map(|notice| {
             h_flex()
