@@ -574,3 +574,56 @@ async fn with_several_stashed_mod_s_shows_the_stash(cx: &mut TestAppContext) {
     });
     assert_eq!(composer_text(&view, cx), "Also\n\nSecond idea");
 }
+
+// Markdown in the composer.
+
+#[gpui::test]
+async fn the_composer_highlights_markdown_and_has_t3s_formatting_keys(cx: &mut TestAppContext) {
+    init_test(cx);
+    let languages = Arc::new(language::LanguageRegistry::test(cx.executor()));
+    languages.add(Arc::new(language::Language::new(
+        language::LanguageConfig {
+            name: "Markdown".into(),
+            ..Default::default()
+        },
+        None,
+    )));
+    let backend = FakeBackend::with_thread(finished_thread(), 10);
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        ThreadView::new(
+            backend,
+            Some(languages),
+            Some(THREAD.into()),
+            "".into(),
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    let composer = view.read_with(cx, |view, _| view.composer().clone());
+    let language = composer.read_with(cx, |editor, cx| {
+        editor
+            .buffer()
+            .read(cx)
+            .as_singleton()
+            .and_then(|buffer| buffer.read(cx).language().map(|language| language.name()))
+    });
+    assert_eq!(
+        language.map(|name| name.to_string()).as_deref(),
+        Some("Markdown")
+    );
+
+    type_message(&view, "Use retries here", cx);
+    composer.update_in(cx, |editor, window, cx| {
+        editor.change_selections(Default::default(), window, cx, |selections| {
+            selections.select_ranges([editor::MultiBufferOffset(4)..editor::MultiBufferOffset(11)])
+        })
+    });
+    cx.dispatch_action(crate::ToggleBold);
+    assert_eq!(composer_text(&view, cx), "Use **retries** here");
+    cx.dispatch_action(crate::ToggleInlineCode);
+    assert_eq!(composer_text(&view, cx), "Use **`retries`** here");
+    cx.dispatch_action(crate::ToggleInlineCode);
+    cx.dispatch_action(crate::ToggleBold);
+    assert_eq!(composer_text(&view, cx), "Use retries here");
+}

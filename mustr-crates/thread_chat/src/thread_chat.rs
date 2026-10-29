@@ -69,7 +69,9 @@ pub use snooze::SnoozeThread;
 // WP15, timeline and composer:
 mod answers;
 mod file_links;
+mod formatting;
 pub use find_bar::open_thread_with_find;
+pub use formatting::{ToggleBold, ToggleInlineCode, ToggleItalic};
 mod quote;
 mod stash;
 pub use stash::StashPrompt;
@@ -197,6 +199,10 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         // WP14, agent setup and T3's settings:
         // WP15, timeline and composer: T3's `mod+s` stashes the prompt, or brings it back.
         KeyBinding::new("secondary-s", StashPrompt, composer),
+        // T3's formatting keys: `mod+b` (bold, a selection only), `mod+i` and `mod+e` (code).
+        KeyBinding::new("secondary-b", ToggleBold, composer),
+        KeyBinding::new("secondary-i", ToggleItalic, composer),
+        KeyBinding::new("secondary-e", ToggleInlineCode, composer),
     ]
 }
 

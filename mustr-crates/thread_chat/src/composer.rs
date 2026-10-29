@@ -116,6 +116,8 @@ pub struct ComposerState {
     pub(crate) answering: crate::answers::AnswerState,
     /// Whether the prompt stash's list shows (`stash.rs`).
     pub(crate) stash: crate::stash::StashState,
+    /// Whether the composer's Markdown highlighting was asked for (`formatting.rs`).
+    pub(crate) markdown_highlighting: bool,
     _save_draft: Option<gpui::Task<()>>,
 }
 
@@ -2107,6 +2109,7 @@ impl ThreadView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         self.deploy_pending_find(window, cx);
+        self.highlight_composer_markdown(cx);
         self.sync_placeholder(window, cx);
         let declines = self.feedback_target().is_some();
         let palette = palette(cx);
@@ -2459,6 +2462,9 @@ impl ThreadView {
                             .on_action(cx.listener(Self::on_stop))
                             .on_action(cx.listener(Self::on_paste_as_text))
                             .on_action(cx.listener(Self::on_stash_prompt))
+                            .on_action(cx.listener(Self::on_toggle_bold))
+                            .on_action(cx.listener(Self::on_toggle_italic))
+                            .on_action(cx.listener(Self::on_toggle_inline_code))
                             .capture_action(cx.listener(Self::on_paste))
                             .capture_action(cx.listener(Self::on_move_up))
                             .capture_action(cx.listener(Self::on_move_down))
