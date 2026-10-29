@@ -80,6 +80,7 @@ mod review_page;
 mod review_sections;
 // GitHub queries: any pull request on GitHub, by a section's query or a link.
 mod github_search;
+mod open_pull_request;
 // Toolbar icons: the programs' icons in Open in.
 mod editor_icons;
 
@@ -569,4 +570,5 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     review_sections::init(cx);
     // GitHub queries:
     github_search::init(cx);
+    open_pull_request::init(cx);
 }
