@@ -56,8 +56,8 @@ A checklist for the first launch of a release, such as on a work laptop.
      session shows as "mustr" in `t3 auth session list`. It never asks for `access:*` or `relay:*`.
    - **Keychain:** the token goes in your login keychain as `mustr-t3:<server URL>`. Saving it
      doesn't prompt; the next launch does: "mustr wants to use your confidential information…".
-     Enter your login password and choose **Always Allow**. The app is signed ad hoc, so macOS asks
-     again after each update.
+     Enter your login password and choose **Always Allow**. The app is signed ad hoc, so macOS
+     probably asks again after each update (not yet seen on a Mac).
    - **Pairing again** happens by itself when the token expires (after about 30 days), when T3
      revokes it, or when a newer mustr needs another scope. To start over, revoke the "mustr"
      session (`t3 auth session revoke <id>`), then choose Reconnect on Home.
