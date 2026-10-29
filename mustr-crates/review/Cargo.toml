@@ -41,6 +41,7 @@ editor = { workspace = true, features = ["test-support"] }
 futures.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 language = { workspace = true, features = ["test-support"] }
+mustr_languages = { path = "../mustr_languages" }
 parking_lot.workspace = true
 pretty_assertions.workspace = true
 project = { workspace = true, features = ["test-support"] }

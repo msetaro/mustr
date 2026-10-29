@@ -2157,6 +2157,8 @@ impl Render for ReviewView {
 
 #[cfg(test)]
 mod agent_tests;
+#[cfg(test)]
+mod syntax_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -2306,7 +2308,10 @@ pub(crate) mod tests {
         })
     }
 
-    fn lhs_editor(review_view: &Entity<ReviewView>, cx: &mut VisualTestContext) -> Entity<Editor> {
+    pub(crate) fn lhs_editor(
+        review_view: &Entity<ReviewView>,
+        cx: &mut VisualTestContext,
+    ) -> Entity<Editor> {
         review_view.read_with(cx, |review_view, cx| {
             review_view
                 .editor
