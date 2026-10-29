@@ -45,11 +45,11 @@ mod macos;
 mod notifications;
 // WP11, terminals, worktrees and the PR flow:
 mod local_servers;
+mod merge_back;
 mod project_scripts;
 mod pull_request_details;
 mod pull_request_guide;
 mod remote_terminal;
-mod thread_handoff;
 mod worktree_cleanup;
 // WP12, composer and timeline:
 // WP13, thread list and navigation:
@@ -73,6 +73,8 @@ mod updates;
 mod worktree_trust;
 // Settings in the UI: one Settings page, with T3's settings.
 mod settings_page;
+// Toolbar icons: the programs' icons in Open in.
+mod editor_icons;
 
 use anyhow::{Context as _, Result};
 use assets::Assets;

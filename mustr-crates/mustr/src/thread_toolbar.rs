@@ -3,15 +3,20 @@
 //!
 //! - The checkout's branch, which opens the branch picker, and its git status
 //!   (`subscribeVcsStatus`, through [`ThreadGit`]).
-//! - The thread's pull request, with its state and checks (`pullRequests.summary`,
-//!   `pullRequests.checks`). Clicking it opens mustr's review of it; its menu links, unlinks,
-//!   and watches pull requests (`thread.pull-request.link`, `unlink`, `watch`).
+//! - The thread's pull request, `● #80 ✗ ▾`: its state as a dot and its checks as an icon
+//!   (`pullRequests.summary`, `pullRequests.checks`), the rest in its tooltip. Its menu reviews
+//!   it, opens it on the web, marks it ready (`pullRequests.runAction`), watches it, links and
+//!   unlinks it (`thread.pull-request.link`, `unlink`, `watch`), and lists the thread's other
+//!   linked pull requests.
 //! - The thread's local dev servers (`local_servers.rs`), each opening in the system browser.
-//! - **Merge back**, on a fork, and **Hand off ▾** to another agent, with the handoff the next
-//!   message makes (`thread_handoff.rs`).
-//! - **Review changes** (handles `thread_chat::ReviewThreadChanges`), **Terminal** (dispatches
-//!   `thread_chat::OpenThreadTerminal`, which the terminal panel handles), **Open in ▾** (handles
-//!   `thread_chat::OpenInEditor`), and **Commit ▾**, with a row of a running action's steps.
+//! - **Review changes** (handles `thread_chat::ReviewThreadChanges`), **Merge back** on a fork
+//!   (`merge_back.rs`), and **Commit ▾**, with a row of a running action's steps; then two icon
+//!   buttons, **Terminal** (dispatches `thread_chat::OpenThreadTerminal`, which the terminal panel
+//!   handles) and **Open in ▾** with the editor's icon (handles `thread_chat::OpenInEditor`), and
+//!   "…" for what doesn't fit.
+//!
+//! The left side shows, the right side acts: the branch and the pull request are quiet buttons
+//! with muted details, the actions outlined buttons, all one height.
 //!
 //! The pull request a thread shows is chosen as T3's `useLinkedThreadPullRequest` does: from the
 //! thread's linked pull requests when T3 sends them, then its `linkedPullRequest`, then the pull
@@ -26,12 +31,12 @@ use crate::{
     agent_review,
     agent_threads::{AgentThread, agent_threads},
     local_servers::{self, LocalServers},
+    merge_back::MergeBack,
     pull_request_review::{self, checks_summary},
     thread_git::{
         BranchPickerDelegate, ControlsParts, ControlsPlacement, Editors, GitProgressRow, MenuSlot,
-        ThreadGit, ThreadGitControls, editor_label, menu_position,
+        ThreadGit, ThreadGitControls, editor_choices, menu_position, open_in_entries,
     },
-    thread_handoff::{self, MergeBack, PendingHandoff},
 };
 use anyhow::{Context as _, Result, anyhow};
 use editor::Editor;
@@ -42,8 +47,8 @@ use gpui::{
     px, rems,
 };
 use mustr_ui::{
-    ButtonStyle, Chip, OverflowItem, OverflowRow, TextButton, overflow, palette, tokens,
-    tokens::scaled,
+    ButtonStyle, IconOnlyButton, MustrIcon, OverflowItem, OverflowRow, QuietButton, TextButton,
+    overflow, palette, tokens, tokens::scaled,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -59,8 +64,8 @@ use t3_client::{
             OrchestrationV2CommandThreadPullRequestUnlinkType,
             OrchestrationV2CommandThreadPullRequestWatch,
             OrchestrationV2CommandThreadPullRequestWatchType, OrchestrationV2ThreadShell,
-            PullRequestChecks, PullRequestChecksState, PullRequestState, PullRequestSummary,
-            ThreadPullRequestLinkSource,
+            PullRequestAction, PullRequestChecks, PullRequestChecksState, PullRequestState,
+            PullRequestSummary, ThreadPullRequestLink, ThreadPullRequestLinkSource,
         },
     },
 };
@@ -69,8 +74,8 @@ use thread_chat::{
     ThreadShells, ThreadView,
 };
 use ui::{
-    Color, ContextMenu, ContextMenuEntry, Icon, IconButton, IconName, IconSize, Label,
-    LabelCommon as _, LabelSize, Tooltip, prelude::*,
+    Color, ContextMenu, ContextMenuEntry, Icon, IconName, IconSize, Label, LabelCommon as _,
+    LabelSize, Tooltip, prelude::*,
 };
 use workspace::{
     ItemHandle, ModalView, Toast, ToolbarItemEvent, ToolbarItemLocation, ToolbarItemView,
@@ -258,8 +263,38 @@ pub struct ThreadPullRequest {
     pub is_draft: bool,
     pub title: Option<String>,
     pub checks: Option<PullRequestChecksState>,
-    /// How many other pull requests are linked to the thread.
-    pub others: usize,
+    /// The other pull requests linked to the thread, newest first (the toolbar used to show
+    /// them as `+2`; its menu lists them now).
+    pub others: Vec<OtherPullRequest>,
+}
+
+/// Another pull request linked to the thread, as T3 last saw it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OtherPullRequest {
+    pub reference: PullRequestRef,
+    pub title: Option<String>,
+    pub state: Option<PullRequestState>,
+}
+
+impl OtherPullRequest {
+    /// `#81 Retry webhooks (merged)`.
+    pub fn label(&self) -> String {
+        let mut label = format!("#{}", self.reference.number);
+        if let Some(title) = self
+            .title
+            .as_deref()
+            .filter(|title| !title.trim().is_empty())
+        {
+            label.push(' ');
+            label.push_str(title.trim());
+        }
+        match &self.state {
+            Some(PullRequestState::Merged) => label.push_str(" (merged)"),
+            Some(PullRequestState::Closed) => label.push_str(" (closed)"),
+            _ => {}
+        }
+        label
+    }
 }
 
 impl ThreadPullRequest {
@@ -343,6 +378,15 @@ pub fn thread_pull_request(thread: &OrchestrationV2ThreadShell) -> Option<Thread
             open.into_iter().max_by_key(|link| updated(link))
         }?;
         let snapshot = chosen.snapshot.as_ref();
+        let mut others = links
+            .iter()
+            .filter(|link| !std::ptr::eq(**link, *chosen))
+            .collect::<Vec<_>>();
+        others.sort_by_key(|link| std::cmp::Reverse(updated(link)));
+        let others = others
+            .into_iter()
+            .map(|link| other_pull_request(link, &thread.project_id))
+            .collect();
         return Some(ThreadPullRequest {
             reference: PullRequestRef {
                 allow_stale: None,
@@ -359,7 +403,7 @@ pub fn thread_pull_request(thread: &OrchestrationV2ThreadShell) -> Option<Thread
             is_draft: snapshot.is_some_and(|snapshot| snapshot.is_draft),
             title: snapshot.map(|snapshot| snapshot.title.clone()),
             checks: snapshot.and_then(|snapshot| snapshot.checks_state.clone()),
-            others: links.len() - 1,
+            others,
         });
     }
     let (linked, origin) = match (&thread.linked_pull_request, &thread.branch_pull_request) {
@@ -383,8 +427,24 @@ pub fn thread_pull_request(thread: &OrchestrationV2ThreadShell) -> Option<Thread
         is_draft: false,
         title: None,
         checks: None,
-        others: 0,
+        others: Vec::new(),
     })
+}
+
+fn other_pull_request(link: &ThreadPullRequestLink, project_id: &str) -> OtherPullRequest {
+    let snapshot = link.snapshot.as_ref();
+    OtherPullRequest {
+        reference: PullRequestRef {
+            allow_stale: None,
+            expected_account_id: None,
+            host: Some(link.host.clone()),
+            number: link.number,
+            project_id: project_id.to_string(),
+            repository: link.repository.clone(),
+        },
+        title: snapshot.map(|snapshot| snapshot.title.clone()),
+        state: snapshot.map(|snapshot| snapshot.state.clone()),
+    }
 }
 
 fn host_of(pull_request: &ThreadPullRequest) -> String {
@@ -633,6 +693,45 @@ impl PullRequestStatus {
             thread_chat::commands::new_id(),
         );
         self.dispatch(command, "watch the pull request", cx);
+    }
+
+    /// Marks the draft pull request ready for review (`pullRequests.runAction`), as its review's
+    /// Ready for review does.
+    pub fn mark_ready(&mut self, cx: &mut Context<Self>) {
+        let (Some(backend), Some(pull_request)) =
+            (thread_chat::backend(cx), self.pull_request.clone())
+        else {
+            return;
+        };
+        let call = backend.call::<rpc::PullRequestsRunAction>(
+            pull_request_review::run_action_input(
+                &pull_request.reference,
+                PullRequestAction::Ready,
+                None,
+            ),
+            Access::SourceControlWrite,
+        );
+        self._tasks.push(cx.spawn(async move |this, cx| {
+            let result = call.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        if let Some(summary) = &mut this.summary {
+                            summary.is_draft = Some(false);
+                        }
+                        if let Some(pull_request) = &mut this.pull_request {
+                            pull_request.is_draft = false;
+                        }
+                    }
+                    Err(error) => {
+                        log::error!("couldn't mark the pull request ready: {error:#}");
+                        this.error = Some(format!("Couldn't mark it ready: {error:#}").into());
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     /// Links the pull request of the thread's branch, so it can be watched.
@@ -927,6 +1026,8 @@ pub struct ThreadToolbar {
     /// The thread view it's over, which may be a draft that becomes a thread.
     view: Option<WeakEntity<ThreadView>>,
     menu: MenuSlot,
+    /// Whose menu `menu` is.
+    menu_owner: Option<ToolbarItem>,
     location: ToolbarItemLocation,
     /// Measures the toolbar, to decide which items fit.
     overflow: OverflowRow,
@@ -936,8 +1037,6 @@ pub struct ThreadToolbar {
     merging: bool,
     /// T3's local dev servers, once the toolbar shows a thread.
     servers: Option<(Entity<LocalServers>, Subscription)>,
-    /// T3's agents, for Hand off ▾.
-    configs: Option<(Entity<thread_chat::ServerConfigs>, Subscription)>,
     _view: Option<Subscription>,
     _activation: Subscription,
 }
@@ -959,12 +1058,12 @@ impl ThreadToolbar {
             thread: None,
             view: None,
             menu: MenuSlot::default(),
+            menu_owner: None,
             location: ToolbarItemLocation::Hidden,
             overflow: OverflowRow::new(),
             hidden: Vec::new(),
             merging: false,
             servers: None,
-            configs: None,
             _view: None,
             _activation: activation,
         }
@@ -1069,87 +1168,8 @@ impl ThreadToolbar {
             let subscription = cx.observe(&servers, |_, _, cx| cx.notify());
             self.servers = Some((servers, subscription));
         }
-        if self.configs.is_none() {
-            let configs = thread_chat::ServerConfigs::global(cx);
-            let subscription = cx.observe(&configs, |_, _, cx| cx.notify());
-            self.configs = Some((configs, subscription));
-        }
         self.location = ToolbarItemLocation::PrimaryLeft;
         self.location
-    }
-
-    /// What Hand off ▾ offers: the agents the thread can go to (none when its agent can't hand
-    /// off, or while it runs), and the handoff its next message makes, if any.
-    fn handoff(
-        &self,
-        cx: &App,
-    ) -> Option<(Vec<thread_chat::AgentChoice>, Option<PendingHandoff>, bool)> {
-        let view = self.view.as_ref()?.upgrade()?;
-        let state = view.read(cx).thread_state()?;
-        let providers = self.configs.as_ref()?.0.read(cx).providers()?;
-        let targets = thread_handoff::handoff_targets(state, providers);
-        let pending = thread_handoff::pending_handoff(state, providers);
-        if targets.is_empty() && pending.is_none() {
-            return None;
-        }
-        let allowed = thread_handoff::supports_handoff(state) && state.active_run().is_none();
-        Some((targets, pending, allowed))
-    }
-
-    fn deploy_handoff_menu(
-        &mut self,
-        event: &ClickEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let (Some(thread), Some((targets, _, allowed))) = (&self.thread, self.handoff(cx)) else {
-            return;
-        };
-        let thread_id = thread.thread_id.clone();
-        let workspace = self.workspace.clone();
-        let menu = ContextMenu::build(window, cx, move |menu, _, _| {
-            handoff_entries(menu, &thread_id, &targets, allowed, &workspace)
-        });
-        self.menu
-            .deploy(menu_position(event, window), menu, window, cx, |this| {
-                &mut this.menu
-            });
-    }
-
-    fn render_handoff(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some((_, pending, allowed)) = self.handoff(cx) else {
-            return div().into_any_element();
-        };
-        match pending {
-            Some(pending) => Chip::new(
-                "thread-handoff",
-                format!("Handoff to {} pending", pending.to),
-            )
-            .accent(true)
-            .menu_indicator(true)
-            .tooltip(format!(
-                "The next message hands the conversation from {} to {}, with a summary of it \
-                     (T3's context handoff)",
-                pending.from, pending.to
-            ))
-            .menu_open(self.menu.is_open())
-            .on_click(
-                cx.listener(|this, event, window, cx| this.deploy_handoff_menu(event, window, cx)),
-            )
-            .into_any_element(),
-            None => TextButton::new("thread-handoff", "Hand off ▾")
-                .disabled(!allowed)
-                .tooltip(if allowed {
-                    "Hand the conversation to another agent: its next message goes there"
-                } else {
-                    "This agent can't hand its conversation to another now"
-                })
-                .menu_open(self.menu.is_open())
-                .on_click(cx.listener(|this, event, window, cx| {
-                    this.deploy_handoff_menu(event, window, cx)
-                }))
-                .into_any_element(),
-        }
     }
 
     /// The thread's local dev servers.
@@ -1197,10 +1217,7 @@ impl ThreadToolbar {
             }
             menu
         });
-        self.menu
-            .deploy(menu_position(event, window), menu, window, cx, |this| {
-                &mut this.menu
-            });
+        self.deploy_menu(ToolbarItem::Servers, event, menu, window, cx);
     }
 
     fn render_servers(&self, thread: &ToolbarThread, cx: &mut Context<Self>) -> AnyElement {
@@ -1212,18 +1229,19 @@ impl ThreadToolbar {
         } else {
             "The thread's terminals run these servers on T3's machine"
         };
-        Chip::new("thread-local-servers", label)
-            .dot(palette.ok.hsla())
+        QuietButton::new("thread-local-servers", label)
+            .muted(true)
+            .start(status_dot(palette.ok.hsla()))
             .menu_indicator(true)
-            .tooltip(tooltip)
-            .menu_open(self.menu.is_open())
+            .tooltip(Tooltip::text(tooltip))
+            .menu_open(self.menu_open_for(ToolbarItem::Servers))
             .on_click(
                 cx.listener(|this, event, window, cx| this.deploy_servers_menu(event, window, cx)),
             )
             .into_any_element()
     }
 
-    /// What merging the thread back would do, when it's a fork (`thread_handoff.rs`).
+    /// What merging the thread back would do, when it's a fork (`merge_back.rs`).
     fn merge_back(&self, thread: &ToolbarThread, cx: &mut App) -> Option<MergeBack> {
         let shells = ThreadShells::global(cx);
         let view = self.view.as_ref().and_then(WeakEntity::upgrade);
@@ -1306,37 +1324,120 @@ impl ThreadToolbar {
             return;
         };
         let menu = ContextMenu::build(window, cx, move |menu, _, _| entries(menu));
+        self.deploy_menu(ToolbarItem::PullRequest, event, menu, window, cx);
+    }
+
+    fn deploy_menu(
+        &mut self,
+        item: ToolbarItem,
+        event: &ClickEvent,
+        menu: Entity<ContextMenu>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.menu_owner = Some(item);
         self.menu
             .deploy(menu_position(event, window), menu, window, cx, |this| {
                 &mut this.menu
             });
     }
 
-    /// The pull request menu's entries: review, watch, link and unlink the thread's pull request,
+    /// Whether the menu open is `item`'s.
+    fn menu_open_for(&self, item: ToolbarItem) -> bool {
+        self.menu.is_open() && self.menu_owner == Some(item)
+    }
+
+    /// The pull request's menu: review it, open it on the web, mark a draft ready, merge or close
+    /// it (in its review), watch it, link or unlink it; the thread's other linked pull requests;
     /// and link another.
+    fn pull_request_menu(&self, cx: &App) -> Option<Vec<PullRequestMenuRow>> {
+        let thread = self.thread.as_ref()?;
+        let status = thread.pull_request.read(cx);
+        let mut rows = Vec::new();
+        if let Some(pull_request) = status.pull_request() {
+            let state = status.state();
+            let is_open = state
+                .as_ref()
+                .is_none_or(|(state, _)| *state == PullRequestState::Open);
+            let is_draft = state.as_ref().is_some_and(|(_, draft)| *draft);
+            let number = pull_request.reference.number;
+            let repository = &pull_request.reference.repository;
+            rows.push(PullRequestMenuRow::Header(match &state {
+                Some((state, is_draft)) => {
+                    format!("{repository}#{number} · {}", state_label(state, *is_draft))
+                }
+                None => format!("{repository}#{number}"),
+            }));
+            if let Some((_, checks)) = status.checks() {
+                rows.push(PullRequestMenuRow::Label(checks));
+            }
+            rows.push(PullRequestMenuRow::Review(
+                format!("Review #{number}"),
+                pull_request.reference.clone(),
+            ));
+            rows.push(PullRequestMenuRow::OpenOnWeb(
+                web_label(&host_of(pull_request)),
+                pull_request.url.clone(),
+            ));
+            if is_open && is_draft {
+                let can_write = thread_chat::backend(cx).is_some_and(|backend| {
+                    backend.blocked_reason(Access::SourceControlWrite).is_none()
+                });
+                rows.push(PullRequestMenuRow::MarkReady { enabled: can_write });
+            }
+            if is_open {
+                // Merging and closing ask first, and merging asks how, in the review's header.
+                rows.push(PullRequestMenuRow::Review(
+                    "Merge or close…".to_string(),
+                    pull_request.reference.clone(),
+                ));
+            }
+            rows.push(PullRequestMenuRow::Separator);
+            if pull_request.is_linked() {
+                if is_open {
+                    rows.push(PullRequestMenuRow::Watch(pull_request.watching));
+                }
+                rows.push(PullRequestMenuRow::Unlink);
+            } else {
+                rows.push(PullRequestMenuRow::LinkShown);
+            }
+            if !pull_request.others.is_empty() {
+                rows.push(PullRequestMenuRow::Separator);
+                rows.push(PullRequestMenuRow::Header(
+                    "Also linked to this thread".to_string(),
+                ));
+                for other in &pull_request.others {
+                    rows.push(PullRequestMenuRow::Review(
+                        other.label(),
+                        other.reference.clone(),
+                    ));
+                }
+            }
+            rows.push(PullRequestMenuRow::Separator);
+        }
+        rows.push(PullRequestMenuRow::LinkAnother);
+        Some(rows)
+    }
+
+    /// Adds the pull request's menu to a menu.
     fn pull_request_entries(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<impl FnOnce(ContextMenu) -> ContextMenu + 'static> {
-        let thread = self.thread.as_ref()?;
-        let status = thread.pull_request.clone();
-        let pull_request = status.read(cx).pull_request().cloned();
-        let is_open = status
-            .read(cx)
-            .state()
-            .is_none_or(|(state, _)| state == PullRequestState::Open);
+        let rows = self.pull_request_menu(cx)?;
+        let status = self.thread.as_ref()?.pull_request.clone();
         let this = cx.weak_entity();
         Some(move |mut menu: ContextMenu| {
-            if let Some(pull_request) = &pull_request {
-                let review = this.clone();
-                let reference = pull_request.reference.clone();
-                menu = menu.entry(
-                    format!("Review #{}", pull_request.reference.number),
-                    None,
-                    move |window, cx| {
-                        let reference = reference.clone();
-                        review
-                            .update(cx, |this, cx| {
+            for row in rows {
+                menu = match row {
+                    PullRequestMenuRow::Header(header) => menu.header(header),
+                    PullRequestMenuRow::Label(label) => menu.label(label),
+                    PullRequestMenuRow::Separator => menu.separator(),
+                    PullRequestMenuRow::Review(label, reference) => {
+                        let this = this.clone();
+                        menu.entry(label, None, move |window, cx| {
+                            let reference = reference.clone();
+                            this.update(cx, |this, cx| {
                                 open_pull_request_review(
                                     this.workspace.clone(),
                                     reference,
@@ -1345,46 +1446,59 @@ impl ThreadToolbar {
                                 )
                             })
                             .ok();
-                    },
-                );
-                if pull_request.is_linked() {
-                    if is_open {
-                        let watching = pull_request.watching;
+                        })
+                    }
+                    PullRequestMenuRow::OpenOnWeb(label, url) => {
+                        menu.entry(label, None, move |_, cx| cx.open_url(&url))
+                    }
+                    PullRequestMenuRow::MarkReady { enabled } => {
                         let status = status.clone();
-                        menu = menu.entry(
-                            if watching {
-                                "Stop watching"
-                            } else {
-                                "Watch for CI and comments"
-                            },
+                        menu.item(
+                            ContextMenuEntry::new("Mark ready for review")
+                                .disabled(!enabled)
+                                .handler(move |_, cx| {
+                                    status.update(cx, |status, cx| status.mark_ready(cx))
+                                }),
+                        )
+                    }
+                    PullRequestMenuRow::Watch(watching) => {
+                        let status = status.clone();
+                        menu.toggleable_entry(
+                            "Watch for CI and comments",
+                            watching,
+                            IconPosition::End,
                             None,
                             move |_, cx| {
                                 status.update(cx, |status, cx| status.set_watching(!watching, cx))
                             },
-                        );
+                        )
                     }
-                    let status = status.clone();
-                    menu = menu.entry("Unlink from thread", None, move |_, cx| {
-                        status.update(cx, |status, cx| status.unlink(cx))
-                    });
-                } else {
-                    let status = status.clone();
-                    menu = menu.entry("Link to thread", None, move |_, cx| {
-                        status.update(cx, |status, cx| status.link_shown(cx))
-                    });
-                }
-                menu = menu.separator();
+                    PullRequestMenuRow::Unlink => {
+                        let status = status.clone();
+                        menu.entry("Unlink from thread", None, move |_, cx| {
+                            status.update(cx, |status, cx| status.unlink(cx))
+                        })
+                    }
+                    PullRequestMenuRow::LinkShown => {
+                        let status = status.clone();
+                        menu.entry("Link to thread", None, move |_, cx| {
+                            status.update(cx, |status, cx| status.link_shown(cx))
+                        })
+                    }
+                    PullRequestMenuRow::LinkAnother => {
+                        let this = this.clone();
+                        menu.entry("Link a pull request…", None, move |window, cx| {
+                            this.update(cx, |this, cx| this.open_link_dialog(window, cx))
+                                .ok();
+                        })
+                    }
+                };
             }
-            let link = this;
-            menu.entry("Link a pull request…", None, move |window, cx| {
-                link.update(cx, |this, cx| this.open_link_dialog(window, cx))
-                    .ok();
-            })
+            menu
         })
     }
 
-    /// The "…" menu: the toolbar's items that didn't fit, in their order. What only shows a
-    /// state (git status, checks) comes first, as plain text.
+    /// The "…" menu: the toolbar's items that didn't fit, in their order.
     fn deploy_overflow_menu(
         &mut self,
         event: &ClickEvent,
@@ -1404,17 +1518,16 @@ impl ThreadToolbar {
             .flatten();
         let servers = self.local_servers(thread, cx);
         let here = crate::worktrees::worktrees_are_local(cx);
-        let handoff = self.handoff(cx);
-        let workspace = self.workspace.clone();
-        let editors = Editors::global(cx).read(cx);
-        let available = editors.available().to_vec();
-        let preferred = editors.preferred();
+        let editors = entries
+            .contains(&OverflowEntry::OpenIn)
+            .then(|| editor_choices(&Editors::global(cx), cx))
+            .unwrap_or_default();
         let this = cx.weak_entity();
         let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
             let mut pull_request_entries = pull_request_entries;
+            let mut editors = Some(editors);
             for entry in entries {
                 match entry {
-                    OverflowEntry::Text(text) => menu = menu.label(text),
                     OverflowEntry::ReviewChanges => {
                         let thread_id = thread_id.clone();
                         menu = menu.entry(
@@ -1429,17 +1542,6 @@ impl ThreadToolbar {
                                 )
                             },
                         );
-                    }
-                    OverflowEntry::Handoff => {
-                        if let Some((targets, _, allowed)) = &handoff {
-                            menu = handoff_entries(
-                                menu.separator(),
-                                &thread_id,
-                                targets,
-                                *allowed,
-                                &workspace,
-                            );
-                        }
                     }
                     OverflowEntry::Servers => {
                         for server in &servers {
@@ -1467,33 +1569,23 @@ impl ThreadToolbar {
                     }
                     OverflowEntry::Terminal => {
                         let thread_id = thread_id.clone();
-                        menu = menu.entry("Open a terminal", None, move |window, cx| {
-                            window.dispatch_action(
-                                Box::new(OpenThreadTerminal {
-                                    thread_id: thread_id.clone(),
+                        menu = menu.item(
+                            ContextMenuEntry::new("Open a terminal")
+                                .custom_icon_path(MustrIcon::Terminal.path())
+                                .icon_color(Color::Muted)
+                                .handler(move |window, cx| {
+                                    window.dispatch_action(
+                                        Box::new(OpenThreadTerminal {
+                                            thread_id: thread_id.clone(),
+                                        }),
+                                        cx,
+                                    )
                                 }),
-                                cx,
-                            )
-                        });
+                        );
                     }
                     OverflowEntry::OpenIn => {
-                        if available.is_empty() {
-                            menu = menu.label("T3 found no editors");
-                        }
-                        for editor in &available {
-                            let git = git.clone();
-                            let editor = editor.clone();
-                            menu = menu.toggleable_entry(
-                                format!("Open in {}", editor_label(&editor)),
-                                preferred.as_ref() == Some(&editor),
-                                IconPosition::Start,
-                                None,
-                                move |_, cx| {
-                                    let editor = editor.clone();
-                                    git.update(cx, |git, cx| git.open_in_editor(Some(editor), cx))
-                                },
-                            );
-                        }
+                        menu =
+                            open_in_entries(menu, editors.take().unwrap_or_default(), true, &git);
                     }
                     OverflowEntry::LinkPullRequest => {
                         let this = this.clone();
@@ -1511,48 +1603,37 @@ impl ThreadToolbar {
             }
             menu
         });
-        self.menu
-            .deploy(menu_position(event, window), menu, window, cx, |this| {
-                &mut this.menu
-            });
+        self.deploy_menu(ToolbarItem::More, event, menu, window, cx);
     }
 
-    /// What the "…" menu offers for the items that didn't fit when the toolbar was last drawn.
-    fn overflow_entries(&self, merge: Option<&MergeBack>, cx: &App) -> Vec<OverflowEntry> {
-        let Some(thread) = &self.thread else {
+    /// What the "…" menu offers for the items that didn't fit when the toolbar was last drawn:
+    /// the actions first, in the toolbar's order, then the pull request's menu.
+    fn overflow_entries(&self, merge: Option<&MergeBack>, _cx: &App) -> Vec<OverflowEntry> {
+        if self.thread.is_none() {
             return Vec::new();
-        };
-        let mut texts = Vec::new();
+        }
         let mut actions = Vec::new();
+        let mut pull_request = Vec::new();
         for item in &self.hidden {
             match item {
-                ToolbarItem::GitSummary => {
-                    texts.extend(git_summary(&thread.git, cx).map(OverflowEntry::Text))
-                }
-                ToolbarItem::Checks => texts.extend(
-                    thread
-                        .pull_request
-                        .read(cx)
-                        .checks()
-                        .map(|(_, label)| OverflowEntry::Text(label.into())),
-                ),
                 ToolbarItem::ReviewChanges => actions.push(OverflowEntry::ReviewChanges),
                 ToolbarItem::Terminal => actions.push(OverflowEntry::Terminal),
                 ToolbarItem::Servers => actions.push(OverflowEntry::Servers),
-                ToolbarItem::Handoff => actions.push(OverflowEntry::Handoff),
                 ToolbarItem::MergeBack => actions.push(OverflowEntry::MergeBack(
                     !self.merging && merge.is_some_and(|merge| merge.run_id.is_some()),
                 )),
                 ToolbarItem::OpenIn => actions.push(OverflowEntry::OpenIn),
                 ToolbarItem::LinkPullRequest => actions.push(OverflowEntry::LinkPullRequest),
-                ToolbarItem::PullRequest => actions.push(OverflowEntry::PullRequest),
-                ToolbarItem::Branch | ToolbarItem::GitAction => {}
+                ToolbarItem::PullRequest => pull_request.push(OverflowEntry::PullRequest),
+                ToolbarItem::Branch | ToolbarItem::GitAction | ToolbarItem::More => {}
             }
         }
-        texts.extend(actions);
-        texts
+        actions.extend(pull_request);
+        actions
     }
 
+    /// `● main 3 ▾`: the branch, with a dot for its state (changed, pushed, or not yet) and how
+    /// many files have changed; the rest is in its tooltip and the branch picker.
     fn render_branch(&self, thread: &ToolbarThread, cx: &mut Context<Self>) -> AnyElement {
         let git = thread.git.read(cx);
         if git.checkout().is_none() {
@@ -1577,6 +1658,7 @@ impl ThreadToolbar {
             Some(status) if status.has_upstream() && status.ahead() == 0 => palette.ok.hsla(),
             _ => palette.text_muted.hsla(),
         };
+        let changed = status.map_or(0, |status| status.changed_files());
         let mut tooltip = git
             .checkout()
             .map(|checkout| {
@@ -1589,26 +1671,20 @@ impl ThreadToolbar {
         if let Some(summary) = git_summary(&thread.git, cx) {
             tooltip.push_str(&format!("\n{summary}"));
         }
-        Chip::new("thread-branch", branch)
-            .dot(dot)
+        QuietButton::new("thread-branch", branch)
+            .start(status_dot(dot))
+            .when(changed > 0, |this| this.count(changed.to_string()))
             .menu_indicator(true)
             .truncate(true)
-            .tooltip(tooltip)
+            .tooltip(Tooltip::text(tooltip))
             .on_click(cx.listener(|this, _, window, cx| this.open_branch_picker(window, cx)))
             .into_any_element()
     }
 
+    /// `● #80 ✗ ▾`: the pull request's number, a dot for its state, and an icon for its checks;
+    /// the rest is in its tooltip and its menu.
     fn render_pull_request(&self, thread: &ToolbarThread, cx: &mut Context<Self>) -> AnyElement {
         let status = thread.pull_request.read(cx);
-        let menu_button = IconButton::new("thread-pull-request-menu", IconName::ChevronDown)
-            .icon_size(IconSize::XSmall)
-            // A tooltip that was pending when the click came would cover the menu.
-            .when(!self.menu.is_open(), |this| {
-                this.tooltip(Tooltip::text("Link, unlink, or watch pull requests"))
-            })
-            .on_click(cx.listener(|this, event, window, cx| {
-                this.deploy_pull_request_menu(event, window, cx)
-            }));
         let Some(pull_request) = status.pull_request().cloned() else {
             return div().into_any_element();
         };
@@ -1616,11 +1692,6 @@ impl ThreadToolbar {
         let (state, is_draft) = status
             .state()
             .unwrap_or((PullRequestState::Open, pull_request.is_draft));
-        let mut label = format!("PR #{number} · {}", state_label(&state, is_draft));
-        if pull_request.others > 0 {
-            label.push_str(&format!(" +{}", pull_request.others));
-        }
-        let title = status.title();
         let origin = match &pull_request.origin {
             PullRequestOrigin::Linked(ThreadPullRequestLinkSource::Created) => {
                 "Created from this thread"
@@ -1630,85 +1701,90 @@ impl ThreadToolbar {
             PullRequestOrigin::Linked(_) | PullRequestOrigin::LinkedField => "Linked by you",
             PullRequestOrigin::Branch => "The pull request of the thread's branch",
         };
-        let mut tooltip = match &title {
-            Some(title) => format!(
-                "{}#{number}: {title}\n{origin}",
-                pull_request.reference.repository
-            ),
-            None => format!("{}#{number}\n{origin}", pull_request.reference.repository),
-        };
-        if let Some((_, checks)) = status.checks() {
-            tooltip.push_str(&format!("\n{checks}"));
+        let mut tooltip = format!("{}#{number}", pull_request.reference.repository);
+        if let Some(title) = status.title() {
+            tooltip.push_str(&format!(": {title}"));
         }
-        let reference = pull_request.reference.clone();
-        h_flex()
-            .gap(scaled(px(4.)))
-            .child(
-                Chip::new("thread-pull-request", label)
-                    .dot(state_color(&state, is_draft, cx))
-                    .tooltip(tooltip)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        open_pull_request_review(
-                            this.workspace.clone(),
-                            reference.clone(),
-                            window,
-                            cx,
-                        )
-                    })),
-            )
-            .when(pull_request.watching, |this| {
-                this.child(
-                    div()
-                        .id("thread-pull-request-watching")
-                        .tooltip(Tooltip::text("The agent reacts to its CI and comments"))
-                        .child(
-                            Icon::new(IconName::Eye)
-                                .size(IconSize::XSmall)
-                                .color(Color::Accent),
-                        ),
-                )
-            })
-            .child(menu_button)
-            .into_any_element()
-    }
-
-    fn render_checks(&self, thread: &ToolbarThread, cx: &mut Context<Self>) -> AnyElement {
-        let Some((state, label)) = thread.pull_request.read(cx).checks() else {
-            return div().into_any_element();
-        };
-        let palette = palette(cx);
-        let error_color = cx.theme().status().error;
-        let (icon, color) = match state {
-            PullRequestChecksState::Passing => (IconName::Check, palette.ok.hsla()),
-            PullRequestChecksState::Failing => (IconName::XCircle, error_color),
-            _ => (IconName::Circle, palette.warning.hsla()),
-        };
-        h_flex()
-            .gap_1()
-            .child(
-                Icon::new(icon)
-                    .size(IconSize::XSmall)
-                    .color(Color::Custom(color)),
-            )
-            .child(
-                Label::new(label)
-                    .size(LabelSize::Small)
-                    .color(Color::Custom(color)),
-            )
+        tooltip.push_str(&format!("\n{} · {origin}", state_label(&state, is_draft)));
+        let checks = status.checks();
+        if let Some((_, label)) = &checks {
+            tooltip.push_str(&format!("\n{label}"));
+        }
+        if pull_request.watching {
+            tooltip.push_str("\nThe agent watches its CI and comments");
+        }
+        match pull_request.others.len() {
+            0 => {}
+            1 => tooltip.push_str("\n1 more pull request linked to this thread"),
+            others => tooltip.push_str(&format!(
+                "\n{others} more pull requests linked to this thread"
+            )),
+        }
+        if let Some(error) = &status.error {
+            tooltip.push_str(&format!("\n{error}"));
+        }
+        let checks_icon = checks.map(|(state, _)| {
+            let (icon, color) = match state {
+                PullRequestChecksState::Passing => (IconName::Check, Color::Success),
+                PullRequestChecksState::Failing => (IconName::XCircle, Color::Error),
+                _ => (IconName::LoadCircle, Color::Muted),
+            };
+            Icon::new(icon)
+                .size(IconSize::Custom(scaled(px(12.))))
+                .color(color)
+        });
+        QuietButton::new("thread-pull-request", format!("#{number}"))
+            .start(status_dot(state_color(&state, is_draft, cx)))
+            .when_some(checks_icon, |this, icon| this.end(icon))
+            .menu_indicator(true)
+            .tooltip(Tooltip::text(tooltip))
+            .menu_open(self.menu_open_for(ToolbarItem::PullRequest))
+            .on_click(cx.listener(|this, event, window, cx| {
+                this.deploy_pull_request_menu(event, window, cx)
+            }))
             .into_any_element()
     }
 
     fn render_link_pull_request(&self, cx: &mut Context<Self>) -> AnyElement {
-        Chip::new("thread-link-pull-request", "Link PR")
-            .tooltip("Link a pull request to this thread")
+        QuietButton::new("thread-link-pull-request", "Link PR")
+            .muted(true)
+            .start(
+                MustrIcon::PullRequest
+                    .icon()
+                    .size(IconSize::Custom(scaled(px(12.))))
+                    .color(Color::Muted),
+            )
+            .tooltip(Tooltip::text("Link a pull request to this thread"))
             .on_click(cx.listener(|this, _, window, cx| this.open_link_dialog(window, cx)))
             .into_any_element()
     }
 
+    fn render_terminal(&self, thread_id: String) -> AnyElement {
+        IconOnlyButton::new(
+            "thread-terminal",
+            MustrIcon::Terminal
+                .icon()
+                .size(IconSize::Custom(scaled(TOOLBAR_ICON_SIZE))),
+        )
+        .tooltip(Tooltip::for_action_title(
+            "Terminal",
+            &crate::terminal_panel::ToggleThreadTerminal,
+        ))
+        .on_click(move |_, window, cx| {
+            window.dispatch_action(
+                Box::new(OpenThreadTerminal {
+                    thread_id: thread_id.clone(),
+                }),
+                cx,
+            )
+        })
+        .into_any_element()
+    }
+
     /// The items the toolbar would show if it were wide enough, in their order, with their
     /// priorities: Commit ▾ and the branch always show (the branch shrinks), then Review
-    /// changes, the pull request, the checks, and the git status; Open in, Terminal, and Link PR
-    /// go into the "…" menu first.
+    /// changes, Merge back and the pull request; Link PR, Terminal, and Open in go into the "…"
+    /// menu first.
     fn items(
         &self,
         thread: &ToolbarThread,
@@ -1720,32 +1796,23 @@ impl ThreadToolbar {
         let has_pull_request = listed && status.pull_request().is_some();
         let git = thread.git.read(cx);
         let mut items = vec![ToolbarItem::Branch];
-        if git_summary(&thread.git, cx).is_some() {
-            items.push(ToolbarItem::GitSummary);
-        }
         if has_pull_request {
             items.push(ToolbarItem::PullRequest);
-            if status.checks().is_some() {
-                items.push(ToolbarItem::Checks);
-            }
         } else if listed {
             items.push(ToolbarItem::LinkPullRequest);
+        }
+        if !self.local_servers(thread, cx).is_empty() {
+            items.push(ToolbarItem::Servers);
         }
         items.push(ToolbarItem::ReviewChanges);
         if merge.is_some() {
             items.push(ToolbarItem::MergeBack);
         }
-        if !self.local_servers(thread, cx).is_empty() {
-            items.push(ToolbarItem::Servers);
-        }
-        if self.handoff(cx).is_some() {
-            items.push(ToolbarItem::Handoff);
-        }
+        items.push(ToolbarItem::GitAction);
         items.push(ToolbarItem::Terminal);
         if git.checkout().is_some() {
             items.push(ToolbarItem::OpenIn);
         }
-        items.push(ToolbarItem::GitAction);
         let branch_min_width = tokens::scaled_pixels(BRANCH_MIN_WIDTH, cx);
         items
             .into_iter()
@@ -1761,46 +1828,68 @@ impl ThreadToolbar {
     }
 }
 
-/// The narrowest the branch chip gets, at mustr's design size, before items go into the "…"
-/// menu.
-const BRANCH_MIN_WIDTH: Pixels = px(72.);
+/// The narrowest the branch gets, at mustr's design size, before items go into the "…" menu.
+const BRANCH_MIN_WIDTH: Pixels = px(100.);
 
 /// The gap between the toolbar's items, at mustr's design size.
-const ITEM_GAP: Pixels = px(10.);
+const ITEM_GAP: Pixels = px(8.);
+
+/// The size of the toolbar's icons, at mustr's design size (Zed's `IconSize`s assume 16px rems).
+const TOOLBAR_ICON_SIZE: Pixels = px(15.);
+
+/// The width of the "…" button (an outlined icon button), at mustr's design size, without its
+/// 1px borders.
+const MORE_WIDTH: Pixels = px(27.);
+
+/// A small status dot, as the branch's and the pull request's.
+fn status_dot(color: Hsla) -> impl IntoElement {
+    div()
+        .flex_none()
+        .size(scaled(px(6.)))
+        .rounded_full()
+        .bg(color)
+}
+
+/// `Open on GitHub`, or on the pull request's host.
+fn web_label(host: &str) -> String {
+    match host {
+        "github.com" => "Open on GitHub".to_string(),
+        "gitlab.com" => "Open on GitLab".to_string(),
+        "bitbucket.org" => "Open on Bitbucket".to_string(),
+        host => format!("Open on {host}"),
+    }
+}
 
 /// The toolbar's items, each of which shows only when there's room (see
 /// [`ThreadToolbar::items`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ToolbarItem {
     Branch,
-    GitSummary,
     PullRequest,
-    Checks,
     LinkPullRequest,
+    Servers,
     ReviewChanges,
     MergeBack,
-    Servers,
-    Handoff,
+    GitAction,
     Terminal,
     OpenIn,
-    GitAction,
+    /// The "…" button, for its menu.
+    More,
 }
 
 impl ToolbarItem {
     fn key(self) -> &'static str {
         match self {
             Self::Branch => "thread-toolbar-branch",
-            Self::GitSummary => "thread-toolbar-git-summary",
             Self::PullRequest => "thread-toolbar-pull-request",
-            Self::Checks => "thread-toolbar-checks",
             Self::LinkPullRequest => "thread-toolbar-link-pull-request",
+            Self::Servers => "thread-toolbar-servers",
             Self::ReviewChanges => "thread-toolbar-review-changes",
             Self::MergeBack => "thread-toolbar-merge-back",
-            Self::Servers => "thread-toolbar-servers",
-            Self::Handoff => "thread-toolbar-handoff",
+            Self::GitAction => "thread-toolbar-git-action",
             Self::Terminal => "thread-toolbar-terminal",
             Self::OpenIn => "thread-toolbar-open-in",
-            Self::GitAction => "thread-toolbar-git-action",
+            Self::More => "thread-toolbar-more",
         }
     }
 
@@ -1808,20 +1897,17 @@ impl ToolbarItem {
     fn is_action(self) -> bool {
         matches!(
             self,
-            Self::ReviewChanges | Self::MergeBack | Self::Terminal | Self::OpenIn | Self::GitAction
+            Self::ReviewChanges | Self::MergeBack | Self::GitAction | Self::Terminal | Self::OpenIn
         )
     }
 
     fn priority(self) -> u32 {
         match self {
-            Self::Branch | Self::GitAction => overflow::ALWAYS,
+            Self::Branch | Self::GitAction | Self::More => overflow::ALWAYS,
             Self::ReviewChanges => 90,
             Self::MergeBack => 70,
-            Self::Servers => 35,
-            Self::Handoff => 15,
             Self::PullRequest => 60,
-            Self::Checks => 50,
-            Self::GitSummary => 40,
+            Self::Servers => 35,
             Self::OpenIn => 30,
             Self::Terminal => 20,
             Self::LinkPullRequest => 10,
@@ -1829,55 +1915,41 @@ impl ToolbarItem {
     }
 }
 
+/// A row of the pull request's menu.
+#[derive(Clone, Debug, PartialEq)]
+enum PullRequestMenuRow {
+    Header(String),
+    /// Plain text, such as the checks.
+    Label(String),
+    Separator,
+    /// Opens mustr's review of a pull request.
+    Review(String, PullRequestRef),
+    OpenOnWeb(String, String),
+    MarkReady {
+        enabled: bool,
+    },
+    /// Watch for CI and comments, checked while watching.
+    Watch(bool),
+    Unlink,
+    /// Links the pull request of the thread's branch.
+    LinkShown,
+    LinkAnother,
+}
+
 /// An entry of the toolbar's "…" menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum OverflowEntry {
-    /// A state, such as the git status or the checks, as plain text.
-    Text(SharedString),
     ReviewChanges,
     /// Merge back, and whether it can run now.
     MergeBack(bool),
     /// The thread's local servers.
     Servers,
-    /// Hand off to each agent.
-    Handoff,
     Terminal,
     /// Open in each of T3's editors.
     OpenIn,
     LinkPullRequest,
     /// The pull request menu's entries.
     PullRequest,
-}
-
-/// Hand off ▾'s entries: one per agent the thread can go to.
-fn handoff_entries(
-    mut menu: ContextMenu,
-    thread_id: &str,
-    targets: &[thread_chat::AgentChoice],
-    allowed: bool,
-    workspace: &WeakEntity<Workspace>,
-) -> ContextMenu {
-    if targets.is_empty() {
-        return menu.label("No other agent is set up on T3");
-    }
-    for agent in targets {
-        let thread_id = thread_id.to_string();
-        let agent = agent.clone();
-        let workspace = workspace.clone();
-        menu = menu.item(
-            ContextMenuEntry::new(format!("Hand off to {}", agent.name))
-                .disabled(!allowed)
-                .handler(move |_, cx| {
-                    thread_handoff::hand_off(
-                        thread_id.clone(),
-                        agent.clone(),
-                        workspace.clone(),
-                        cx,
-                    )
-                }),
-        );
-    }
-    menu
 }
 
 /// The checkout's git status, such as "2 changed" or "Up to date", once T3 has sent it.
@@ -1903,7 +1975,7 @@ impl ThreadPullRequest {
             is_draft: false,
             title: None,
             checks: None,
-            others: 0,
+            others: Vec::new(),
         }
     }
 }
@@ -1982,7 +2054,7 @@ impl Render for ThreadToolbar {
                 .map(|(_, overflow)| overflow.clone())
                 .collect::<Vec<_>>(),
             gap.to_pixels(rem_size),
-            overflow::more_button_width(rem_size),
+            scaled(MORE_WIDTH).to_pixels(rem_size) + tokens::BORDER_WIDTH * 2.,
         );
         let hidden = items
             .iter()
@@ -2002,14 +2074,7 @@ impl Render for ThreadToolbar {
             }
             let element = match item {
                 ToolbarItem::Branch => self.render_branch(thread, cx),
-                ToolbarItem::GitSummary => {
-                    Label::new(git_summary(&thread.git, cx).unwrap_or_default())
-                        .size(LabelSize::Small)
-                        .color(Color::Muted)
-                        .into_any_element()
-                }
                 ToolbarItem::PullRequest => self.render_pull_request(thread, cx),
-                ToolbarItem::Checks => self.render_checks(thread, cx),
                 ToolbarItem::LinkPullRequest => self.render_link_pull_request(cx),
                 ToolbarItem::ReviewChanges => {
                     let thread_id = thread_id.clone();
@@ -2026,27 +2091,14 @@ impl Render for ThreadToolbar {
                         .into_any_element()
                 }
                 ToolbarItem::Servers => self.render_servers(thread, cx),
-                ToolbarItem::Handoff => self.render_handoff(cx),
                 ToolbarItem::MergeBack => match &merge {
                     Some(merge) => self.render_merge_back(merge, cx),
                     None => div().into_any_element(),
                 },
-                ToolbarItem::Terminal => {
-                    let thread_id = thread_id.clone();
-                    TextButton::new("thread-terminal", "Terminal")
-                        .tooltip("Open a terminal in the thread's checkout")
-                        .on_click(move |_, window, cx| {
-                            window.dispatch_action(
-                                Box::new(OpenThreadTerminal {
-                                    thread_id: thread_id.clone(),
-                                }),
-                                cx,
-                            )
-                        })
-                        .into_any_element()
-                }
-                ToolbarItem::OpenIn => thread.open_in.clone().into_any_element(),
                 ToolbarItem::GitAction => thread.controls.clone().into_any_element(),
+                ToolbarItem::Terminal => self.render_terminal(thread_id.clone()),
+                ToolbarItem::OpenIn => thread.open_in.clone().into_any_element(),
+                ToolbarItem::More => div().into_any_element(),
             };
             children.push((Some(SharedString::from(item.key())), element));
         }
@@ -2054,13 +2106,15 @@ impl Render for ThreadToolbar {
             children.push((
                 Some(overflow::MORE_KEY.into()),
                 div()
-                    .debug_selector(|| "thread-toolbar-more".into())
+                    .debug_selector(|| ToolbarItem::More.key().into())
                     .child(
-                        overflow::more_button(
-                            "thread-toolbar-more",
-                            "More of the thread's actions",
-                            self.menu.is_open(),
+                        IconOnlyButton::new(
+                            ToolbarItem::More.key(),
+                            Icon::new(IconName::Ellipsis)
+                                .size(IconSize::Custom(scaled(TOOLBAR_ICON_SIZE))),
                         )
+                        .tooltip(Tooltip::text("More of the thread's actions"))
+                        .menu_open(self.menu_open_for(ToolbarItem::More))
                         .on_click(cx.listener(
                             |this, event, window, cx| this.deploy_overflow_menu(event, window, cx),
                         )),
