@@ -18,7 +18,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::nav_panel::register_rail_entry;
+use crate::{nav_panel::register_rail_entry, source_control::SourceControlAccounts};
 use anyhow::{Context as _, Result};
 use editor::{Editor, EditorEvent};
 use futures::{FutureExt as _, future::BoxFuture};
@@ -132,6 +132,51 @@ pub(crate) fn branch_prefix(settings: &ServerSettings) -> String {
         .unwrap_or_else(|| DEFAULT_BRANCH_PREFIX.to_string())
 }
 
+/// How agents write commit messages and pull requests (`sourceControlWritingStyle`), with T3's
+/// defaults (`repo_conventions`, no instructions, following the repository's templates).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct WritingStyle {
+    pub mode: String,
+    pub custom_instructions: String,
+    pub follow_templates: bool,
+}
+
+pub(crate) fn writing_style(settings: &ServerSettings) -> WritingStyle {
+    let value = settings
+        .source_control_writing_style
+        .as_ref()
+        .and_then(|style| serde_json::to_value(style).ok())
+        .unwrap_or(Value::Null);
+    WritingStyle {
+        mode: value
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("repo_conventions")
+            .to_string(),
+        custom_instructions: value
+            .get("customInstructions")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        follow_templates: value
+            .get("followChangeRequestTemplates")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+    }
+}
+
+/// The patch that sets the writing style, whole.
+pub(crate) fn writing_patch(style: &WritingStyle) -> Patch {
+    (
+        "sourceControlWritingStyle",
+        json!({ "sourceControlWritingStyle": {
+            "mode": style.mode,
+            "customInstructions": style.custom_instructions,
+            "followChangeRequestTemplates": style.follow_templates,
+        } }),
+    )
+}
+
 /// `settings` with `patch` applied, for showing a change before T3 confirms it. The patch's keys
 /// are the settings' own, so it merges key by key.
 pub(crate) fn patched(settings: &ServerSettings, patch: &Value) -> Option<ServerSettings> {
@@ -179,6 +224,10 @@ pub struct T3SettingsView {
     error: Option<SharedString>,
     prefix: Entity<Editor>,
     instructions: Entity<Editor>,
+    /// The custom instructions for commit messages and pull requests.
+    writing: Entity<Editor>,
+    /// The forges' accounts on T3's machine (`crate::source_control`).
+    source_control: Entity<SourceControlAccounts>,
     _tasks: Vec<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -204,7 +253,22 @@ impl T3SettingsView {
             );
             editor
         });
+        let writing = cx.new(|cx| {
+            let mut editor = Editor::auto_height(3, 8, window, cx);
+            editor.set_placeholder_text(
+                "Write commit subjects in the imperative, under 60 characters.",
+                window,
+                cx,
+            );
+            editor
+        });
+        let source_control = cx.new(|cx| SourceControlAccounts::new(backend.clone(), cx));
         let subscriptions = vec![
+            cx.subscribe(&writing, |_, _, event: &EditorEvent, cx| {
+                if matches!(event, EditorEvent::BufferEdited) {
+                    cx.notify();
+                }
+            }),
             cx.observe_in(&configs, window, |this, configs, window, cx| {
                 // T3's `settingsUpdated`, from this page or another client.
                 if let Some(settings) = configs.read(cx).settings().cloned()
@@ -235,6 +299,8 @@ impl T3SettingsView {
             error: None,
             prefix,
             instructions,
+            writing,
+            source_control,
             _tasks: Vec::new(),
             _subscriptions: subscriptions,
         };
@@ -308,6 +374,9 @@ impl T3SettingsView {
             .update(cx, |editor, cx| editor.set_text(prefix, window, cx));
         self.instructions
             .update(cx, |editor, cx| editor.set_text(instructions, window, cx));
+        let writing = writing_style(settings).custom_instructions;
+        self.writing
+            .update(cx, |editor, cx| editor.set_text(writing, window, cx));
     }
 
     #[cfg(test)]
@@ -947,6 +1016,118 @@ impl T3SettingsView {
         section("Auto-settle", None, rows)
     }
 
+    fn render_writing(&self, settings: &ServerSettings, cx: &mut Context<Self>) -> AnyElement {
+        const MODES: [(&str, &str); 3] = [
+            ("repo_conventions", "Repository"),
+            ("conventional_commits", "Conventional"),
+            ("custom", "Instructions"),
+        ];
+        let style = writing_style(settings);
+        let selected = MODES
+            .iter()
+            .position(|(mode, _)| *mode == style.mode)
+            .unwrap_or(0);
+        let mode = self.segmented(
+            "t3-settings-writing-mode",
+            &MODES.map(|(_, label)| label),
+            selected,
+            {
+                let style = style.clone();
+                move |this, index, cx| {
+                    let mut style = style.clone();
+                    style.mode = MODES[index].0.to_string();
+                    this.write(writing_patch(&style), cx)
+                }
+            },
+            self.blocked()
+                .or_else(|| self.saving.map(|_| "Saving".into())),
+            cx,
+        );
+        let templates = self.switch(
+            "t3-settings-writing-templates",
+            style.follow_templates,
+            {
+                let style = style.clone();
+                move |on| {
+                    let mut style = style.clone();
+                    style.follow_templates = on;
+                    writing_patch(&style)
+                }
+            },
+            cx,
+        );
+        let mut rows = vec![
+            row(
+                "t3-settings-row-writing-mode",
+                "Commit and pull request style",
+                match style.mode.as_str() {
+                    "conventional_commits" => "Agents write Conventional Commits (feat:, fix:, …).",
+                    "custom" => "Agents follow your instructions below.",
+                    _ => "Agents follow each repository's own conventions.",
+                },
+                mode,
+                true,
+                cx,
+            ),
+            row(
+                "t3-settings-row-writing-templates",
+                "Use pull request templates",
+                "Agents fill in a repository's pull request template when it has one.",
+                templates,
+                false,
+                cx,
+            ),
+        ];
+        if style.mode == "custom" {
+            let palette = palette(cx);
+            let typed = self.writing.read(cx).text(cx);
+            let changed = typed.trim() != style.custom_instructions.trim();
+            let save = self.save_button(
+                "t3-settings-save-writing",
+                changed,
+                |this, cx| this.save_writing(cx),
+                cx,
+            );
+            rows.push(
+                v_flex()
+                    .w_full()
+                    .gap_1()
+                    .px_2()
+                    .py(scaled(px(9.)))
+                    .border_t(tokens::BORDER_WIDTH)
+                    .border_color(palette.border.hsla())
+                    .child(Label::new("Instructions").weight(FontWeight::MEDIUM))
+                    .child(
+                        div()
+                            .w_full()
+                            .px_2()
+                            .py_1()
+                            .rounded(scaled(tokens::CONTROL_RADIUS))
+                            .border(tokens::BORDER_WIDTH)
+                            .border_color(palette.border.hsla())
+                            .bg(palette.background.hsla())
+                            .child(self.writing.clone()),
+                    )
+                    .child(h_flex().justify_end().child(save))
+                    .into_any_element(),
+            );
+        }
+        section(
+            "Writing",
+            Some("How agents write commits and pull requests"),
+            rows,
+        )
+    }
+
+    fn save_writing(&mut self, cx: &mut Context<Self>) {
+        let Some(settings) = self.settings.loaded() else {
+            return;
+        };
+        let mut style = writing_style(settings);
+        style.custom_instructions = self.writing.read(cx).text(cx).trim().to_string();
+        self.write(writing_patch(&style), cx);
+    }
+
     fn render_branch_naming(
         &self,
         settings: &ServerSettings,
@@ -1163,6 +1344,8 @@ impl Render for T3SettingsView {
                     self.render_follow_ups(cx),
                     self.render_auto_settle(&settings, window, cx),
                     self.render_branch_naming(&settings, cx),
+                    self.render_writing(&settings, cx),
+                    self.source_control.clone().into_any_element(),
                 ]
             }
         };

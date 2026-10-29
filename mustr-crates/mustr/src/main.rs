@@ -57,6 +57,7 @@ mod auth_terminal;
 mod fake_t3;
 mod project_settings;
 mod servers;
+mod source_control;
 mod usage_page;
 // Zoom:
 mod zoom;
