@@ -298,7 +298,7 @@ impl NavPanel {
         };
         let chosen = Some(width) == self.chosen_width;
         let new_width = if chosen {
-            self.default_size(window, cx).min(max_width)
+            self.preferred_width(window, cx).min(max_width)
         } else {
             width.min(max_width)
         };
@@ -346,12 +346,21 @@ impl NavPanel {
         let width = match sidebar {
             Sidebar::None => tokens::scaled_pixels(tokens::RAIL_WIDTH, cx),
             _ => remembered
-                .unwrap_or_else(|| self.default_size(window, cx))
+                .unwrap_or_else(|| self.preferred_width(window, cx))
                 .min(max_width),
         };
         self.sized_for = Some(sidebar);
         self.chosen_width = Some(width);
         Self::set_width(&panel, left_dock, width, cx);
+    }
+
+    /// The panel's width with its sidebar, by default: a third of the window at most.
+    fn preferred_width(&self, window: &Window, cx: &App) -> Pixels {
+        default_width(
+            window.viewport_size().width,
+            self.sidebar().default_width(),
+            rem_size(cx),
+        )
     }
 
     fn set_width(panel: &Entity<Self>, left_dock: &Entity<Dock>, width: Pixels, cx: &mut App) {
@@ -697,12 +706,15 @@ impl Panel for NavPanel {
 
     fn set_position(&mut self, _: DockPosition, _: &mut Window, _: &mut Context<Self>) {}
 
-    fn default_size(&self, window: &Window, cx: &App) -> Pixels {
-        default_width(
-            window.viewport_size().width,
-            self.sidebar().default_width(),
-            rem_size(cx),
-        )
+    /// What the dock falls back to: the rail and a file tree, at the font size alone. Zed's dock
+    /// resets a panel to its default size whenever that changes between two settings changes
+    /// (`Dock::add_panel` in `crates/workspace/src/dock.rs`), so it mustn't follow the window's
+    /// width or the sidebar showing: then any save (a setting, a Review section) after maximizing
+    /// the window, or after leaving Agents, widened the rail with an empty strip. The panel sets
+    /// its width itself ([`Self::preferred_width`]); a zoom still resets it, and
+    /// [`Self::ui_font_size_changed`] scales it after.
+    fn default_size(&self, _: &Window, cx: &App) -> Pixels {
+        tokens::scaled_pixels(tokens::RAIL_WIDTH + DEFAULT_TREE_WIDTH, cx)
     }
 
     fn starts_open(&self, _: &Window, _: &App) -> bool {
@@ -985,6 +997,67 @@ mod tests {
             });
         });
         cx.run_until_parked();
+    }
+
+    /// Writes a setting other than the size, as the Settings page and the Review page's sections
+    /// do.
+    fn write_another_setting(value: f32, cx: &mut VisualTestContext) {
+        cx.update(|_, cx| {
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.theme.buffer_font_size = Some(value.into());
+                });
+            });
+        });
+        cx.run_until_parked();
+    }
+
+    /// Writing a setting keeps the panel's width. Zed's dock resets a panel to its default size
+    /// whenever that differs from what it was at the last settings change, and the panel's
+    /// default followed the window's width and the sidebar showing, so a save after maximizing
+    /// the window, or after leaving Agents, widened the rail with an empty strip.
+    #[gpui::test]
+    async fn writing_a_setting_keeps_the_panels_width(cx: &mut TestAppContext) {
+        let (workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;
+        set_ui_font_size(26., cx);
+        cx.simulate_resize(gpui::size(px(1200.), px(800.)));
+        cx.run_until_parked();
+        show_inbox(&workspace, cx);
+        click(&nav_panel, Area::Review, cx);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(76.));
+
+        // Maximized, then a save.
+        cx.simulate_resize(gpui::size(px(1512.), px(982.)));
+        cx.run_until_parked();
+        write_another_setting(14., cx);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(76.));
+
+        // At 13: a save in Agents, then one on the Review page.
+        set_ui_font_size(13., cx);
+        click(&nav_panel, Area::Agents, cx);
+        write_another_setting(15., cx);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(38. + 320.));
+        click(&nav_panel, Area::Review, cx);
+        write_another_setting(16., cx);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(38.));
+
+        // A width the user dragged stays too.
+        click(&nav_panel, Area::Agents, cx);
+        let left_dock = workspace.read_with(cx, |workspace, _| workspace.left_dock().clone());
+        left_dock.update(cx, |dock, cx| {
+            dock.set_panel_size_state(
+                &nav_panel,
+                PanelSizeState {
+                    size: Some(px(420.)),
+                    flex: None,
+                },
+                cx,
+            )
+        });
+        cx.simulate_resize(gpui::size(px(1400.), px(900.)));
+        cx.run_until_parked();
+        write_another_setting(17., cx);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(420.));
     }
 
     /// The panel is sized in rems of `ui_font_size`, like what it draws, and a zoom scales it,
