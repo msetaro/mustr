@@ -110,7 +110,7 @@ groups what's left into four packages.
 | Reorder the queue | Drag handle | `queued-run.reorder` | Missing | S | P2 |
 | Send a queued message now | "Send now" on a queued message | `queued-run.start` *(0.1.3)* | Missing: unblocked by the 0.1.3 pin | S | P2 |
 | Usage-limit recovery | Resume at reset, or snooze until reset (`chat/UsageLimitRecoveryBanner.tsx`) | `thread.metadata.update` `{limitRecovery}`, `thread.snooze`; shell `usageLimitResetAt` | Done (`thread_chat/src/usage.rs`): Resume at reset, Snooze until reset, and Resume now | — | P1 |
-| Worktree setup progress, retry | Setup card with retry and cancel (`chat/WorktreeSetupCard.tsx`) | `subscribeWorktreeSetup`, `prepared-run.retry`, `worktreeSetup.cancel` | Missing: a thread being set up shows only its status pill | S | P1 |
+| Worktree setup progress, retry | Setup card with retry and cancel (`chat/WorktreeSetupCard.tsx`) | `subscribeWorktreeSetup`, `prepared-run.retry`, `worktreeSetup.cancel` | Done (`thread_chat/src/worktree_setup.rs`): the card above the timeline with stages, the script's last lines, Details, Cancel, and Retry for a failed preparation. No Open terminal or Work locally | — | P1 |
 
 ### 2.6 Approvals, questions and secrets
 
@@ -166,10 +166,10 @@ groups what's left into four packages.
 |---|---|---|---|---|---|
 | A worktree per thread | Created when the thread launches | `launchThread` | Done | — | P0 |
 | Remove worktrees | Offers removal of an unshared worktree on archive or delete; automatic cleanup rules (`worktreeCleanup.ts`, `settings/StorageSettings.tsx`) | `vcs.removeWorktree`; whether a worktree is shared: `orchestration.getWorktreeThreadIds` *(0.1.3)*, or on 0.1.1 the shell threads with the same `worktreePath`; `server.runStorageCleanup` | Done (`mustr/src/worktrees.rs`): the worktrees page, and on archive. No automatic cleanup rules | — | P0: user's must-have; about 150 T3 worktrees on this machine |
-| Switch or create a branch | `mod+shift+g` (`components/BranchPicker.tsx`) | `vcs.listRefs`, `vcs.switchRef`, `vcs.createRef` | Done (`mustr/src/thread_git.rs`: the toolbar's branch picker). No `mod+shift+g` | — | P0: user's must-have |
+| Switch or create a branch | `mod+shift+g` (`components/BranchPicker.tsx`) | `vcs.listRefs`, `vcs.switchRef`, `vcs.createRef` | Done (`mustr/src/thread_git.rs`: the toolbar's branch picker, `mod+shift+g`) | — | P0: user's must-have |
 | Git status | Ahead, behind and dirty for the git actions | `subscribeVcsStatus`, `vcs.refreshStatus` | Done (`thread_git.rs`) | — | P0: user's must-have (feeds §2.11) |
 | Worktree handoff | Moves a thread between the checkout and a worktree | `thread.metadata.update` `{worktreePath, branch}` | Missing | M | P2 |
-| Project scripts | Run `dev` or `test` from `t3.json`; `runOnSettle` (`components/ProjectScriptsControl.tsx`) | `terminal.open`; `projects.mutate` scripts | Missing | M | P2 |
+| Project scripts | Run `dev` or `test` from `t3.json`; `runOnSettle` (`components/ProjectScriptsControl.tsx`) | `terminal.open`; `projects.mutate` scripts | Partial (`mustr/src/terminal_panel.rs`): the terminal panel's Run ▾ runs the project's scripts and `t3.json`'s (`projects.readFile`) in a new terminal. No editing, importing, `runOnSettle` or previews | S | P2 |
 
 ### 2.11 Git and pull requests
 
@@ -179,7 +179,7 @@ groups what's left into four packages.
 | The thread's PR | PR chip with checks in the header and sidebar (`components/ThreadStatusIndicators.tsx`, `chat/ThreadDetailsPrRow.tsx`) | Shell `linkedPullRequest`, `branchPullRequest`; `pullRequests.summary`, `pullRequests.checks` | Done (`mustr/src/thread_toolbar.rs`): opens mustr's review. Sidebar rows show no PR chip | — | P0 (with the row above) |
 | Link or unlink a PR | `pullRequest/LinkPullRequestDialog.tsx` | `thread.pull-request.link`, `thread.pull-request.unlink` | Done (`thread_toolbar.rs`) | — | P0: user's must-have |
 | Watch a PR | The agent reacts to CI and comments | `thread.pull-request.watch` | Done (`thread_toolbar.rs`) | — | P0: user's must-have |
-| A PR's threads | `pullRequest/PullRequestThreadLinks.tsx` | `pullRequests.linkedThreads` | Missing | S | P1 |
+| A PR's threads | `pullRequest/PullRequestThreadLinks.tsx` | `pullRequests.linkedThreads` | Done (`mustr/src/pull_request_review.rs`): Threads in the PR review header, opening each | — | P1 |
 | Merge, ready, close | `pullRequest/PullRequestDetailActions.tsx` | `pullRequests.runAction` | Done (`mustr/src/pull_request_review.rs`): in the PR header, confirming merges and closes | — | P0: user's must-have |
 | PR inbox, review, comments, submit | `pullRequest/PullRequestsPage.tsx` | `pullRequests.*` | Done: mustr's core (`review/`, `mustr/src/home.rs`) | — | — |
 | Review guides | `pullRequest/PullRequestGuideTab.tsx`; agents' `write_pull_request_guides` | `pullRequests.reviewGuide`, `generateReviewGuide` | Missing | M | P2 |
@@ -190,9 +190,9 @@ groups what's left into four packages.
 
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
-| Open in editor | Cursor, VS Code, Zed and others for the thread's folder (`chat/OpenInPicker.tsx`) | `shell.openInEditor`; editors from `server.getConfig` | Done (`thread_git.rs`: Open in ▾ in the thread toolbar and the agent review header). No `mod+o` | — | P0: the way out for anything mustr lacks |
-| Terminal per thread | A drawer in the thread's worktree that stays open (`components/ThreadTerminalDrawer.tsx`, `components/PersistentThreadTerminals.tsx`) | `terminal.open/attach/write/resize/close`, `subscribeTerminalEvents` (`terminal:*` scopes) | Partial: local threads only (`mustr/src/terminal_panel.rs`: Zed terminals in the thread's worktree, kept per thread, `mod+j`). On a T3 on another machine the panel says it isn't supported | M | P0: user's must-have. What's left is T3's `terminal.*` for remote threads |
-| Terminal excerpt to the composer | `chat/TerminalContextInlineChip.tsx` | `message.dispatch.context` (terminal) | Missing | S | P2 |
+| Open in editor | Cursor, VS Code, Zed and others for the thread's folder (`chat/OpenInPicker.tsx`) | `shell.openInEditor`; editors from `server.getConfig` | Done (`thread_git.rs`: Open in ▾ in the thread toolbar and the agent review header, `mod+o`) | — | P0: the way out for anything mustr lacks |
+| Terminal per thread | A drawer in the thread's worktree that stays open (`components/ThreadTerminalDrawer.tsx`, `components/PersistentThreadTerminals.tsx`) | `terminal.open/attach/write/resize/close`, `subscribeTerminalEvents` (`terminal:*` scopes) | Done (`mustr/src/terminal_panel.rs`, `remote_terminal.rs`): Zed terminals in the thread's worktree, kept per thread, `mod+j`; on a T3 on another machine, T3's terminals (`terminal.attach`, `write`, `resize`, `close`) in the same panel, found again while T3 runs them. No mouse reports to full-screen programs | — | P0: user's must-have |
+| Terminal excerpt to the composer | `chat/TerminalContextInlineChip.tsx` | `message.dispatch.context` (terminal) | Done (`terminal_panel.rs`): Add to chat on a selection (`mod+>`) dispatches T3's terminal record; the composer's chip is WP12's | — | P2 |
 
 ### 2.13 Preview browser and devices
 
@@ -240,8 +240,8 @@ groups what's left into four packages.
 
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
-| Thread and composer keys | Model `mod+shift+m`, effort `mod+shift+e`, access `mod+shift+a`, workspace `mod+shift+x`, branch `mod+shift+g`; previous and next thread `mod+shift+[` and `]`; diff `mod+d`; open in editor `mod+o` (`packages/shared/src/keybindings.ts`) | Local; `server.upsertKeybinding` for T3's own store | Partial: send, queue, steer, model, effort, access, settle, search (`mod+alt+k`) and terminal (`mod+j`) (`thread_chat/src/thread_chat.rs` `key_bindings`, `mustr/src/terminal_panel.rs`). No workspace, branch, previous and next thread, diff or open in editor | S | P1: mustr uses Zed's `keymap.json`, so no sync with T3 |
-| Command palette | Thread actions, new thread in…, settle, usage | — | Partial: thread actions (settle, archive, pin, rename, compact, restart, usage), terminals, worktrees and schedules are in Zed's palette. Review changes, Open in, Commit and the branch picker aren't, since their actions take a thread id | S | P1 |
+| Thread and composer keys | Model `mod+shift+m`, effort `mod+shift+e`, access `mod+shift+a`, workspace `mod+shift+x`, branch `mod+shift+g`; previous and next thread `mod+shift+[` and `]`; diff `mod+d`; open in editor `mod+o` (`packages/shared/src/keybindings.ts`) | Local; `server.upsertKeybinding` for T3's own store | Partial: send, queue, steer, model, effort, access, settle, search (`mod+alt+k`), terminal (`mod+j`), diff (`mod+d`), open in editor (`mod+o`) and branch (`mod+shift+g`) (`thread_chat/src/thread_chat.rs` `key_bindings`, `mustr/src/terminal_panel.rs`, `mustr/src/thread_toolbar.rs`). No workspace, previous and next thread | S | P1: mustr uses Zed's `keymap.json`, so no sync with T3 |
+| Command palette | Thread actions, new thread in…, settle, usage | — | Partial: thread actions (settle, archive, pin, rename, compact, restart, usage), terminals, worktrees and schedules are in Zed's palette. Review changes, Open in, the branch picker, Commit push and PR, and Link PR are too, on the open thread (`thread_toolbar.rs`) | — | P1 |
 | T3 settings | Thread defaults, auto-settle rules, follow-up behavior, branch naming (`settings/SettingsPanels.tsx`) | `server.getSettings`, `server.updateSettings` (`settings:write`) | Missing: read for new-thread defaults only (`thread_settings.rs`) | M | P1 |
 | Install and sign in to agents | Install CLIs, log in (`settings/ProviderSetupSection.tsx`, `settings/ProviderAuthTerminal.tsx`, `onboarding/`) | `provider.install.*`, `provider.auth.*` (`providers:manage`) | Missing: Home and the provider banner say what's wrong; fixing it needs T3's app or the CLI | M | P1: CLI logins live on disk and are shared |
 | Usage limits | 5-hour and weekly windows per account (`chat/ComposerUsageLimits.tsx`, `components/usage/UsageLimits.tsx`) | Provider status in `server.getConfig` and `subscribeServerConfig`, `server.refreshProviders`; `provider.consumeResetCredit` | Done (`thread_chat/src/usage.rs`): the header's windows and a usage panel with reset times | — | P1 |
