@@ -731,8 +731,13 @@ impl KeyBindingsView {
             .py(scaled(px(5.)))
             .border_b(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
+            // The row being recorded is filled and rounded, inset in the table so the fill stays
+            // clear of its rounded corners (`mustr_ui::corners`), and the fill stands in for its
+            // line.
             .when(recording.is_some(), |this| {
-                this.bg(palette.accent_soft.hsla())
+                this.rounded(scaled(tokens::CONTROL_RADIUS))
+                    .border_color(gpui::transparent_black())
+                    .bg(palette.accent_soft.hsla())
             })
             .child(
                 v_flex()
@@ -930,6 +935,7 @@ impl Render for KeyBindingsView {
                     .flex_1()
                     .min_h_0()
                     .w_full()
+                    .p(scaled(tokens::LIST_INSET))
                     .rounded(scaled(tokens::CORNER_RADIUS))
                     .border(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
