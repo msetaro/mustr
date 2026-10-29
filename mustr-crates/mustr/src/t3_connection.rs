@@ -22,7 +22,10 @@ use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use t3_client::{
@@ -771,15 +774,29 @@ impl CurrentRpc {
 /// Whichever session is current, for background work that outlives a reconnect (such as the
 /// agent threads' backend). Empty while disconnected.
 #[derive(Clone, Default)]
-pub struct CurrentSession(Arc<parking_lot::Mutex<Option<Arc<T3Session>>>>);
+pub struct CurrentSession {
+    session: Arc<parking_lot::Mutex<Option<Arc<T3Session>>>>,
+    /// The app's first attempt to connect has connected, or found why it can't.
+    first_attempt_done: Arc<AtomicBool>,
+}
 
 impl CurrentSession {
     pub fn get(&self) -> Option<Arc<T3Session>> {
-        self.0.lock().clone()
+        self.session.lock().clone()
     }
 
     fn set(&self, session: Option<Arc<T3Session>>) {
-        *self.0.lock() = session;
+        *self.session.lock() = session;
+    }
+
+    /// Whether the app is still making its first connection, as when views restored at launch
+    /// first load: they'll load once it's up, so their failed reads aren't worth a warning.
+    pub fn first_attempt_pending(&self) -> bool {
+        !self.first_attempt_done.load(Ordering::Acquire)
+    }
+
+    fn finish_first_attempt(&self) {
+        self.first_attempt_done.store(true, Ordering::Release);
     }
 }
 
@@ -1056,6 +1073,9 @@ impl T3Connection {
     }
 
     fn set_status(&mut self, status: ConnectionStatus, cx: &mut Context<Self>) {
+        if !matches!(status, ConnectionStatus::Connecting(_)) {
+            self.current_session.finish_first_attempt();
+        }
         self.status = status;
         cx.notify();
     }
@@ -1825,6 +1845,37 @@ fn scope_list(scopes: &[Scope]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reads that fail before the app's first attempt to connect has finished (views restored at
+    /// launch) are expected, so they're logged quietly; once it has connected or failed, a
+    /// missing connection is a real failure again, reconnects included.
+    #[gpui::test]
+    fn only_the_first_attempt_to_connect_is_quiet(cx: &mut gpui::TestAppContext) {
+        let connection = cx.update(|cx| init_for_test(T3Mode::Embedded, cx));
+        let session = connection.read_with(cx, |connection, _| connection.current_session());
+        assert!(session.first_attempt_pending());
+
+        connection.update(cx, |connection, cx| {
+            connection.set_status(ConnectionStatus::Connecting("Connecting".into()), cx)
+        });
+        assert!(session.first_attempt_pending());
+        connection.update(cx, |connection, cx| {
+            connection.set_status(ConnectionStatus::Failed("T3 isn't running.".into()), cx)
+        });
+        assert!(!session.first_attempt_pending());
+        connection.update(cx, |connection, cx| {
+            connection.set_status(ConnectionStatus::Connecting("Reconnecting".into()), cx)
+        });
+        assert!(!session.first_attempt_pending());
+
+        let error = anyhow::Error::new(thread_chat::NotConnected {
+            connecting: session.first_attempt_pending(),
+        });
+        assert_eq!(
+            thread_chat::retry_log_level(&error, log::Level::Warn),
+            log::Level::Warn
+        );
+    }
 
     #[test]
     fn the_installed_t3_is_used_started_or_set_up() {

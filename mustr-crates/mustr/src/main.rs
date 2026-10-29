@@ -150,10 +150,27 @@ struct Args {
     printenv: bool,
 }
 
+// Copied from crates/util/src/util.rs (`prevent_root_execution`), in mustr's words: Zed's says
+// "Running Zed as root".
+#[cfg(unix)]
+fn prevent_root_execution() {
+    let is_root = nix::unistd::geteuid().is_root();
+    let allow_root = std::env::var("MUSTR_ALLOW_ROOT").is_ok_and(|value| value == "true");
+    if is_root && !allow_root {
+        eprintln!(
+            "\
+Error: Running mustr as root or via sudo is unsupported.
+       Doing so (even once) may break things for all later use of mustr as yourself.
+       If you wish to proceed anyway, set `MUSTR_ALLOW_ROOT=true` in your environment."
+        );
+        std::process::exit(1);
+    }
+}
+
 fn main() {
     zed_services::scrub_env();
     #[cfg(unix)]
-    util::prevent_root_execution();
+    prevent_root_execution();
 
     let args = Args::parse();
 

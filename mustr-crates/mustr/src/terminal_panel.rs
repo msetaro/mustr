@@ -7,6 +7,9 @@
 //! - Whether the panel shows is kept per thread too, as T3 keeps its drawer open per thread: it
 //!   opens for a thread whose terminals were showing and closes for one whose weren't. Other
 //!   items, such as home or a review, leave it as it is.
+//! - Across launches, the panel remembers the thread whose terminals showed last
+//!   ([`SHOWN_THREAD_KEY`]): it opens again with that thread, in a new terminal, and not over
+//!   home or another thread, though Zed reopens the bottom dock as it was when mustr quit.
 //! - When T3 runs on this machine, the terminals are Zed's (`terminal_view`), started in the
 //!   thread's folder. When it runs on another machine (or `MUSTR_IGNORE_LOCAL_WORKTREES` is set),
 //!   they're T3's, on that machine (`remote_terminal.rs`), in the same tabs with the same keys.
@@ -36,6 +39,8 @@ use crate::{
     thread_git::{MenuSlot, menu_position},
     worktrees::{display_path, worktrees_are_local},
 };
+use anyhow::Context as _;
+use db::kvp::KeyValueStore;
 use gpui::{
     Action, AnyElement, AnyView, App, AppContext as _, Context, Entity, EntityId, EventEmitter,
     FocusHandle, Focusable, FontWeight, KeyBinding, Pixels, SharedString, Subscription, Task,
@@ -60,8 +65,9 @@ use thread_chat::{
     ThreadBackendExt as _, ThreadShells, ThreadView, actions::TerminalContext,
 };
 use ui::{ContextMenu, Tooltip, prelude::*};
+use util::ResultExt as _;
 use workspace::{
-    ItemHandle, Workspace,
+    ItemHandle, MultiWorkspace, Workspace,
     dock::{DockPosition, Panel, PanelEvent},
     item::ItemEvent,
     pane::CloseActiveItem,
@@ -84,6 +90,9 @@ actions!(
 );
 
 const KEY_CONTEXT: &str = "ThreadTerminals";
+
+/// Where the panel keeps, across launches, the thread whose terminals showed last.
+const SHOWN_THREAD_KEY: &str = "mustr-thread-terminals-shown";
 
 /// The panel's height at mustr's design size, in a window tall enough for it.
 const DEFAULT_HEIGHT: Pixels = px(300.);
@@ -138,6 +147,25 @@ pub fn key_bindings() -> Vec<KeyBinding> {
     ]
 }
 
+/// Tells the windows' panels that their windows have opened, so Zed has restored their docks:
+/// from now on the panel shows whenever its dock does. Call when a window has opened.
+pub fn finish_launch(cx: &mut App) {
+    for window in cx.windows() {
+        let Some(window) = window.downcast::<MultiWorkspace>() else {
+            continue;
+        };
+        window
+            .update(cx, |multi_workspace, _, cx| {
+                for workspace in multi_workspace.workspaces() {
+                    if let Some(panel) = workspace.read(cx).panel::<ThreadTerminalPanel>(cx) {
+                        panel.update(cx, |panel, _| panel.launching = false);
+                    }
+                }
+            })
+            .ok();
+    }
+}
+
 /// Adds the terminal panel to a new workspace. It must run while the workspace is set up, before
 /// dock restoration finishes (`window.rs`); it doesn't read the workspace entity.
 pub fn add_panel(
@@ -164,6 +192,7 @@ fn open_terminals(
     };
     let thread_id = thread_id.or_else(|| active_thread_id(workspace, cx));
     panel.update(cx, |panel, cx| {
+        panel.launching = false;
         if let Some(thread_id) = thread_id {
             panel.show_thread(thread_id, window, cx);
         }
@@ -186,6 +215,7 @@ fn open_setup_terminal(
         return;
     };
     panel.update(cx, |panel, cx| {
+        panel.launching = false;
         panel.show_thread(action.thread_id.clone(), window, cx);
         panel.show_t3_terminal(action, window, cx);
     });
@@ -369,6 +399,14 @@ pub struct ThreadTerminalPanel {
     menu: MenuSlot,
     /// T3's settings, for which scripts apply, once a thread is shown.
     scripts: Option<(Entity<ProjectScripts>, Subscription)>,
+    /// Where the thread whose terminals showed last is kept across launches: the app's database,
+    /// once it has one (tests don't).
+    memory: Option<KeyValueStore>,
+    /// The thread whose terminals showed last, this launch or the one before.
+    remembered: Option<String>,
+    /// The window is still opening, so Zed may reopen the dock as it was when mustr quit
+    /// ([`finish_launch`]).
+    launching: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -390,19 +428,69 @@ impl ThreadTerminalPanel {
                 }
             },
         );
+        let memory = cx
+            .has_global::<db::AppDatabase>()
+            .then(|| KeyValueStore::global(cx));
+        let remembered = memory.as_ref().and_then(|memory| {
+            memory
+                .read_kvp(SHOWN_THREAD_KEY)
+                .context("reading the thread whose terminals showed last")
+                .log_err()
+                .flatten()
+        });
+        let mut threads = HashMap::new();
+        // Its terminals show again when it's next shown, as the dock showed them at quit.
+        if let Some(thread_id) = &remembered {
+            threads.insert(
+                thread_id.clone(),
+                ThreadTerminals {
+                    open: true,
+                    ..ThreadTerminals::default()
+                },
+            );
+        }
         Self {
             focus_handle: cx.focus_handle(),
             workspace: workspace.downgrade(),
             project,
             thread_id: None,
-            threads: HashMap::new(),
+            threads,
             focus_on_start: false,
             shells: None,
             _active_thread: None,
             menu: MenuSlot::default(),
             scripts: None,
+            memory,
+            remembered,
+            launching: true,
             _subscriptions: vec![subscription],
         }
+    }
+
+    /// Whether the thread shown is the one whose terminals showed last, so the dock Zed reopens
+    /// at launch can stay open.
+    fn restores_with_shown_thread(&self) -> bool {
+        self.thread_id.is_some() && self.thread_id == self.remembered
+    }
+
+    /// Keeps, for the next launch, whether the thread's terminals show.
+    fn remember(&mut self, thread_id: &str, open: bool, cx: &App) {
+        let remembered = self.remembered.as_deref() == Some(thread_id);
+        if open == remembered {
+            return;
+        }
+        self.remembered = open.then(|| thread_id.to_string());
+        let Some(memory) = self.memory.clone() else {
+            return;
+        };
+        let thread_id = thread_id.to_string();
+        db::write_and_log(cx, move || async move {
+            if open {
+                memory.write_kvp(SHOWN_THREAD_KEY.into(), thread_id).await
+            } else {
+                memory.delete_kvp(SHOWN_THREAD_KEY.into()).await
+            }
+        });
     }
 
     fn active_item_changed(
@@ -1473,6 +1561,7 @@ impl ThreadTerminalPanel {
                 this.child(
                     TextButton::new("thread-terminal-scripts", "Run ▾")
                         .tooltip("Run one of the project's scripts in a new terminal")
+                        .menu_open(self.menu.is_open())
                         .on_click(cx.listener(|_, event, window, cx| {
                             // After the click's own focus changes (the dock focuses its
                             // terminal), which would close a menu opened now.
@@ -1874,10 +1963,25 @@ impl Panel for ThreadTerminalPanel {
     }
 
     fn set_active(&mut self, active: bool, window: &mut Window, cx: &mut Context<Self>) {
+        // While the window opens, Zed reopens the dock as it was when mustr quit. Terminals don't
+        // outlive mustr, so the panel only comes back with the thread whose terminals showed,
+        // not over home or another thread.
+        if active && self.launching && !self.restores_with_shown_thread() {
+            let workspace = self.workspace.clone();
+            window.defer(cx, move |window, cx| {
+                workspace
+                    .update(cx, |workspace, cx| {
+                        workspace.close_panel::<Self>(window, cx)
+                    })
+                    .ok();
+            });
+            return;
+        }
         let Some(thread_id) = self.thread_id.clone() else {
             return;
         };
-        self.threads.entry(thread_id).or_default().open = active;
+        self.threads.entry(thread_id.clone()).or_default().open = active;
+        self.remember(&thread_id, active, cx);
         if active {
             self.ensure_terminal(window, cx);
         }
@@ -2092,5 +2196,83 @@ mod tests {
         open_thread("b", cx);
         open_thread("a", cx);
         assert!(!showing(&workspace, &panel, cx));
+    }
+
+    /// Zed reopens the bottom dock at launch as it was when mustr quit. The panel only comes back
+    /// with the thread whose terminals showed: not over home or another thread, and later with
+    /// that thread when it's opened.
+    #[gpui::test]
+    async fn the_panel_comes_back_only_with_its_thread(cx: &mut TestAppContext) {
+        let backend = FakeBackend::new(
+            vec![thread("a", Some("/wt/a")), thread("b", Some("/wt/b"))],
+            Vec::new(),
+        );
+        let (workspace, cx) = workspace_with(backend, false, cx).await;
+        // A database of its own, so the panel remembers across "launches" in this test only.
+        cx.update(|_, cx| cx.set_global(db::AppDatabase::test_new()));
+        let memory = cx.update(|_, cx| KeyValueStore::global(cx));
+        let shown = |cx: &mut gpui::VisualTestContext| {
+            cx.run_until_parked();
+            memory.read_kvp(SHOWN_THREAD_KEY).unwrap()
+        };
+        let open_thread = |thread_id: &str, cx: &mut gpui::VisualTestContext| {
+            let weak = workspace.downgrade();
+            let thread_id = thread_id.to_string();
+            workspace.update_in(cx, |_, window, cx| {
+                thread_chat::open_thread(thread_id, "Thread".into(), weak, window, cx)
+            });
+            cx.run_until_parked();
+        };
+        // What Zed's dock restoration does with a dock that was open at quit.
+        let restore_dock = |cx: &mut gpui::VisualTestContext| {
+            workspace.update_in(cx, |workspace, window, cx| {
+                workspace.open_panel::<ThreadTerminalPanel>(window, cx)
+            });
+            cx.run_until_parked();
+        };
+
+        // A launch on home: the restored dock closes, with nothing to remember.
+        let panel = workspace_panel(&workspace, cx);
+        restore_dock(cx);
+        assert!(!showing(&workspace, &panel, cx));
+        assert_eq!(shown(cx), None);
+
+        // Showing a thread's terminals remembers the thread.
+        cx.update(|_, cx| finish_launch(cx));
+        open_thread("a", cx);
+        cx.dispatch_action(OpenThreadTerminal {
+            thread_id: "a".into(),
+        });
+        assert!(showing(&workspace, &panel, cx));
+        assert_eq!(shown(cx), Some("a".to_string()));
+        // Another thread's closing the panel leaves a's remembered.
+        open_thread("b", cx);
+        assert!(!showing(&workspace, &panel, cx));
+        assert_eq!(shown(cx), Some("a".to_string()));
+
+        // The next launch, over b: the restored dock closes.
+        workspace.update_in(cx, |workspace, window, cx| {
+            if let Some(panel) = workspace.panel::<ThreadTerminalPanel>(cx) {
+                workspace.remove_panel(&panel, window, cx);
+            }
+        });
+        let panel = workspace_panel(&workspace, cx);
+        open_thread("b", cx);
+        assert_eq!(
+            panel.read_with(cx, |panel, _| panel.thread_id.clone()),
+            Some("b".into())
+        );
+        restore_dock(cx);
+        assert!(!showing(&workspace, &panel, cx));
+        // Then a, whose terminals showed, shows them again.
+        open_thread("a", cx);
+        assert!(showing(&workspace, &panel, cx));
+
+        // Hiding them forgets a.
+        cx.update(|_, cx| finish_launch(cx));
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.close_panel::<ThreadTerminalPanel>(window, cx)
+        });
+        assert_eq!(shown(cx), None);
     }
 }

@@ -280,12 +280,18 @@ impl OverflowRow {
     }
 }
 
-/// The "…" button that opens a row's menu of the items that didn't fit.
-pub fn more_button(id: impl Into<ElementId>, tooltip: &'static str) -> IconButton {
-    IconButton::new(id, IconName::Ellipsis)
+/// The "…" button that opens a row's menu of the items that didn't fit. `menu_open` says
+/// whether that menu is open, which hides the button's tooltip.
+pub fn more_button(id: impl Into<ElementId>, tooltip: &'static str, menu_open: bool) -> IconButton {
+    let button = IconButton::new(id, IconName::Ellipsis)
         .icon_size(IconSize::Small)
-        .icon_color(Color::Muted)
-        .tooltip(Tooltip::text(tooltip))
+        .icon_color(Color::Muted);
+    // While its menu is open, a tooltip that was pending when the click came would cover it.
+    if menu_open {
+        button
+    } else {
+        button.tooltip(Tooltip::text(tooltip))
+    }
 }
 
 /// The "…" button's width before it has been measured: about an icon button's, at

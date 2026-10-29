@@ -1050,6 +1050,7 @@ impl PullRequestActions {
                     } else {
                         format!("Linked from {} agent threads", threads.len())
                     })
+                    .menu_open(self.menu.is_open())
                     .on_click(cx.listener(|this, event, window, cx| {
                         this.deploy_threads_menu(event, window, cx)
                     }))
@@ -1326,6 +1327,7 @@ impl Render for PullRequestActions {
         let weak = cx.weak_entity();
         let work_menu = weak.clone();
         let merge_menu = weak.clone();
+        let menu_open = self.menu.is_open();
 
         let mut children: Vec<(PullRequestItem, AnyElement)> = Vec::new();
         if let Some(running) = self.running.clone() {
@@ -1349,6 +1351,7 @@ impl Render for PullRequestActions {
                         "Check the pull request out in a new worktree, for a new agent thread",
                     ))
                     .menu_tooltip("Where to check it out")
+                    .menu_open(menu_open)
                     .on_click(move |_, window, cx| {
                         weak.update(cx, |this, cx| {
                             this.work_on(CheckoutMode::Worktree, window, cx)
@@ -1408,6 +1411,7 @@ impl Render for PullRequestActions {
                     .tooltip(tooltip)
                     .on_click(arm)
                     .menu_tooltip("Choose how to merge")
+                    .menu_open(menu_open)
                     .on_menu_click(move |event, window, cx| {
                         merge_menu
                             .update(cx, |this, cx| this.deploy_merge_menu(event, window, cx))
@@ -1465,11 +1469,15 @@ impl Render for PullRequestActions {
         let more = (!self.hidden.is_empty()).then(|| {
             (
                 Some(SharedString::from(overflow::MORE_KEY)),
-                overflow::more_button("pull-request-more", "More of the pull request's actions")
-                    .on_click(cx.listener(|this, event, window, cx| {
-                        this.deploy_overflow_menu(event, window, cx)
-                    }))
-                    .into_any_element(),
+                overflow::more_button(
+                    "pull-request-more",
+                    "More of the pull request's actions",
+                    menu_open,
+                )
+                .on_click(cx.listener(|this, event, window, cx| {
+                    this.deploy_overflow_menu(event, window, cx)
+                }))
+                .into_any_element(),
             )
         });
         let children = children

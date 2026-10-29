@@ -97,15 +97,23 @@ const SERVICE_ACTIONS: &[&str] = &[
     "zed::ShowWelcome",
 ];
 
-/// Zed actions that mustr's own replace. They're hidden from the palette only, because their
-/// handlers belong to Zed's terminal panel, which mustr doesn't add, so from the palette they'd do
-/// nothing. Their key bindings stay: mustr's terminal panel handles `workspace::NewTerminal`.
+/// Zed actions that mustr's own replace, or that have nothing to offer in mustr. They're hidden
+/// from the palette only; their key bindings stay.
 const SUPERSEDED_ACTIONS: &[&str] = &[
-    // mustr::ToggleThreadTerminal
+    // mustr::ToggleThreadTerminal. Their handlers belong to Zed's terminal panel, which mustr
+    // doesn't add, so from the palette they'd do nothing.
     "terminal_panel::Toggle",
     "terminal_panel::ToggleFocus",
-    // mustr::NewThreadTerminal
+    // mustr::NewThreadTerminal. mustr's terminal panel handles it, for its key binding.
     "workspace::NewTerminal",
+    // mustr::OpenSettings, mustr::OpenKeyBindings, and mustr::Quit, which the palette lists
+    // under mustr's name rather than as "zed: open settings". mustr handles Zed's too.
+    "zed::OpenSettings",
+    "zed::OpenSettingsFile",
+    "zed::OpenKeymapFile",
+    "zed::Quit",
+    // Zed's icon theme picker: its one icon theme is "Zed (Default)".
+    "icon_theme_selector::Toggle",
 ];
 
 /// Whether mustr hides the action with this (canonical) name.
@@ -355,6 +363,7 @@ pub(crate) mod tests {
             git_ui::init(cx);
             vim::init(cx);
             init(cx);
+            crate::window::register_app_actions(cx);
             app_state
         });
         let project = project::Project::test(app_state.fs.clone(), [], cx).await;
@@ -374,6 +383,23 @@ pub(crate) mod tests {
         cx.run_until_parked();
 
         let (available, listed) = palette_actions(cx);
+        // The app's settings, key bindings and quit are listed under mustr's name, not as
+        // "zed: open settings" and the like.
+        for name in [
+            "mustr::OpenSettings",
+            "mustr::OpenKeyBindings",
+            "mustr::Quit",
+        ] {
+            assert!(listed.iter().any(|a| a == name), "the palette hides {name}");
+        }
+        let zeds: Vec<_> = listed
+            .iter()
+            .filter(|name| name.starts_with("zed::"))
+            .collect();
+        assert!(
+            zeds.is_empty(),
+            "the palette lists {zeds:?} under Zed's name"
+        );
         // Zed's crates do register AI actions on the editor and the workspace.
         for name in [
             "editor::ShowEditPrediction",

@@ -104,6 +104,41 @@ pub fn is_unsupported_rpc(error: &anyhow::Error) -> bool {
         .any(|cause| cause.downcast_ref::<UnsupportedRpc>().is_some())
 }
 
+/// The error a backend gives while mustr has no connection to T3. `connecting` is set while the
+/// app's first attempt to connect hasn't finished, as when views restored at launch first load.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotConnected {
+    pub connecting: bool,
+}
+
+impl std::fmt::Display for NotConnected {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "mustr isn't connected to T3")
+    }
+}
+
+impl std::error::Error for NotConnected {}
+
+/// Whether `error` comes from calling T3 before mustr's first attempt to connect finished
+/// ([`NotConnected`]).
+pub fn is_still_connecting(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<NotConnected>()
+            .is_some_and(|error| error.connecting)
+    })
+}
+
+/// The level to log a failed read at that will be retried: `level`, or debug while mustr is
+/// still making its first connection, since the read will succeed once it's up.
+pub fn retry_log_level(error: &anyhow::Error, level: log::Level) -> log::Level {
+    if is_still_connecting(error) {
+        log::Level::Debug
+    } else {
+        level
+    }
+}
+
 /// An attachment's bytes, for [`ThreadBackend::upload`].
 pub struct AttachmentUpload {
     /// The `relativeUrl` that `attachments.createUploadUrl` minted for it.

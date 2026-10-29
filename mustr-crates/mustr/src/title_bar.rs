@@ -475,6 +475,7 @@ impl MustrTitleBar {
             .dot(dot)
             .menu_indicator(!compact)
             .tooltip(tooltip)
+            .menu_open(self.server_menu.is_open())
             .on_click(move |event, window, cx| {
                 let position = menu_position(event, window);
                 let menu = crate::servers::server_menu(workspace.clone(), window, cx);

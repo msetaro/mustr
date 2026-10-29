@@ -33,7 +33,9 @@ use t3_client::{
         },
     },
 };
-use thread_chat::{Access, AttachmentUpload, ReadOnlyBackend, ThreadBackend, UnsupportedRpc};
+use thread_chat::{
+    Access, AttachmentUpload, NotConnected, ReadOnlyBackend, ThreadBackend, UnsupportedRpc,
+};
 
 /// Installs the threads' backend. Call once, after `t3_connection::init`.
 pub fn init(session: CurrentSession, cx: &mut App) {
@@ -77,9 +79,11 @@ struct T3ThreadBackend {
 
 impl T3ThreadBackend {
     fn session(&self) -> Result<Arc<T3Session>> {
-        self.session
-            .get()
-            .ok_or_else(|| anyhow!("mustr isn't connected to T3"))
+        self.session.get().ok_or_else(|| {
+            anyhow::Error::new(NotConnected {
+                connecting: self.session.first_attempt_pending(),
+            })
+        })
     }
 
     fn call<M>(&self, payload: M::Payload) -> BoxFuture<'static, Result<M::Success>>
@@ -504,6 +508,13 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.to_string(), "mustr isn't connected to T3");
+        // Before the first attempt to connect finishes, as at launch, the views that retry
+        // log it quietly.
+        assert!(thread_chat::is_still_connecting(&error));
+        assert_eq!(
+            thread_chat::retry_log_level(&error, log::Level::Warn),
+            log::Level::Debug
+        );
         assert!(
             backend
                 .subscribe_raw("subscribeVcsStatus", Value::Null, Access::Read)

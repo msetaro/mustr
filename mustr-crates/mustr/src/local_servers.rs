@@ -75,7 +75,10 @@ impl LocalServers {
                             }
                         }
                     }
-                    Err(error) => log::info!("can't follow T3's local servers: {error:#}"),
+                    Err(error) => log::log!(
+                        thread_chat::retry_log_level(&error, log::Level::Info),
+                        "can't follow T3's local servers: {error:#}"
+                    ),
                 }
                 cx.background_executor()
                     .timer(crate::thread_git::retry_delay(attempt))

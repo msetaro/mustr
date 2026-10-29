@@ -726,6 +726,57 @@ impl<R: PullRequestRpc> ReviewBackend for AgentReviewBackend<R> {
     }
 }
 
+/// What opening a review does with a scope that has no changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WhenEmpty {
+    /// Opens the review anyway, saying the scope has no changes, as T3's diff panel shows an
+    /// empty diff.
+    Show,
+    /// Fails with [`NoChanges`], for a caller that shows another scope instead.
+    Fail,
+}
+
+/// A scope of a thread that has no changes: nothing to review, which isn't a failure.
+#[derive(Debug)]
+struct NoChanges {
+    title: String,
+    scope: ReviewScope,
+}
+
+impl std::fmt::Display for NoChanges {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{} has no changes in {}",
+            self.title,
+            self.scope.label()
+        )
+    }
+}
+
+impl std::error::Error for NoChanges {}
+
+fn is_no_changes(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<NoChanges>().is_some())
+}
+
+/// Whether a loaded scope can open, given what to do when it's empty.
+fn check_empty(
+    loaded: &LoadedScope,
+    target: &AgentReviewTarget,
+    when_empty: WhenEmpty,
+) -> Result<()> {
+    if when_empty == WhenEmpty::Fail && loaded.files.is_empty() && loaded.unavailable.is_empty() {
+        return Err(anyhow::Error::new(NoChanges {
+            title: target.thread.title.clone(),
+            scope: target.scope,
+        }));
+    }
+    Ok(())
+}
+
 /// A scope of a thread with its saved review, loaded off the main thread.
 struct LoadedReview {
     scope: LoadedScope,
@@ -738,17 +789,12 @@ async fn load_review(
     rpc: &CurrentRpc,
     target: &AgentReviewTarget,
     project_root: Option<String>,
+    when_empty: WhenEmpty,
 ) -> Result<LoadedReview> {
     let thread = &target.thread;
     let mut loaded =
         load_scope(session, rpc, thread, target.scope, project_root.as_deref()).await?;
-    if loaded.files.is_empty() && loaded.unavailable.is_empty() {
-        anyhow::bail!(
-            "{} has no changes in {}",
-            thread.title,
-            target.scope.label()
-        );
-    }
+    check_empty(&loaded, target, when_empty)?;
     let store = AgentReviewStore::new(&agent_reviews_dir(), &thread.id, target.scope);
     let (pending, _) = store.load().unwrap_or_else(|error| {
         log::error!("couldn't load the agent review's drafts: {error:#}");
@@ -852,11 +898,23 @@ fn open_review(
 }
 
 /// Opens (or shows, if it's open) a review of an agent thread's work. `replacing` is the review
-/// of another scope of the same thread, which the new one takes the place of.
+/// of another scope of the same thread, which the new one takes the place of. A scope without
+/// changes opens as an empty review that says so.
 pub fn open_agent_review(
     workspace: &mut Workspace,
     target: AgentReviewTarget,
     replacing: Option<Entity<ReviewView>>,
+    window: &mut Window,
+    cx: &mut gpui::Context<Workspace>,
+) -> Task<Result<Entity<ReviewView>>> {
+    open_scope(workspace, target, replacing, WhenEmpty::Show, window, cx)
+}
+
+fn open_scope(
+    workspace: &mut Workspace,
+    target: AgentReviewTarget,
+    replacing: Option<Entity<ReviewView>>,
+    when_empty: WhenEmpty,
     window: &mut Window,
     cx: &mut gpui::Context<Workspace>,
 ) -> Task<Result<Entity<ReviewView>>> {
@@ -880,7 +938,7 @@ pub fn open_agent_review(
             let target = target.clone();
             let session = session.clone();
             let rpc = rpc.clone();
-            async move { load_review(&session, &rpc, &target, project_root).await }
+            async move { load_review(&session, &rpc, &target, project_root, when_empty).await }
         });
         let (contents, problems) = match loading.await {
             Ok(loaded) => review_contents(loaded, &session, rpc, &target),
@@ -965,32 +1023,43 @@ async fn latest_turn(session: &T3Session, thread_id: &str) -> Result<u32> {
 }
 
 /// Opens the review of a thread's work, as the thread toolbar's Review changes does: its whole
-/// changes, or its latest turn when the branch has none (for example, once they're merged).
+/// changes, or its latest turn when the branch has none (for example, once they're merged), or
+/// the empty changes when it has no turns either.
 pub fn review_thread_work(
     workspace: &mut Workspace,
     thread: AgentThread,
     window: &mut Window,
     cx: &mut gpui::Context<Workspace>,
 ) -> Task<Result<()>> {
-    let changes = open_agent_review(
+    let changes = AgentReviewTarget {
+        thread: thread.clone(),
+        scope: ReviewScope::Changes,
+    };
+    let opening = open_scope(
         workspace,
-        AgentReviewTarget {
-            thread: thread.clone(),
-            scope: ReviewScope::Changes,
-        },
+        changes.clone(),
         None,
+        WhenEmpty::Fail,
         window,
         cx,
     );
     let session = T3Connection::global(cx).read(cx).session();
     cx.spawn_in(window, async move |workspace, cx| {
-        let error = match changes.await {
+        let error = match opening.await {
             Ok(_) => return Ok(()),
             Err(error) => error,
         };
         let session = session.context("mustr isn't connected to T3")?;
         let Ok(turn) = latest_turn(&session, &thread.id).await else {
-            return Err(error);
+            if !is_no_changes(&error) {
+                return Err(error);
+            }
+            workspace
+                .update_in(cx, |workspace, window, cx| {
+                    open_agent_review(workspace, changes, None, window, cx)
+                })?
+                .await?;
+            return Ok(());
         };
         log::info!(
             "{} has nothing to review in Changes ({error:#}); opening turn {turn}",
@@ -1507,6 +1576,47 @@ Review of your changes:
             .expect_err("dry runs refuse writes");
         assert!(format!("{error:#}").contains("MUSTR_DRY_RUN_WRITES"));
         assert!(recording.0.calls.lock().is_empty());
+    }
+
+    /// A scope without changes opens as an empty review, unless the caller would rather show
+    /// another scope (Review changes falls back to the latest turn), and either way it isn't a
+    /// failure to load.
+    #[test]
+    fn empty_scopes_open_unless_the_caller_falls_back() {
+        let thread = crate::agent_threads::agent_threads(&json!({
+            "threads": [{ "id": "thread-1", "projectId": "p", "title": "Run", "status": "idle",
+                          "updatedAt": "2026-10-27T00:00:00.000Z" }]
+        }))
+        .remove(0);
+        let target = AgentReviewTarget {
+            thread,
+            scope: ReviewScope::Uncommitted,
+        };
+        let empty = LoadedScope {
+            files: Vec::new(),
+            unavailable: Vec::new(),
+            worktree: None,
+            source: "Uncommitted".to_string(),
+            branch: None,
+            turns: Vec::new(),
+            problems: Vec::new(),
+        };
+        assert!(check_empty(&empty, &target, WhenEmpty::Show).is_ok());
+        let error = check_empty(&empty, &target, WhenEmpty::Fail).unwrap_err();
+        assert!(is_no_changes(&error));
+        assert_eq!(error.to_string(), "Run has no changes in Uncommitted");
+        assert!(!is_no_changes(&anyhow!("git failed")));
+
+        let with_unavailable = LoadedScope {
+            unavailable: vec![UnavailableFile {
+                path: "big.bin".to_string(),
+                old_path: None,
+                change: FileChange::Modified,
+                reason: "binary".to_string(),
+            }],
+            ..empty
+        };
+        assert!(check_empty(&with_unavailable, &target, WhenEmpty::Fail).is_ok());
     }
 
     #[gpui::test]

@@ -291,7 +291,10 @@ impl ThreadView {
                             true
                         }
                         Err(error) => {
-                            log::warn!("couldn't load thread {thread_id}: {error:#}");
+                            log::log!(
+                                crate::retry_log_level(&error, log::Level::Warn),
+                                "couldn't load thread {thread_id}: {error:#}"
+                            );
                             this.state = Loadable::Failed(format!("{error:#}").into());
                             false
                         }

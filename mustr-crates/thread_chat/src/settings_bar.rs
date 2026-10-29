@@ -23,7 +23,7 @@ use gpui::{
     IntoElement, MouseButton, ParentElement as _, Render, RenderOnce, SharedString, Styled as _,
     Task, WeakEntity, Window, actions, div, px,
 };
-use mustr_ui::{palette, tokens, tokens::scaled};
+use mustr_ui::{MustrIcon, palette, tokens, tokens::scaled};
 use std::{rc::Rc, sync::Arc};
 use t3_api::{
     tagged::OrchestrationV2Command,
@@ -139,7 +139,10 @@ impl ThreadSettingsBar {
                     this.catalog = match agents {
                         Ok(agents) => Catalog::Loaded(agents),
                         Err(error) => {
-                            log::warn!("couldn't read T3's agents: {error:#}");
+                            log::log!(
+                                crate::retry_log_level(&error, log::Level::Warn),
+                                "couldn't read T3's agents: {error:#}"
+                            );
                             Catalog::Failed
                         }
                     };
@@ -501,11 +504,11 @@ fn thread_settings_for(
     }
 }
 
-fn agent_icon(agent: Option<&AgentChoice>) -> IconName {
+fn agent_icon(agent: Option<&AgentChoice>) -> Icon {
     match agent.map(|agent| agent.driver.as_str()) {
-        Some("claudeAgent") => IconName::AiClaude,
-        Some("codex") => IconName::AiOpenAi,
-        _ => IconName::ZedAgent,
+        Some("claudeAgent") => Icon::new(IconName::AiClaude),
+        Some("codex") => Icon::new(IconName::AiOpenAi),
+        _ => MustrIcon::Agent.icon(),
     }
 }
 
@@ -911,7 +914,7 @@ type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 struct ComposerControl {
     id: ElementId,
     label: SharedString,
-    icon: Option<IconName>,
+    icon: Option<Icon>,
     chevron: bool,
     /// Accented, for a mode that's on (plan mode).
     active: bool,
@@ -937,8 +940,8 @@ impl ComposerControl {
         }
     }
 
-    fn icon(mut self, icon: IconName) -> Self {
-        self.icon = Some(icon);
+    fn icon(mut self, icon: impl Into<Icon>) -> Self {
+        self.icon = Some(icon.into());
         self
     }
 
@@ -1024,7 +1027,7 @@ impl RenderOnce for ComposerControl {
             .whitespace_nowrap()
             .when(self.disabled, |this| this.opacity(0.5))
             .when_some(self.icon, |this, icon| {
-                this.child(Icon::new(icon).size(IconSize::XSmall).color(icon_color))
+                this.child(icon.size(IconSize::XSmall).color(icon_color))
             })
             .child(self.label)
             .when(self.chevron, |this| {
