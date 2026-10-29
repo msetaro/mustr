@@ -905,6 +905,17 @@ impl ReviewView {
 
     /// Scrolls to the start of a file, given its index in the file tree. Returns `false` for
     /// files the review doesn't show.
+    /// Scrolls to the file at `path` (its path in the head revision, or a renamed file's old
+    /// one), if the review shows it.
+    pub fn scroll_to_path(&mut self, path: &str, window: &mut Window, cx: &mut App) -> bool {
+        let file = self
+            .file_tree
+            .files()
+            .iter()
+            .position(|file| file.path == path || file.old_path.as_deref() == Some(path));
+        file.is_some_and(|file| self.scroll_to_file(file, window, cx))
+    }
+
     pub fn scroll_to_file(&mut self, file: usize, window: &mut Window, cx: &mut App) -> bool {
         let Some(shown) = self.files.get(file) else {
             return false;

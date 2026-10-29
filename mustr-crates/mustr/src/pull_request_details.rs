@@ -14,12 +14,14 @@
 //!   saves nothing.
 //! - **Stack**: the stacked pull requests it's part of (`pullRequests.stack`), top first, each
 //!   opening its review, as T3's `PullRequestStackMenu.tsx` lists them.
+//! - **Guide**: the pull request's review guide (`pull_request_guide.rs`).
 //!
 //! The reads need `orchestration:read`; the writes `source-control:write`, so dry runs refuse
 //! them before they're sent.
 
 use crate::{
     inbox::decode_each,
+    pull_request_guide::{self, GuideState},
     pull_request_review,
     thread_git::{MenuSlot, menu_position},
 };
@@ -287,8 +289,10 @@ pub struct PullRequestDetails {
     review: WeakEntity<review::ReviewView>,
     workspace: WeakEntity<Workspace>,
     stack: Option<PullRequestStack>,
+    guide: GuideState,
     menu: MenuSlot,
     _stack: Task<()>,
+    _guide: Task<()>,
 }
 
 impl PullRequestDetails {
@@ -304,15 +308,68 @@ impl PullRequestDetails {
         } else {
             Task::ready(())
         };
+        let load_guide = pull_request_guide::load(&reference, cx);
+        let guide = cx.spawn(async move |this, cx| {
+            let state = load_guide.await;
+            this.update(cx, |this, cx| {
+                this.guide = state;
+                cx.notify();
+            })
+            .ok();
+        });
         Self {
             reference,
             metadata,
             review,
             workspace,
             stack: None,
+            guide: GuideState::Unknown,
             menu: MenuSlot::default(),
             _stack: stack,
+            _guide: guide,
         }
+    }
+
+    #[cfg(test)]
+    pub fn guide(&self) -> &GuideState {
+        &self.guide
+    }
+
+    pub fn open_guide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let reference = self.reference.clone();
+        let state = self.guide.clone();
+        let review = self.review.clone();
+        let this = cx.weak_entity();
+        self.workspace
+            .update(cx, |workspace, cx| {
+                pull_request_guide::open(
+                    reference,
+                    state,
+                    review,
+                    move |state, cx| {
+                        this.update(cx, |this, cx| {
+                            this.guide = state;
+                            cx.notify();
+                        })
+                        .ok();
+                    },
+                    workspace,
+                    window,
+                    cx,
+                )
+            })
+            .ok();
+    }
+
+    fn render_guide(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (label, tooltip) = self.guide.chip()?;
+        Some(
+            Chip::new("pull-request-guide", label)
+                .accent(self.guide.guide().is_some() && !self.guide.is_stale())
+                .tooltip(tooltip)
+                .on_click(cx.listener(|this, _, window, cx| this.open_guide(window, cx)))
+                .into_any_element(),
+        )
     }
 
     #[cfg(test)]
@@ -606,6 +663,7 @@ impl Render for PullRequestDetails {
             .child(self.render_reviewers(cx))
             .children(self.render_labels(cx))
             .children(self.render_stack(cx))
+            .children(self.render_guide(cx))
             .children(edit_title)
             .children(self.menu.render())
     }

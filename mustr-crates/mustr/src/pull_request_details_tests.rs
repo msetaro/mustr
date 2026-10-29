@@ -151,6 +151,10 @@ async fn reviewers_and_labels_change_one_pick_at_a_time(cx: &mut TestAppContext)
     let backend = RecordingBackend::with_shell(shell(vec![]));
     backend.respond("pullRequests.stack", Ok(stack()));
     backend.respond(
+        "pullRequests.reviewGuide",
+        Ok(json!({ "guide": null, "run": null, "currentHeadSha": "abc" })),
+    );
+    backend.respond(
         "pullRequests.reviewerCandidates",
         Ok(json!({
             "candidates": [
@@ -198,8 +202,17 @@ async fn reviewers_and_labels_change_one_pick_at_a_time(cx: &mut TestAppContext)
         }]
     );
     details.read_with(cx, |details, _| {
-        assert_eq!(details.stack().map(|stack| stack.layers.len()), Some(3))
+        assert_eq!(details.stack().map(|stack| stack.layers.len()), Some(3));
+        // And whether it has a review guide.
+        assert_eq!(
+            details.guide().chip(),
+            Some(("Guide".to_string(), "No review guide yet".to_string()))
+        );
     });
+    assert_eq!(
+        backend.calls_to("pullRequests.reviewGuide")[0].access,
+        Access::Read
+    );
 
     // Asking Mona to review.
     details.update_in(cx, |details, window, cx| {
