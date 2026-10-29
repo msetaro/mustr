@@ -23,6 +23,29 @@
   but you change them in Settings. If one of them can't be read, Settings says why and can start it
   over from mustr's defaults, keeping the old file next to it as `.bak`.
 - **A gear** for Settings on the rail, in place of the icon that looked like a sun.
+- **Four places on the rail: Inbox, Edit, Review, Agents** (⌘1 to ⌘4), with Settings at the
+  bottom. Each button's tooltip names it and its shortcut.
+  - **Inbox** is what Home was: what needs you, the connection, and your projects.
+  - **Edit** is the editor on one folder: pick one of T3's projects on this Mac, a recent folder,
+    or Open Folder… at the top of its file tree. Files open as tabs (only here), ⌘P finds a file
+    and ⌘⇧F searches in that folder, and mustr remembers the folder. Open in mustr's editor (in a
+    thread's Open in menu) and file links in agent messages open here. Clicking Edit again shows
+    or hides the files.
+  - **Review** lists what there is to review: pull requests in sections, each a GitHub-style
+    query (Review requested, Yours, and the other open ones in your projects, to start with), with
+    their checks and reviews, and the agent work waiting for review. A section's menu edits its
+    query, renames or removes it, and Add section adds one (Settings › Review lists them too). A
+    search box narrows everything. In a review, Review goes back to the list. This fixes the Pull
+    requests button, which did nothing when no review was open.
+  - **Agents** is the threads, in a wider list (about T3's width), and the thread you pick.
+    Scheduled tasks, worktrees, usage (⌘U) and agents setup moved from the rail to the row of
+    buttons under the threads; the palette and their shortcuts still open them.
+- **No more tabs outside Edit.** Opening a thread, a review or a page shows it in place of what
+  was there, like an app rather than an editor. The title bar shows where you are, with back and
+  forward arrows: ⌘[ and ⌘] (and the mouse's back and forward buttons) go back and forward
+  through what you looked at, from one place to another, and each rail button brings back what
+  its place showed last. Outside Edit, ⌘W goes back instead of closing anything; in Edit it
+  closes the file.
 
 ## 0.1.0
 

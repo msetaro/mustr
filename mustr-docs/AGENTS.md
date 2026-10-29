@@ -69,6 +69,8 @@ The user changes every setting in mustr's Settings page (`mustr-crates/mustr/src
   - `--review-thread <thread id>` (with `--thread-scope changes|turn:N`) opens a review of an agent thread's work.
   - `--open-thread <thread id>` opens an agent thread's chat.
   - `--new-thread` opens the new-thread form.
+  - `--edit <folder>` opens a folder in Edit. Don't click Open Folder… under Xvfb, for the reason
+    below.
   - `--add-project <path>` adds a folder as a project once connected. Don't click Add project under Xvfb: its folder picker asks the session's desktop portal, which starts `xdg-desktop-portal` on the user's session bus and shows nothing.
 - Set `MUSTR_DRY_RUN_WRITES=1` so mustr can't write to a real pull request or agent. Comments, reviews, resolving, and viewed marks on pull requests, Send to agent, and agent messages, approvals, stopping, new threads, and new projects all fail locally; reads still work. New projects on the embedded engine are allowed, since that engine is mustr's own. `MUSTR_IGNORE_LOCAL_WORKTREES=1` builds agent reviews from T3's diffs alone, as when T3 runs on another machine. Revoke the `mustr` sessions afterwards.
 - Agent threads write to the user's real agents, which run their own CLIs on their subscription. Never send a message to a real agent thread from a test. Live checks only read (open threads and reviews, expand tool calls, open the new-thread form) with `MUSTR_DRY_RUN_WRITES=1`. Verify writes with the recording backends in `thread_chat`'s and `mustr`'s tests, which assert the exact payloads.
