@@ -792,3 +792,53 @@ async fn several_models_need_a_git_project(cx: &mut TestAppContext) {
     assert_eq!(launches.len(), 1);
     assert_eq!(launches[0]["modelSelection"]["model"], "gpt-5.5");
 }
+
+// Model visibility.
+
+#[gpui::test]
+async fn pickers_hide_the_models_t3_hides(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let mut settings = settings_json();
+    settings["providerModelPreferences"] = json!({
+        "claudeAgent": {
+            "hiddenModels": ["claude-haiku-4-5", "claude-opus-4-7", "my-fine-tune"],
+            "modelOrder": ["claude-sonnet-4-6"]
+        },
+        "codex": { "hiddenModels": [], "modelOrder": ["gpt-5.5-mini", "gpt-5.5"] }
+    });
+    backend.respond("server.getSettings", settings);
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let draft = new_draft(&workspace, cx);
+    let bar = draft.read_with(cx, |view, _| view.settings_bar.clone());
+    assert_eq!(
+        bar.update(cx, |bar, cx| bar.shown_models(cx)),
+        [
+            (
+                "claudeAgent".to_string(),
+                vec![
+                    // In T3's order: first the ones it orders.
+                    "claude-sonnet-4-6".to_string(),
+                    // Hidden, but T3's default and picked now, so it shows checked.
+                    "claude-opus-4-7".to_string(),
+                    // Custom models never hide.
+                    "my-fine-tune".to_string(),
+                ]
+            ),
+            (
+                "codex".to_string(),
+                vec!["gpt-5.5-mini".to_string(), "gpt-5.5".to_string()]
+            ),
+        ]
+    );
+    // Once another model is picked, the hidden one goes.
+    let form = draft
+        .read_with(cx, |view, _| view.new_thread.clone())
+        .unwrap();
+    form.update(cx, |form, cx| {
+        form.pick_model("codex".into(), "gpt-5.5".into(), cx)
+    });
+    assert_eq!(
+        bar.update(cx, |bar, cx| bar.shown_models(cx))[0].1,
+        ["claude-sonnet-4-6", "my-fine-tune"]
+    );
+}

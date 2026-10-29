@@ -383,6 +383,11 @@ impl NewThreadForm {
         loaded
     }
 
+    /// T3's settings, once they've loaded.
+    pub(crate) fn server_settings(&self) -> Option<&ServerSettings> {
+        self.settings.loaded()
+    }
+
     pub(crate) fn agents(&self) -> Option<&[AgentChoice]> {
         self.agents.loaded().map(Vec::as_slice)
     }

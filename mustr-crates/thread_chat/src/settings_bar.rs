@@ -85,6 +85,8 @@ enum Target {
 struct Settings {
     target: Target,
     agents: Vec<AgentChoice>,
+    /// The agents with the models T3's settings show in pickers.
+    shown_agents: Vec<AgentChoice>,
     agent: Option<AgentChoice>,
     instance_id: Option<String>,
     model_slug: Option<String>,
@@ -156,6 +158,25 @@ impl ThreadSettingsBar {
     }
 
     fn settings(&mut self, cx: &mut Context<Self>) -> Option<Settings> {
+        let mut settings = self.unfiltered_settings(cx)?;
+        // T3's settings as the server config keeps them current, or else as a draft read them.
+        let server_settings = crate::usage::ServerConfigs::try_global(cx)
+            .and_then(|configs| configs.read(cx).settings().cloned())
+            .or_else(|| match &settings.target {
+                Target::Draft(form) => form.read(cx).server_settings().cloned(),
+                Target::Thread { .. } => None,
+            });
+        let keep = settings
+            .instance_id
+            .as_deref()
+            .zip(settings.model_slug.as_deref());
+        settings.shown_agents =
+            thread_settings::shown_agents(&settings.agents, server_settings.as_ref(), keep);
+        Some(settings)
+    }
+
+    /// The settings, with every agent's models.
+    fn unfiltered_settings(&mut self, cx: &mut Context<Self>) -> Option<Settings> {
         let view = self.thread_view.upgrade()?;
         if let Some(form) = view.read(cx).new_thread.clone() {
             return Some(draft_settings(form, cx));
@@ -185,6 +206,23 @@ impl ThreadSettingsBar {
                     settings.model_locked,
                     settings.blocked,
                 )
+            })
+            .unwrap_or_default()
+    }
+
+    /// The models the model picker shows, by agent. For tests.
+    #[cfg(test)]
+    pub(crate) fn shown_models(&mut self, cx: &mut Context<Self>) -> Vec<(String, Vec<String>)> {
+        self.settings(cx)
+            .map(|settings| {
+                settings
+                    .shown_agents
+                    .iter()
+                    .map(|agent| {
+                        let models = agent.models.iter().map(|model| model.slug.clone());
+                        (agent.instance_id.clone(), models.collect())
+                    })
+                    .collect()
             })
             .unwrap_or_default()
     }
@@ -401,6 +439,7 @@ fn draft_settings(form: Entity<NewThreadForm>, cx: &App) -> Settings {
         interaction_mode: draft.interaction_mode(),
         agent,
         agents,
+        shown_agents: Vec::new(),
         agent_locked: None,
         model_locked: None,
         blocked: None,
@@ -454,6 +493,7 @@ fn thread_settings_for(
         blocked: backend.blocked_reason(crate::Access::Operate),
         agent,
         agents,
+        shown_agents: Vec::new(),
         target: Target::Thread {
             thread_id: thread.id.clone(),
             backend,
@@ -610,7 +650,7 @@ fn model_menu(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<ContextMenu> {
-    let agents = settings.agents.clone();
+    let agents = settings.shown_agents.clone();
     let current_agent = settings.instance_id.clone();
     let current_model = settings.model_slug.clone();
     let agent_locked = settings.agent_locked;
