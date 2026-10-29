@@ -11089,6 +11089,7 @@ dependencies = [
  "chrono",
  "clap",
  "client",
+ "collections",
  "command_palette",
  "command_palette_hooks",
  "db",

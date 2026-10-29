@@ -25,6 +25,7 @@ mod toolbar;
 
 pub use agent::{
     AgentStatusTone, AgentThreadHeader, OpenThreadChat, ReviewScope, ReviewViewEvent, ScopeChoice,
+    TrustThreadWorktree,
 };
 pub use backend::{ReviewBackend, ReviewPermissions};
 pub use comment_html::comment_markdown;

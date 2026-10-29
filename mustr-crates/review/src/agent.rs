@@ -34,6 +34,16 @@ pub struct OpenThreadChat {
     pub title: String,
 }
 
+/// Asks to trust the folder of the agent thread under review, which Zed's Restricted Mode keeps
+/// language servers out of. The review only dispatches it; the app asks what to trust (its
+/// project, which covers the project's agent worktrees, or only this folder).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, schemars::JsonSchema, Action)]
+#[action(namespace = review)]
+#[serde(deny_unknown_fields)]
+pub struct TrustThreadWorktree {
+    pub thread_id: String,
+}
+
 /// Which changes of an agent thread a review shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ReviewScope {
@@ -278,9 +288,17 @@ pub(crate) fn render_agent_header(
                 .children(render_scope_picker(header, review))
                 .when(restricted_worktree, |this| {
                     let tooltip = "Restricted Mode: language servers don't run in this worktree \
-                                   until you trust it. Click to trust it or stay in Restricted Mode.";
-                    let trust = |_: &ClickEvent, window: &mut Window, cx: &mut App| {
-                        window.dispatch_action(Box::new(workspace::ToggleWorktreeSecurity), cx)
+                                   until you trust it. Trusting its project covers all of the \
+                                   project's agent worktrees. Click to choose, or stay in \
+                                   Restricted Mode.";
+                    let thread_id = thread_id.clone();
+                    let trust = move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                        window.dispatch_action(
+                            Box::new(TrustThreadWorktree {
+                                thread_id: thread_id.clone(),
+                            }),
+                            cx,
+                        )
                     };
                     if compact {
                         this.child(

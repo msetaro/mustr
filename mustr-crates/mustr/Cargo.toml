@@ -27,6 +27,7 @@ assets.workspace = true
 chrono = { workspace = true, features = ["clock"] }
 clap.workspace = true
 client.workspace = true
+collections.workspace = true
 command_palette.workspace = true
 command_palette_hooks.workspace = true
 db.workspace = true
