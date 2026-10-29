@@ -571,4 +571,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     // GitHub queries:
     github_search::init(cx);
     open_pull_request::init(cx);
+    // Syntax highlighting for the languages Zed gets from extensions:
+    mustr_languages::init(&app_state.languages);
 }
