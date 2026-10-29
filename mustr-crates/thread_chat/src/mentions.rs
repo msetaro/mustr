@@ -1009,6 +1009,12 @@ pub(crate) struct ServerInfo {
     pub file_uploads: crate::attachments::FileUploads,
     /// Its T3 Code version (`environment.serverVersion`), such as `0.1.3`.
     pub server_version: Option<String>,
+    /// Whether it takes images and files in answers to questions
+    /// (`environment.capabilities.questionAttachments`, T3 0.1.3).
+    pub question_attachments: bool,
+    /// Whether it takes context records inline in messages
+    /// (`environment.capabilities.inlineMessageContext`).
+    pub inline_message_context: bool,
 }
 
 /// Whether a T3 Code version is `major.minor.patch` or later; a pre-release counts as its
@@ -1031,6 +1037,12 @@ impl ServerInfo {
             server_version: config["environment"]["serverVersion"]
                 .as_str()
                 .map(str::to_string),
+            question_attachments: config["environment"]["capabilities"]["questionAttachments"]
+                .as_bool()
+                .unwrap_or(false),
+            inline_message_context: config["environment"]["capabilities"]["inlineMessageContext"]
+                .as_bool()
+                .unwrap_or(false),
             environment_id: config["environment"]["environmentId"]
                 .as_str()
                 .filter(|id| !id.trim().is_empty())
@@ -1177,6 +1189,31 @@ impl ComposerMenu {
             ..ServerInfo::default()
         };
         self.server = Some((server, Instant::now()));
+    }
+
+    /// Whether T3's config has been read, or failed to be.
+    pub(crate) fn has_server_info(&self) -> bool {
+        self.server.is_some()
+    }
+
+    /// Keeps what `server.getConfig` answered; a failure leaves what was read before, or
+    /// nothing known.
+    pub(crate) fn set_server_config(&mut self, config: Result<Value>) {
+        match config {
+            Ok(config) => self.server = Some((ServerInfo::from_config(&config), Instant::now())),
+            Err(error) => {
+                log::warn!("couldn't read T3's config for the composer: {error:#}");
+                self.server
+                    .get_or_insert_with(|| (ServerInfo::default(), Instant::now()));
+            }
+        }
+    }
+
+    /// Whether the server takes attachments in answers, once its config is read.
+    pub(crate) fn question_attachments(&self) -> bool {
+        self.server
+            .as_ref()
+            .is_some_and(|(server, _)| server.question_attachments)
     }
 
     /// The server's environment id, once its config is read.
@@ -1615,16 +1652,7 @@ impl ThreadView {
             this.update(cx, |this, cx| {
                 let menu = &mut this.composer_state.menu;
                 menu.loading_server = None;
-                match config {
-                    Ok(config) => {
-                        menu.server = Some((ServerInfo::from_config(&config), Instant::now()))
-                    }
-                    Err(error) => {
-                        log::warn!("couldn't read T3's config for the composer: {error:#}");
-                        menu.server
-                            .get_or_insert_with(|| (ServerInfo::default(), Instant::now()));
-                    }
-                }
+                menu.set_server_config(config);
                 this.update_items(cx);
             })
             .ok();

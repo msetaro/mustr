@@ -112,6 +112,11 @@ pub(super) fn with_config(inner: &Arc<FakeBackend>, config: Value) -> Arc<dyn Th
     })
 }
 
+/// The commands sent, without their ids.
+fn sent(backend: &FakeBackend) -> Vec<Value> {
+    backend.commands().into_iter().map(without_ids).collect()
+}
+
 // Quoting a response.
 
 #[gpui::test]
@@ -180,5 +185,237 @@ async fn without_the_environment_a_quote_is_a_block_quote(cx: &mut TestAppContex
     assert_eq!(
         composer_text(&view, cx),
         "> Done. `withRetry` now wraps `post()`.\n\n"
+    );
+}
+
+// Answering questions, with text and attachments.
+
+/// A run waiting on two questions: one with options that takes a typed answer too, and one
+/// without options.
+fn question_thread() -> Projection {
+    let mut projection = finished_thread();
+    projection.items.extend([
+        user_message("i6", 6, "run-2", "Set up the cache"),
+        item(
+            "user_input_request",
+            "i7",
+            7,
+            Some("run-2"),
+            "waiting",
+            json!({
+                "requestId": "request-q",
+                "questions": [
+                    {
+                        "id": "q1", "header": "Store", "question": "Which store?",
+                        "options": [
+                            { "label": "Redis", "description": "In memory" },
+                            { "label": "Postgres", "description": "On disk", "value": "pg" }
+                        ]
+                    },
+                    { "id": "q2", "header": "Notes", "question": "Anything else?", "options": [] }
+                ]
+            }),
+        ),
+    ]);
+    projection.runs.push(run("run-2", 2, "running", "m2"));
+    projection
+        .messages
+        .push(message("m2", "run-2", "Set up the cache"));
+    let mut request = runtime_request("request-q", "pending");
+    request["kind"] = json!("user_input");
+    projection.runtime_requests.push(request);
+    projection
+}
+
+fn attach_notes(view: &Entity<ThreadView>, cx: &mut VisualTestContext) {
+    use crate::attachments::{NewAttachment, NewFile};
+    view.update_in(cx, |view, window, cx| {
+        view.add_attachments(
+            vec![NewFile::pasted_text("notes.txt".into(), "notes").map(NewAttachment::File)],
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+}
+
+fn load_config(view: &Entity<ThreadView>, cx: &mut VisualTestContext) {
+    view.update(cx, |view, cx| view.load_server_info(false, cx));
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+async fn the_composer_answers_questions_with_text_and_attachments(cx: &mut TestAppContext) {
+    let inner = FakeBackend::with_thread(question_thread(), 20);
+    inner.raw_responses.lock().push(minted("attachment-1"));
+    let config = server_config(
+        "0.1.3",
+        json!({
+            "questionAttachments": true,
+            "attachmentUploads": true,
+            "fileAttachments": { "maxUploadBytes": 1048576 }
+        }),
+    );
+    let (view, cx) = open_view(with_config(&inner, config), Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(1200.)));
+    load_config(&view, cx);
+    assert!(cx.debug_bounds("thread-question-request-q-q1").is_some());
+    // The composer answers the first question, so it offers Next, not Queue or Steer.
+    assert!(cx.debug_bounds("thread-answer").is_some());
+    assert!(cx.debug_bounds("thread-queue").is_none());
+
+    // A typed answer with a file answers the first question, and moves to the next.
+    type_message(&view, "Memcached, see the notes", cx);
+    attach_notes(&view, cx);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+    assert!(inner.commands().is_empty(), "one question is left");
+    assert_eq!(composer_text(&view, cx), "");
+    assert!(view.read_with(cx, |view, _| view.composer_files().is_empty()));
+
+    type_message(&view, "Keep it under 1 GB", cx);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+    assert_eq!(
+        sent(&inner),
+        [json!({
+            "type": "runtime-request.respond",
+            "threadId": THREAD,
+            "requestId": "request-q",
+            "answers": { "q1": "Memcached, see the notes", "q2": "Keep it under 1 GB" },
+            "attachmentsByQuestionId": {
+                "q1": [{
+                    "type": "file", "id": "attachment-1", "name": "notes.txt",
+                    "mimeType": "text/plain;charset=utf-8", "sizeBytes": 5,
+                    "source": { "_tag": "pasted-text" }
+                }]
+            }
+        })]
+    );
+}
+
+#[gpui::test]
+async fn an_option_or_a_typed_answer_answers_a_question(cx: &mut TestAppContext) {
+    let inner = FakeBackend::with_thread(question_thread(), 20);
+    let (view, cx) = open_view(
+        with_config(&inner, server_config("0.1.3", json!({}))),
+        Some(THREAD),
+        cx,
+    );
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(1200.)));
+    load_config(&view, cx);
+    // Postgres for the first, so the composer answers the second.
+    view.update(cx, |view, cx| {
+        view.pick_option("request-q".into(), "q1".into(), "pg".into(), cx)
+    });
+    type_message(&view, "No", cx);
+    // The card's Answer takes the composer's text too.
+    view.update_in(cx, |view, window, cx| {
+        view.answer_with_composer(window, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        sent(&inner),
+        [json!({
+            "type": "runtime-request.respond",
+            "threadId": THREAD,
+            "requestId": "request-q",
+            "answers": { "q1": "pg", "q2": "No" }
+        })]
+    );
+}
+
+#[gpui::test]
+async fn older_servers_take_no_attachments_in_answers(cx: &mut TestAppContext) {
+    let inner = FakeBackend::with_thread(question_thread(), 20);
+    inner.raw_responses.lock().push(minted("attachment-1"));
+    // T3 0.1.1 has no `questionAttachments`.
+    let (view, cx) = open_view(
+        with_config(
+            &inner,
+            server_config(
+                "0.1.1",
+                json!({ "attachmentUploads": true, "fileAttachments": { "maxUploadBytes": 1048576 } }),
+            ),
+        ),
+        Some(THREAD),
+        cx,
+    );
+    load_config(&view, cx);
+    type_message(&view, "Memcached", cx);
+    attach_notes(&view, cx);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+    assert!(inner.commands().is_empty());
+    view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.error().map(|error| error.as_ref()),
+            Some("This question can't take attachments.")
+        );
+        assert_eq!(view.composer_files().len(), 1, "the file stays");
+    });
+}
+
+// MCP elicitation and the other kinds of approval.
+
+#[gpui::test]
+async fn an_mcp_servers_question_is_an_app_access_approval(cx: &mut TestAppContext) {
+    let mut projection = running_thread();
+    projection.items[7] = item(
+        "approval_request",
+        "i8",
+        8,
+        Some("run-2"),
+        "waiting",
+        json!({
+            "requestId": "request-1",
+            "requestKind": "mcp-elicitation",
+            "appName": "Linear",
+            "prompt": "Allow Codex to use Linear?",
+            "reason": "To file the bug it found",
+            "options": [
+                { "decision": "cancel", "label": "Cancel" },
+                { "decision": "decline", "label": "Decline" },
+                {
+                    "decision": "acceptForSession", "label": "Always allow this session",
+                    "warning": "Linear can act for you until the session ends"
+                },
+                { "decision": "accept", "label": "Approve" }
+            ]
+        }),
+    );
+    let backend = FakeBackend::with_thread(projection, 20);
+    let (view, cx) = open_view(backend.clone(), Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(1200.)));
+    cx.run_until_parked();
+    let pending = view.read_with(cx, |view, _| {
+        view.thread_state().unwrap().pending_requests()
+    });
+    assert!(matches!(
+        pending[0].item.as_ref().map(|item| &item.kind),
+        Some(ItemKind::Approval { request_kind, app_name: Some(app), reason: Some(_), options, .. })
+            if request_kind == "mcp-elicitation" && app == "Linear"
+                && options[2].warning.as_deref()
+                    == Some("Linear can act for you until the session ends")
+    ));
+    for selector in [
+        "thread-respond-request-1-0",
+        "thread-respond-request-1-1",
+        "thread-respond-request-1-2",
+        "thread-respond-request-1-3",
+    ] {
+        assert!(cx.debug_bounds(selector).is_some(), "{selector}");
+    }
+    let approve = cx.debug_bounds("thread-respond-request-1-3").unwrap();
+    cx.simulate_click(approve.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(
+        sent(&backend),
+        [json!({
+            "type": "runtime-request.respond",
+            "threadId": THREAD,
+            "requestId": "request-1",
+            "decision": "accept"
+        })]
     );
 }

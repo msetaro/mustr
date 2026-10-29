@@ -67,6 +67,7 @@ pub use sidebar::{NextThread, PreviousThread, RowPullRequest};
 pub use snooze::SnoozeThread;
 // WP14, agent setup and T3's settings:
 // WP15, timeline and composer:
+mod answers;
 mod file_links;
 pub use find_bar::open_thread_with_find;
 mod quote;

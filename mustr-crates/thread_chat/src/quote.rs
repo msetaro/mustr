@@ -283,8 +283,6 @@ impl ThreadView {
         if self.thread_id.is_none() || text.trim().is_empty() {
             return None;
         }
-        // The quote names the server's environment, from its config.
-        self.load_server_info(false, cx);
         let selection = self
             .composer_state
             .quote
@@ -353,6 +351,25 @@ impl ThreadView {
             .take()
             .or_else(|| self.composer_state.quote.selection.clone())
             .filter(|selection| selection.item_id == item_id);
+        // The quote names the server's environment, from its config: read it first.
+        if !self.composer_state.menu.has_server_info() {
+            let config = self.backend.call_raw(
+                <t3_api::rpc::ServerGetConfig as t3_api::RpcMethod>::TAG,
+                serde_json::json!({}),
+                crate::backend::Access::Read,
+            );
+            let item_id = item_id.to_string();
+            self._tasks.push(cx.spawn_in(window, async move |this, cx| {
+                let config = config.await;
+                this.update_in(cx, |this, window, cx| {
+                    this.composer_state.menu.set_server_config(config);
+                    this.composer_state.quote.pressed = pressed;
+                    this.quote_in_composer(&item_id, window, cx);
+                })
+                .ok();
+            }));
+            return;
+        }
         let Some(state) = self.thread_state() else {
             return;
         };

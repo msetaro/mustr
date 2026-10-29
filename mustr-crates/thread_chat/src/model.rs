@@ -162,9 +162,14 @@ pub enum ItemKind {
         request_id: String,
         title: Option<String>,
         prompt: Option<String>,
-        /// What's being approved: `command_execution`, `file_change`, and so on.
+        /// What's being approved: `command`, `file-read`, `file-change`, `mcp-elicitation` (an
+        /// MCP server's question, which T3 asks as an approval), or `permission`.
         request_kind: String,
         options: Vec<ApprovalOption>,
+        /// The app an MCP server's question is for (`appName`).
+        app_name: Option<String>,
+        /// Why the agent asks.
+        reason: Option<String>,
     },
     /// The agent asked the user questions.
     Question {
@@ -212,6 +217,9 @@ pub struct Question {
     pub question: String,
     /// `(label, answer)`: the answer sent back is the option's value, or its label.
     pub options: Vec<(String, String)>,
+    /// Whether a typed answer, and attachments, can answer it (`allowCustomAnswer`, on unless
+    /// T3 says otherwise).
+    pub allow_custom_answer: bool,
 }
 
 /// A file other than an image attached to a user message.
@@ -241,6 +249,8 @@ pub struct FileOperation {
 pub struct ApprovalOption {
     pub decision: ProviderApprovalDecision,
     pub label: String,
+    /// What to know before picking it, such as what "Always allow" means.
+    pub warning: Option<String>,
 }
 
 /// The value of a generated string enum or untagged union as it appears on the wire.
@@ -379,6 +389,7 @@ impl TimelineItem {
                                     (option.label.clone(), answer)
                                 })
                                 .collect(),
+                            allow_custom_answer: question.allow_custom_answer != Some(false),
                         })
                         .collect(),
                 }
@@ -502,8 +513,11 @@ impl TimelineItem {
                         .map(|option| ApprovalOption {
                             decision: option.decision.clone(),
                             label: option.label.clone(),
+                            warning: non_empty(option.warning.as_ref()),
                         })
                         .collect(),
+                    app_name: non_empty(item.app_name.as_ref()),
+                    reason: non_empty(item.reason.as_ref()),
                 }
             ),
             OrchestrationV2TurnItem::Error(item) => item!(
