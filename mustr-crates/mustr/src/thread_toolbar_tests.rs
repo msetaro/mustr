@@ -66,7 +66,15 @@ fn the_thread_shows_the_pull_request_t3_would() {
     assert!(pull_request.watching && pull_request.is_linked());
     assert_eq!(pull_request.state, Some(PullRequestState::Open));
     assert_eq!(pull_request.checks, Some(PullRequestChecksState::Failing));
-    assert_eq!(pull_request.others, 1);
+    // The others are in its menu, newest first; a dismissed one isn't.
+    assert_eq!(
+        pull_request
+            .others
+            .iter()
+            .map(OtherPullRequest::label)
+            .collect::<Vec<_>>(),
+        ["#3 PR 3 (merged)"]
+    );
 
     // With none open, the latest one.
     let thread = thread_shell(json!({
@@ -576,21 +584,19 @@ fn toolbar_at(
     cx.run_until_parked();
     let keys = [
         ToolbarItem::Branch,
-        ToolbarItem::GitSummary,
         ToolbarItem::PullRequest,
-        ToolbarItem::Checks,
         ToolbarItem::LinkPullRequest,
+        ToolbarItem::Servers,
         ToolbarItem::ReviewChanges,
         ToolbarItem::MergeBack,
-        ToolbarItem::Servers,
-        ToolbarItem::Handoff,
+        ToolbarItem::GitAction,
         ToolbarItem::Terminal,
         ToolbarItem::OpenIn,
-        ToolbarItem::GitAction,
+        ToolbarItem::More,
     ]
     .map(ToolbarItem::key);
     let mut shown = Vec::new();
-    for key in keys.into_iter().chain(["thread-toolbar-more"]) {
+    for key in keys {
         if let Some(bounds) = cx.debug_bounds(key) {
             assert!(
                 bounds.right() <= px(width) + px(0.5),
@@ -609,9 +615,9 @@ fn toolbar_at(
     (shown, entries)
 }
 
-/// In a MacBook-sized window at mustr's default size, the toolbar doesn't fit: Link PR,
-/// Terminal, and Open in go into its "…" menu first, then the git status, while Review changes
-/// and Commit stay, and the branch shrinks.
+/// In a narrow window at twice mustr's design size, the toolbar doesn't fit: Link PR, Terminal,
+/// and Open in go into its "…" menu first, while Review changes and Commit stay, and the branch
+/// shrinks.
 #[gpui::test]
 async fn the_toolbar_moves_what_doesnt_fit_into_its_menu(cx: &mut TestAppContext) {
     let backend = RecordingBackend::with_shell(shell(vec![shell_thread(json!({}))]));
@@ -643,44 +649,48 @@ async fn the_toolbar_moves_what_doesnt_fit_into_its_menu(cx: &mut TestAppContext
     });
     cx.run_until_parked();
 
-    // Room for everything.
+    // Room for everything: the branch (with its changes folded in) and Link PR at the left,
+    // then Review changes, Commit, Terminal and Open in.
     let (shown, entries) = toolbar_at(&toolbar, 3000., cx);
     assert_eq!(
         shown,
         [
             "thread-toolbar-branch",
-            "thread-toolbar-git-summary",
             "thread-toolbar-link-pull-request",
             "thread-toolbar-review-changes",
+            "thread-toolbar-git-action",
             "thread-toolbar-terminal",
             "thread-toolbar-open-in",
-            "thread-toolbar-git-action",
         ]
     );
     assert_eq!(entries, []);
 
-    // A 14" MacBook's window with the threads beside the thread: the actions that matter least
-    // go into the menu. Terminal is narrow enough to stay where Open in isn't.
-    let (shown, entries) = toolbar_at(&toolbar, 1000., cx);
+    // A 14" MacBook's window with the threads beside the thread: Link PR goes into the menu
+    // first.
+    let (shown, entries) = toolbar_at(&toolbar, 850., cx);
     assert_eq!(
         shown,
         [
             "thread-toolbar-branch",
-            "thread-toolbar-git-summary",
             "thread-toolbar-review-changes",
-            "thread-toolbar-terminal",
             "thread-toolbar-git-action",
+            "thread-toolbar-terminal",
+            "thread-toolbar-open-in",
             "thread-toolbar-more",
         ]
     );
-    // In the toolbar's order.
+    assert_eq!(entries, [OverflowEntry::LinkPullRequest]);
+
+    // Narrower, Terminal goes, then Open in, while Review changes and Commit stay; the menu has
+    // the actions in the toolbar's order.
+    let (shown, entries) = toolbar_at(&toolbar, 750., cx);
+    assert!(!shown.contains(&"thread-toolbar-terminal"), "{shown:?}");
+    assert!(shown.contains(&"thread-toolbar-open-in"), "{shown:?}");
     assert_eq!(
         entries,
-        [OverflowEntry::LinkPullRequest, OverflowEntry::OpenIn]
+        [OverflowEntry::LinkPullRequest, OverflowEntry::Terminal]
     );
-
-    // Narrower still, the git status goes too, and says what it is in the menu.
-    let (shown, entries) = toolbar_at(&toolbar, 700., cx);
+    let (shown, entries) = toolbar_at(&toolbar, 650., cx);
     assert_eq!(
         shown,
         [
@@ -690,9 +700,8 @@ async fn the_toolbar_moves_what_doesnt_fit_into_its_menu(cx: &mut TestAppContext
             "thread-toolbar-more",
         ]
     );
-    assert!(matches!(entries[0], OverflowEntry::Text(_)), "{entries:?}");
     assert_eq!(
-        entries[1..],
+        entries,
         [
             OverflowEntry::LinkPullRequest,
             OverflowEntry::Terminal,
@@ -704,4 +713,147 @@ async fn the_toolbar_moves_what_doesnt_fit_into_its_menu(cx: &mut TestAppContext
     let (shown, _) = toolbar_at(&toolbar, 3000., cx);
     assert!(shown.contains(&"thread-toolbar-terminal"));
     assert!(!shown.contains(&"thread-toolbar-more"));
+}
+
+/// A thread with a draft pull request whose checks fail, which the agent watches, and two more
+/// linked: the toolbar shows one quiet `#4` with its state and checks, and its menu has what the
+/// eye, the ▾ and the `+2` used to: review, the web, mark ready, merge or close, watching,
+/// unlinking, and the other two. Mark ready asks T3 to run it.
+#[gpui::test]
+async fn the_pull_request_is_one_button_with_one_menu(cx: &mut TestAppContext) {
+    let backend = RecordingBackend::with_shell(shell(vec![shell_thread(json!({
+        "pullRequests": [
+            link(4, "created", "open", "2026-10-28T09:00:00.000Z", true),
+            link(3, "manual", "merged", "2026-10-27T09:00:00.000Z", false),
+            link(2, "agent", "closed", "2026-10-26T09:00:00.000Z", false),
+        ]
+    }))]));
+    backend.respond("pullRequests.summary", Ok(summary(4)));
+    backend.respond(
+        "pullRequests.checks",
+        Ok(json!({
+            "state": "open",
+            "checks": [
+                { "name": "build", "status": "success", "description": null, "url": null },
+                { "name": "lint", "status": "failure", "description": null, "url": null }
+            ]
+        })),
+    );
+    backend.respond(
+        "server.getConfig",
+        Ok(json!({ "availableEditors": ["cursor"] })),
+    );
+    backend.respond("pullRequests.runAction", Ok(json!(null)));
+    init_test(backend.clone(), cx);
+    cx.update(init);
+    let (workspace, cx) = workspace(cx).await;
+    let view = cx.new_window_entity(|window, cx| {
+        ThreadView::new(
+            backend.clone(),
+            None,
+            Some(THREAD.to_string()),
+            "Add retries".into(),
+            window,
+            cx,
+        )
+    });
+    let (toolbar, cx) =
+        cx.add_window_view(|window, cx| ThreadToolbar::new(workspace.downgrade(), window, cx));
+    cx.update(|window, cx| {
+        window.set_rem_size(px(13.));
+        crate::thread_git::Editors::global(cx);
+    });
+    toolbar.update_in(cx, |toolbar, window, cx| {
+        toolbar.set_active_pane_item(Some(&view), window, cx)
+    });
+    cx.run_until_parked();
+
+    let (shown, entries) = toolbar_at(&toolbar, 1512., cx);
+    assert_eq!(
+        shown,
+        [
+            "thread-toolbar-branch",
+            "thread-toolbar-pull-request",
+            "thread-toolbar-review-changes",
+            "thread-toolbar-git-action",
+            "thread-toolbar-terminal",
+            "thread-toolbar-open-in",
+        ]
+    );
+    assert_eq!(entries, []);
+    // One height for everything in the row.
+    let heights = shown
+        .iter()
+        .map(|key| cx.debug_bounds(key).unwrap().size.height)
+        .collect::<Vec<_>>();
+    assert!(
+        heights.windows(2).all(|pair| pair[0] == pair[1]),
+        "{shown:?}: {heights:?}"
+    );
+
+    let reference = |number| PullRequestRef {
+        allow_stale: None,
+        expected_account_id: None,
+        host: Some("github.com".to_string()),
+        number,
+        project_id: "project-1".to_string(),
+        repository: "acme/api".to_string(),
+    };
+    let rows = toolbar.update(cx, |toolbar, cx| toolbar.pull_request_menu(cx).unwrap());
+    assert_eq!(
+        rows,
+        [
+            PullRequestMenuRow::Header("acme/api#4 · Draft".to_string()),
+            PullRequestMenuRow::Label("1 of 2 checks failing".to_string()),
+            PullRequestMenuRow::Review("Review #4".to_string(), reference(4)),
+            PullRequestMenuRow::OpenOnWeb(
+                "Open on GitHub".to_string(),
+                "https://github.com/acme/api/pull/4".to_string()
+            ),
+            PullRequestMenuRow::MarkReady { enabled: true },
+            PullRequestMenuRow::Review("Merge or close…".to_string(), reference(4)),
+            PullRequestMenuRow::Separator,
+            PullRequestMenuRow::Watch(true),
+            PullRequestMenuRow::Unlink,
+            PullRequestMenuRow::Separator,
+            PullRequestMenuRow::Header("Also linked to this thread".to_string()),
+            PullRequestMenuRow::Review("#3 PR 3 (merged)".to_string(), reference(3)),
+            PullRequestMenuRow::Review("#2 PR 2 (closed)".to_string(), reference(2)),
+            PullRequestMenuRow::Separator,
+            PullRequestMenuRow::LinkAnother,
+        ]
+    );
+
+    // Mark ready runs T3's action on it, as its review's Ready for review does.
+    let status = toolbar.read_with(cx, |toolbar, _| {
+        toolbar.thread.as_ref().unwrap().pull_request.clone()
+    });
+    status.update(cx, |status, cx| status.mark_ready(cx));
+    cx.run_until_parked();
+    assert_eq!(
+        backend.calls_to("pullRequests.runAction"),
+        [Call {
+            tag: "pullRequests.runAction".to_string(),
+            payload: json!({
+                "action": "ready", "projectId": "project-1", "host": "github.com",
+                "repository": "acme/api", "number": 4
+            }),
+            access: Access::SourceControlWrite,
+        }]
+    );
+    status.read_with(cx, |status, _| {
+        assert_eq!(status.state(), Some((PullRequestState::Open, false)))
+    });
+
+    // A thread without a pull request offers to link one, quietly.
+    let rows = toolbar.update(cx, |toolbar, cx| {
+        toolbar
+            .thread
+            .as_ref()
+            .unwrap()
+            .pull_request
+            .update(cx, |status, _| status.pull_request = None);
+        toolbar.pull_request_menu(cx).unwrap()
+    });
+    assert_eq!(rows, [PullRequestMenuRow::LinkAnother]);
 }

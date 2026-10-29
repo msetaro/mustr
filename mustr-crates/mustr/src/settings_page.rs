@@ -19,6 +19,7 @@ mod connection;
 mod editing;
 mod general;
 pub(crate) mod key_bindings;
+mod review;
 pub(crate) mod rows;
 mod terminal;
 #[cfg(test)]
@@ -73,17 +74,19 @@ pub enum Section {
     Editor,
     Terminal,
     Agents,
+    Review,
     Connection,
     Updates,
     KeyboardShortcuts,
 }
 
 impl Section {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::General,
         Self::Editor,
         Self::Terminal,
         Self::Agents,
+        Self::Review,
         Self::Connection,
         Self::Updates,
         Self::KeyboardShortcuts,
@@ -95,6 +98,7 @@ impl Section {
             Self::Editor => "Editor",
             Self::Terminal => "Terminal",
             Self::Agents => "Agents and threads",
+            Self::Review => "Review",
             Self::Connection => "Connection",
             Self::Updates => "Updates",
             Self::KeyboardShortcuts => "Keyboard shortcuts",
@@ -109,6 +113,7 @@ impl Section {
             Self::Agents => {
                 "How mustr tells you about agent threads, and T3 Code's settings for them."
             }
+            Self::Review => "The Review page's sections of pull requests, and their queries.",
             Self::Connection => "The T3 Code server mustr runs agents on.",
             Self::Updates => "Which mustr this is, and how it updates itself.",
             Self::KeyboardShortcuts => "Every action's keys. Change one, or give an action keys.",
@@ -121,6 +126,7 @@ impl Section {
             Self::Editor => Icon::new(IconName::FileCode),
             Self::Terminal => Icon::new(IconName::Terminal),
             Self::Agents => MustrIcon::Agent.icon(),
+            Self::Review => MustrIcon::PullRequest.icon(),
             Self::Connection => Icon::new(IconName::Server),
             Self::Updates => Icon::new(IconName::ArrowCircle),
             Self::KeyboardShortcuts => Icon::new(IconName::Keyboard),
@@ -133,6 +139,7 @@ impl Section {
             Self::Editor => "settings-section-editor",
             Self::Terminal => "settings-section-terminal",
             Self::Agents => "settings-section-agents",
+            Self::Review => "settings-section-review",
             Self::Connection => "settings-section-connection",
             Self::Updates => "settings-section-updates",
             Self::KeyboardShortcuts => "settings-section-keyboard-shortcuts",
@@ -406,6 +413,7 @@ impl SettingsView {
                 filter(groups, cx)
             }
             Section::Agents => agents::render(self, query, window, cx),
+            Section::Review => filter(review::groups(cx), cx),
             Section::Connection => filter(connection::groups(window, cx), cx),
             Section::Updates => filter(updates::groups(cx), cx),
             Section::KeyboardShortcuts => Found::default(),

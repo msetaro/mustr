@@ -24,7 +24,6 @@
 //! worktree when no other active thread uses it, as T3's app does when it deletes a thread.
 
 use crate::{
-    nav_panel,
     t3_connection::{self, T3Connection},
     worktree_cleanup::WorktreeCleanup,
 };
@@ -78,14 +77,6 @@ const CONTENT_MAX_WIDTH: f32 = 920.;
 
 pub fn init(cx: &mut App) {
     cx.set_global(LocalFolders(t3_runs_here));
-    nav_panel::register_rail_entry(
-        "worktrees",
-        Icon::new(IconName::GitWorktree),
-        "Worktrees",
-        ShowWorktrees,
-        |item| item.downcast::<WorktreesView>().is_some(),
-        cx,
-    );
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, _: &ShowWorktrees, window, cx| {
             WorktreesView::show(workspace, window, cx);

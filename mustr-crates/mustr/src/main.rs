@@ -45,11 +45,11 @@ mod macos;
 mod notifications;
 // WP11, terminals, worktrees and the PR flow:
 mod local_servers;
+mod merge_back;
 mod project_scripts;
 mod pull_request_details;
 mod pull_request_guide;
 mod remote_terminal;
-mod thread_handoff;
 mod worktree_cleanup;
 // WP12, composer and timeline:
 // WP13, thread list and navigation:
@@ -73,6 +73,13 @@ mod updates;
 mod worktree_trust;
 // Settings in the UI: one Settings page, with T3's settings.
 mod settings_page;
+// The rail's four areas: Inbox, Edit, Review and Agents, one view at a time outside Edit.
+mod areas;
+mod edit_area;
+mod review_page;
+mod review_sections;
+// Toolbar icons: the programs' icons in Open in.
+mod editor_icons;
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
@@ -143,6 +150,11 @@ struct Args {
     #[arg(long, hide = true)]
     new_thread: bool,
 
+    /// Opens this folder in Edit at startup (for smoke tests and screenshots: Open Folder…
+    /// asks the desktop's folder picker).
+    #[arg(long, hide = true, value_name = "FOLDER")]
+    edit: Option<PathBuf>,
+
     /// Relays a Git or SSH password prompt over a Unix socket, so git doesn't
     /// need netcat.
     #[cfg(not(target_os = "windows"))]
@@ -203,6 +215,7 @@ fn main() {
     let startup_threads = window::StartupThreads {
         open_thread: args.open_thread.clone(),
         new_thread: args.new_thread,
+        edit_folder: args.edit.clone(),
     };
     let data_dir = match data_dir::init(args.user_data_dir) {
         Ok(data_dir) => data_dir,
@@ -246,7 +259,7 @@ fn main() {
         t3_engine::T3Mode::default()
     });
     let t3_server_url = t3_connection::resolve_server_url(args.t3_server, settings_text.as_deref());
-    // WP18: the server picked last in the title bar's menu, unless something above picks one.
+    // WP18: the server picked last (Settings › Connection), unless something above picks one.
     let (t3_mode, t3_server_url) = servers::remembered_target(
         args.t3_mode.as_deref(),
         server_url_given,
@@ -550,6 +563,8 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     updates::init(cx);
     // Worktree trust: T3's worktrees inherit their project's trust.
     worktree_trust::init(cx);
+    // The rail's four areas:
+    review_sections::init(cx);
     // Syntax highlighting for the languages Zed gets from extensions:
     mustr_languages::init(&app_state.languages);
 }

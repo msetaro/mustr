@@ -388,7 +388,7 @@ pub fn write_error(tag: &str, error: &RpcError) -> anyhow::Error {
                     .unwrap_or_else(|_| "a scope".to_string());
                 format!(
                     "T3 refused: mustr's pairing doesn't include {scope}. Pair again from the \
-                     home view."
+                     Inbox."
                 )
             }
             Some("PullRequestUnavailableError") => {
@@ -693,7 +693,7 @@ mod tests {
             })))
             .await,
             "T3 refused: mustr's pairing doesn't include source-control:write. Pair again from \
-             the home view."
+             the Inbox."
         );
         assert_eq!(
             submit(failed(json!({

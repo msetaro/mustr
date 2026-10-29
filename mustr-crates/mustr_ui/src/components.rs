@@ -4,6 +4,7 @@
 mod button;
 mod card;
 mod chip;
+mod icon_button;
 mod kbd;
 mod rail_button;
 mod segmented_control;
@@ -13,6 +14,7 @@ mod window_tab;
 pub use button::{ButtonStyle, SplitButton, TextButton};
 pub use card::Card;
 pub use chip::{Chip, Pill};
+pub use icon_button::{IconOnlyButton, IconSplitButton, QuietButton};
 pub use kbd::{Kbd, KeyStyle, kbds_for_action, key_label};
 pub use rail_button::RailButton;
 pub use segmented_control::SegmentedControl;

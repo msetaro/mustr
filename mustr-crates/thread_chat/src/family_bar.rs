@@ -1,7 +1,9 @@
-//! A thread's family bar, between the header and the timeline (`mustr-docs/PARITY.md` §2.7 and
-//! §2.14): in a child, the way back to its parent; in a parent, its subagents and delegated
-//! tasks with Open and Stop, its workflows with their agents, script, and Stop, and the
-//! background work its agent left running.
+//! A thread's family (`mustr-docs/PARITY.md` §2.7 and §2.14): in a child, the way back to its
+//! parent (a link in the thread's header); in a parent, its subagents and delegated tasks with
+//! Open and Stop, and its workflows with their agents, script, and Stop, in a drawer from the
+//! right edge of the thread view that the header's subagents button opens; and, above the
+//! composer as T3 shows them at the end of its timeline (`chat/ThreadNow.tsx`), the subagents
+//! waiting for the user and the background work the agent left running.
 //!
 //! The family comes from the shell's threads and their `lineage`, which [`crate::ThreadShells`]
 //! keeps for the whole app, and from the thread's own projection (`family_bar/family.rs`).
@@ -16,9 +18,9 @@ mod family;
 mod tests;
 
 use family::{
-    Activity, BackgroundWork, Family, Relationship, Relative, StopTarget, SubagentTask, Workflow,
-    WorkflowMember,
+    Activity, BackgroundWork, Family, StopTarget, SubagentTask, Workflow, WorkflowMember,
 };
+pub(crate) use family::{Relationship, Relative, format_subagent_title};
 
 use crate::{
     backend::{Access, ThreadBackend, ThreadBackendExt as _, is_unsupported_rpc},
@@ -28,9 +30,9 @@ use crate::{
 };
 use collections::{HashMap, HashSet};
 use gpui::{
-    AnyElement, App, Context, Entity, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task,
-    WeakEntity, Window, div, px,
+    AnyElement, App, Context, Entity, FocusHandle, Focusable as _, FontWeight, Hsla,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Render, SharedString,
+    Styled as _, Subscription, Task, WeakEntity, Window, div, px,
 };
 use mustr_ui::{TextButton, palette, tokens, tokens::scaled};
 use std::sync::Arc;
@@ -42,16 +44,13 @@ use t3_api::{
     },
 };
 use ui::{
-    Color, Icon, IconName, IconSize, Indicator, Label, LabelCommon as _, LabelSize, Tooltip,
+    Color, Icon, IconButton, IconName, IconSize, Label, LabelCommon as _, LabelSize, Tooltip,
     prelude::*,
 };
 use workspace::Workspace;
 
-const ROW_HEIGHT: f32 = 26.;
-/// Rows of children and tasks shown at once; more scroll.
-const MAX_ROWS_SHOWN: f32 = 8.;
-/// Children listed before "Show more".
-const VISIBLE_CHILDREN: usize = 5;
+/// The subagents drawer's width at mustr's design size; a narrow view caps it.
+const DRAWER_WIDTH: f32 = 360.;
 /// Background subagents with a button of their own; the rest are in the title's count.
 const BACKGROUND_THREADS: usize = 2;
 /// Lines of a workflow script shown at once.
@@ -89,12 +88,9 @@ pub struct ThreadFamilyBar {
     family_read: FamilyRead,
     family_read_for: Option<(String, usize)>,
     family: Family,
-    /// Whether the children are listed; `None` until the user says, which lists them while any
-    /// works.
-    expanded: Option<bool>,
-    show_all_children: bool,
-    /// Workflows whose agents are listed, by subagent id.
-    expanded_workflows: HashSet<String>,
+    /// Whether the subagents drawer is open.
+    open: bool,
+    focus_handle: FocusHandle,
     /// Workflow scripts shown, by subagent id.
     scripts: HashMap<String, Script>,
     /// Stops in flight, by [`StopTarget::key`] or workflow subagent id.
@@ -128,9 +124,8 @@ impl ThreadFamilyBar {
             family_read: FamilyRead::None,
             family_read_for: None,
             family: Family::default(),
-            expanded: None,
-            show_all_children: false,
-            expanded_workflows: HashSet::default(),
+            open: false,
+            focus_handle: cx.focus_handle(),
             scripts: HashMap::default(),
             stopping: HashSet::default(),
             error: None,
@@ -170,9 +165,7 @@ impl ThreadFamilyBar {
         self.backend = Some(backend);
         if thread_id != self.thread_id {
             self.thread_id = thread_id;
-            self.expanded = None;
-            self.show_all_children = false;
-            self.expanded_workflows.clear();
+            self.open = false;
             self.scripts.clear();
             self.error = None;
             cx.notify();
@@ -355,9 +348,47 @@ impl ThreadFamilyBar {
         }));
     }
 
-    fn is_expanded(&self) -> bool {
-        self.expanded
-            .unwrap_or_else(|| self.family.working_count() > 0 || self.family.children.len() <= 3)
+    /// How many subagents, delegated tasks and workflows the drawer lists, and how many work.
+    pub(crate) fn summary(&self) -> (usize, usize) {
+        let family = &self.family;
+        (
+            family.children.len() + family.tasks.len() + family.workflows.len(),
+            family.working_count(),
+        )
+    }
+
+    /// The thread this one is a subagent or fork of, for the header's link.
+    pub(crate) fn parent(&self) -> Option<&Relative> {
+        self.family.parent.as_ref()
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        self.open
+    }
+
+    /// Opens or closes the subagents drawer, focusing it when it opens, so Escape closes it.
+    pub(crate) fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open = !self.open;
+        if self.open {
+            window.focus(&self.focus_handle, cx);
+        }
+        cx.notify();
+    }
+
+    /// Closes the drawer, saying whether it was open.
+    pub(crate) fn close(&mut self, cx: &mut Context<Self>) -> bool {
+        let was_open = std::mem::take(&mut self.open);
+        if was_open {
+            cx.notify();
+        }
+        was_open
+    }
+
+    /// Opens the parent thread.
+    pub(crate) fn open_parent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(parent) = self.family.parent.clone().filter(|parent| parent.available) {
+            self.open(parent.thread_id, parent.title, window, cx);
+        }
     }
 }
 
@@ -405,19 +436,14 @@ fn agent_label(provider: Option<&str>, model: Option<&str>) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-fn section_label(text: &'static str) -> impl IntoElement {
-    Label::new(text)
-        .size(LabelSize::XSmall)
-        .weight(FontWeight::SEMIBOLD)
-        .color(Color::Muted)
-}
-
-/// A title that gives way to what follows it.
-fn title(text: String) -> impl IntoElement {
-    div()
-        .flex_1()
-        .min_w_0()
-        .child(Label::new(text).size(LabelSize::Small).truncate())
+/// The status a relative's badge shows, in T3's subagent statuses.
+fn badge_status(activity: &Activity) -> &str {
+    match activity {
+        Activity::Working(status) => status,
+        Activity::NeedsInput => "waiting",
+        Activity::Failed => "failed",
+        Activity::Done(status) => status,
+    }
 }
 
 impl ThreadFamilyBar {
@@ -452,192 +478,112 @@ impl ThreadFamilyBar {
             .into_any_element()
     }
 
-    fn render_parent(&self, parent: &Relative, cx: &mut Context<Self>) -> AnyElement {
-        let this = cx.entity().downgrade();
-        let thread_id = parent.thread_id.clone();
-        let parent_title = parent.title.clone();
-        h_flex()
-            .w_full()
-            .h(scaled(px(26.)))
-            .gap_2()
-            .child(
-                Icon::new(IconName::ArrowUp)
-                    .size(IconSize::Small)
-                    .color(Color::Muted),
-            )
-            .child(
-                Label::new(match parent.relationship {
-                    Relationship::Subagent => "Subagent of",
-                    Relationship::Fork => "Forked from",
-                })
-                .size(LabelSize::Small)
-                .color(Color::Muted),
-            )
-            .child(title(parent.title.clone()))
-            .when(parent.available, |this| {
-                this.child(status_label(&parent.activity, cx))
-            })
-            .child(
-                div().debug_selector(|| "family-open-parent".into()).child(
-                    TextButton::new("family-open-parent", "Open parent")
-                        .disabled(!parent.available)
-                        .tooltip(if parent.available {
-                            "Open the thread that started this one"
-                        } else {
-                            "T3 no longer lists the parent thread"
-                        })
-                        .on_click(move |_, window, cx| {
-                            let (thread_id, parent_title) =
-                                (thread_id.clone(), parent_title.clone());
-                            this.update(cx, |this, cx| {
-                                this.open(thread_id, parent_title, window, cx)
-                            })
-                            .ok();
-                        }),
-                ),
-            )
-            .into_any_element()
+    /// The driver of the thread's own agent, which its workflows' agents run on.
+    fn thread_driver(&self, cx: &App) -> Option<String> {
+        let view = self.thread_view.upgrade()?;
+        let instance = view
+            .read(cx)
+            .thread_state()?
+            .thread
+            .provider_instance_id
+            .clone();
+        Some(crate::agent_badge::instance_driver(&instance, cx))
     }
 
-    fn render_children(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let children = &self.family.children;
-        if children.is_empty() && self.family.tasks.is_empty() {
-            return None;
-        }
+    /// One row of the drawer, as T3's subagent rows (`SubagentTimelineLink`): the agent's badge,
+    /// the title over the agent and its status, Stop while it runs, and a chevron when it opens.
+    #[allow(clippy::too_many_arguments)]
+    fn drawer_row(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        selector: String,
+        driver: Option<String>,
+        activity: &Activity,
+        title: String,
+        detail: Option<String>,
+        opens: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
         let palette = palette(cx);
-        let working = children
-            .iter()
-            .filter(|child| child.activity.is_working())
-            .count()
-            + self.family.tasks.len();
-        let label = if children
-            .iter()
-            .all(|child| child.relationship == Relationship::Subagent)
-        {
-            "Subagents"
-        } else {
-            "Related threads"
-        };
-        let summary = match (working, children.len() + self.family.tasks.len() - working) {
-            (0, settled) => format!("{settled}"),
-            (working, 0) => format!("{working} running"),
-            (working, settled) => format!("{working} running · {settled} done"),
-        };
-        let expanded = self.is_expanded();
-        let header = h_flex()
-            .id("family-children-toggle")
-            .w_full()
-            .h(scaled(px(24.)))
-            .gap_1p5()
-            .cursor_pointer()
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.expanded = Some(!expanded);
-                cx.notify();
-            }))
-            .child(
-                Icon::new(if expanded {
-                    IconName::ChevronDown
-                } else {
-                    IconName::ChevronRight
-                })
-                .size(IconSize::XSmall)
-                .color(Color::Muted),
-            )
-            .child(section_label(label))
-            .child(
-                Label::new(summary)
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted),
-            );
-        let shown = if self.show_all_children {
-            children.len()
-        } else {
-            VISIBLE_CHILDREN.min(children.len())
-        };
-        let hidden = children.len() - shown;
-        Some(
-            v_flex()
-                .w_full()
-                .child(header)
-                .when(expanded, |this| {
-                    this.child(
-                        // All of a long family scrolls, leaving room for the timeline.
-                        v_flex()
-                            .id("family-children-list")
-                            .w_full()
-                            .max_h(scaled(px(ROW_HEIGHT * MAX_ROWS_SHOWN)))
-                            .overflow_y_scroll()
-                            .children(
-                                self.family
-                                    .tasks
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(index, task)| self.render_task(index, task, cx)),
-                            )
-                            .children(
-                                children
-                                    .iter()
-                                    .take(shown)
-                                    .enumerate()
-                                    .map(|(index, child)| self.render_child(index, child, cx)),
-                            ),
-                    )
-                    .when(hidden > 0, |this| {
-                        this.child(
-                            h_flex()
-                                .id("family-show-more")
-                                .h(scaled(px(24.)))
-                                .pl(scaled(px(20.)))
-                                .cursor_pointer()
-                                .text_color(palette.text_muted.hsla())
-                                .hover(|style| style.text_color(palette.text.hsla()))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.show_all_children = true;
-                                    cx.notify();
-                                }))
-                                .child(
-                                    Label::new(format!("Show {hidden} more"))
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Muted),
-                                ),
-                        )
-                    })
-                })
+        let status = badge_status(activity).to_string();
+        let mut line = vec![
+            Label::new(activity.label().to_string())
+                .size(LabelSize::XSmall)
+                .color(Color::Custom(activity_color(activity, cx)))
                 .into_any_element(),
-        )
-    }
-
-    fn row(&self, id: impl Into<gpui::ElementId>, selector: String) -> gpui::Stateful<gpui::Div> {
+        ];
+        if let Some(detail) = detail {
+            line.push(
+                Label::new(format!("· {detail}"))
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .truncate()
+                    .into_any_element(),
+            );
+        }
         h_flex()
             .id(id)
-            .debug_selector(|| selector)
+            .debug_selector({
+                let selector = selector.clone();
+                move || selector
+            })
             .flex_none()
             .w_full()
-            .h(scaled(px(ROW_HEIGHT)))
-            .pl(scaled(px(20.)))
-            .pr_1()
-            .gap_2()
+            .px_2()
+            .py(scaled(px(5.)))
+            .gap(scaled(px(10.)))
             .rounded(scaled(tokens::CONTROL_RADIUS))
+            .when(opens, |this| {
+                this.cursor_pointer()
+                    .hover(|style| style.bg(palette.surface_2.hsla()))
+            })
+            .child(crate::agent_badge::subagent_badge(
+                format!("{selector}-badge"),
+                driver.as_deref(),
+                Some(&status),
+                cx,
+            ))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Label::new(title).size(LabelSize::Small).truncate())
+                    .child(h_flex().min_w_0().gap_1().children(line)),
+            )
+    }
+
+    fn chevron(opens: bool) -> Option<Icon> {
+        opens.then(|| {
+            Icon::new(IconName::ChevronRight)
+                .size(IconSize::XSmall)
+                .color(Color::Muted)
+        })
     }
 
     fn render_child(&self, index: usize, child: &Relative, cx: &mut Context<Self>) -> AnyElement {
-        let palette = palette(cx);
-        let color = activity_color(&child.activity, cx);
         let thread_id = child.thread_id.clone();
         let child_title = child.title.clone();
-        self.row(
+        let driver = child
+            .provider
+            .as_deref()
+            .map(|instance| crate::agent_badge::instance_driver(instance, cx));
+        let agent = agent_label(child.provider.as_deref(), child.model.as_deref());
+        self.drawer_row(
             ("family-child", index),
             format!("family-child-{}", child.thread_id),
+            driver,
+            &child.activity,
+            child.title.clone(),
+            agent,
+            child.available,
+            cx,
         )
         .when(child.available, |this| {
-            this.cursor_pointer()
-                .hover(|style| style.bg(palette.surface_2.hsla()))
-                .tooltip(Tooltip::text("Open this thread"))
+            this.tooltip(Tooltip::text("Open this thread"))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open(thread_id.clone(), child_title.clone(), window, cx)
                 }))
         })
-        .child(Indicator::dot().color(Color::Custom(color)))
         .when(child.relationship == Relationship::Fork, |this| {
             this.child(
                 Icon::new(IconName::GitBranch)
@@ -645,15 +591,6 @@ impl ThreadFamilyBar {
                     .color(Color::Muted),
             )
         })
-        .child(title(child.title.clone()))
-        .children(
-            agent_label(child.provider.as_deref(), child.model.as_deref()).map(|agent| {
-                Label::new(agent)
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted)
-            }),
-        )
-        .child(status_label(&child.activity, cx))
         .children(child.stop.clone().map(|target| {
             let key = target.key().to_string();
             self.stop_button(
@@ -664,35 +601,41 @@ impl ThreadFamilyBar {
                 move |this, cx| this.stop(target.clone(), cx),
             )
         }))
+        .children(Self::chevron(child.available))
         .into_any_element()
     }
 
     fn render_task(&self, index: usize, task: &SubagentTask, cx: &mut Context<Self>) -> AnyElement {
-        let color = activity_color(&task.activity, cx);
-        self.row(("family-task", index), format!("family-task-{}", task.id))
-            .child(Indicator::dot().color(Color::Custom(color)))
-            .child(title(task.title.clone()))
-            .children(
-                agent_label(task.provider.as_deref(), task.model.as_deref()).map(|agent| {
-                    Label::new(agent)
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted)
-                }),
+        let driver = task
+            .provider
+            .as_deref()
+            .map(|instance| crate::agent_badge::instance_driver(instance, cx));
+        let agent = agent_label(task.provider.as_deref(), task.model.as_deref());
+        self.drawer_row(
+            ("family-task", index),
+            format!("family-task-{}", task.id),
+            driver,
+            &task.activity,
+            task.title.clone(),
+            agent,
+            false,
+            cx,
+        )
+        .children(task.stop.clone().map(|target| {
+            let key = target.key().to_string();
+            self.stop_button(
+                format!("family-stop-task-{}", task.id),
+                &key,
+                "Stop this subagent",
+                cx,
+                move |this, cx| this.stop(target.clone(), cx),
             )
-            .child(status_label(&task.activity, cx))
-            .children(task.stop.clone().map(|target| {
-                let key = target.key().to_string();
-                self.stop_button(
-                    format!("family-stop-task-{}", task.id),
-                    &key,
-                    "Stop this subagent",
-                    cx,
-                    move |this, cx| this.stop(target.clone(), cx),
-                )
-            }))
-            .into_any_element()
+        }))
+        .into_any_element()
     }
 
+    /// A workflow (`WorkflowOpeningBlock.tsx`): its name, its agents' tally and status, Script,
+    /// Open and Stop, then its phases with their agents.
     fn render_workflow(
         &self,
         index: usize,
@@ -700,52 +643,40 @@ impl ThreadFamilyBar {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let palette = palette(cx);
-        let expanded = self.expanded_workflows.contains(&workflow.subagent_id);
-        let subagent_id = workflow.subagent_id.clone();
+        let driver = self.thread_driver(cx);
         let header = h_flex()
             .id(("family-workflow", index))
             .w_full()
-            .h(scaled(px(26.)))
+            .px_2()
+            .py(scaled(px(5.)))
             .gap_1p5()
             .child(
-                h_flex()
-                    .id(("family-workflow-toggle", index))
-                    .debug_selector(|| format!("family-workflow-toggle-{subagent_id}"))
+                Icon::new(IconName::ListTree)
+                    .size(IconSize::Small)
+                    .color(Color::Muted),
+            )
+            .child(
+                v_flex()
                     .flex_1()
                     .min_w_0()
-                    .gap_1p5()
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if !this.expanded_workflows.remove(&subagent_id) {
-                            this.expanded_workflows.insert(subagent_id.clone());
-                        }
-                        cx.notify();
-                    }))
                     .child(
-                        Icon::new(if expanded {
-                            IconName::ChevronDown
-                        } else {
-                            IconName::ChevronRight
-                        })
-                        .size(IconSize::XSmall)
-                        .color(Color::Muted),
-                    )
-                    .child(section_label("Workflow"))
-                    .child(
-                        div().min_w_0().child(
-                            Label::new(workflow.name.clone())
-                                .size(LabelSize::Small)
-                                .truncate(),
-                        ),
+                        Label::new(workflow.name.clone())
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::MEDIUM)
+                            .truncate(),
                     )
                     .child(
-                        Label::new(workflow.summary())
-                            .size(LabelSize::XSmall)
-                            .color(Color::Muted),
-                    )
-                    .child(div().flex_1()),
+                        h_flex()
+                            .gap_1()
+                            .child(status_label(&workflow.activity, cx))
+                            .child(
+                                Label::new(format!("· {}", workflow.summary()))
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted)
+                                    .truncate(),
+                            ),
+                    ),
             )
-            .child(status_label(&workflow.activity, cx))
             .children(workflow.script_path.clone().map(|script_path| {
                 let subagent_id = workflow.subagent_id.clone();
                 let shown = self.scripts.contains_key(&workflow.subagent_id);
@@ -829,7 +760,7 @@ impl ThreadFamilyBar {
             };
             div()
                 .id(("family-workflow-script", index))
-                .ml(scaled(px(20.)))
+                .mx_2()
                 .mb_1()
                 .max_h(scaled(px(240.)))
                 .overflow_y_scroll()
@@ -845,58 +776,58 @@ impl ThreadFamilyBar {
             .w_full()
             .child(header)
             .children(script)
-            .when(expanded, |this| {
-                this.children(
-                    workflow
-                        .phases
-                        .iter()
-                        .enumerate()
-                        .map(|(phase_index, phase)| {
-                            v_flex()
-                                .w_full()
-                                .when_some(phase.title.clone(), |this, phase_title| {
-                                    this.child(
-                                        h_flex()
-                                            .h(scaled(px(22.)))
-                                            .pl(scaled(px(20.)))
-                                            .gap_2()
-                                            .child(
-                                                Label::new(phase_title)
-                                                    .size(LabelSize::XSmall)
-                                                    .weight(FontWeight::SEMIBOLD)
-                                                    .color(Color::Muted),
-                                            )
-                                            .child(
-                                                Label::new(format!(
-                                                    "{}/{}",
-                                                    phase.settled(),
-                                                    phase.members.len()
-                                                ))
+            .children(
+                workflow
+                    .phases
+                    .iter()
+                    .enumerate()
+                    .map(|(phase_index, phase)| {
+                        v_flex()
+                            .w_full()
+                            .pl(scaled(px(12.)))
+                            .when_some(phase.title.clone(), |this, phase_title| {
+                                this.child(
+                                    h_flex()
+                                        .px_2()
+                                        .pt_1()
+                                        .gap_2()
+                                        .child(
+                                            Label::new(phase_title)
                                                 .size(LabelSize::XSmall)
+                                                .weight(FontWeight::SEMIBOLD)
                                                 .color(Color::Muted),
-                                            ),
-                                    )
-                                })
-                                .children(phase.members.iter().enumerate().map(
-                                    |(member_index, member)| {
-                                        self.render_member(
-                                            (index * 1000 + phase_index) * 1000 + member_index,
-                                            member,
-                                            cx,
                                         )
-                                    },
-                                ))
-                        }),
+                                        .child(
+                                            Label::new(format!(
+                                                "{}/{}",
+                                                phase.settled(),
+                                                phase.members.len()
+                                            ))
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
+                                        ),
+                                )
+                            })
+                            .children(phase.members.iter().enumerate().map(
+                                |(member_index, member)| {
+                                    self.render_member(
+                                        (index * 1000 + phase_index) * 1000 + member_index,
+                                        member,
+                                        driver.clone(),
+                                        cx,
+                                    )
+                                },
+                            ))
+                    }),
+            )
+            .when(workflow.phases.is_empty(), |this| {
+                this.child(
+                    div().px_2().pl(scaled(px(20.))).child(
+                        Label::new("No agents yet")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
                 )
-                .when(workflow.phases.is_empty(), |this| {
-                    this.child(
-                        div().h(scaled(px(22.))).pl(scaled(px(20.))).child(
-                            Label::new("No agents yet")
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted),
-                        ),
-                    )
-                })
             })
             .into_any_element()
     }
@@ -905,31 +836,110 @@ impl ThreadFamilyBar {
         &self,
         index: usize,
         member: &WorkflowMember,
+        driver: Option<String>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let palette = palette(cx);
-        let color = activity_color(&member.activity, cx);
         let label = member.label.clone();
-        self.row(
+        let opens = member.thread_id.is_some() && member.available;
+        self.drawer_row(
             ("family-workflow-member", index),
             format!("family-workflow-member-{}", member.label),
+            driver,
+            &member.activity,
+            member.label.clone(),
+            None,
+            opens,
+            cx,
         )
-        .pl(scaled(px(32.)))
         .when_some(
             member.thread_id.clone().filter(|_| member.available),
             |this, thread_id| {
-                this.cursor_pointer()
-                    .hover(|style| style.bg(palette.surface_2.hsla()))
-                    .tooltip(Tooltip::text("Open this agent's thread"))
+                this.tooltip(Tooltip::text("Open this agent's thread"))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open(thread_id.clone(), label.clone(), window, cx)
                     }))
             },
         )
-        .child(Indicator::dot().color(Color::Custom(color)))
-        .child(title(member.label.clone()))
-        .child(status_label(&member.activity, cx))
+        .children(Self::chevron(opens))
         .into_any_element()
+    }
+
+    /// The lines above the composer, as T3's `ThreadNow` shows them at the end of its timeline:
+    /// subagents waiting for the user, the background work the agent left running with Stop,
+    /// and that the agent waits on another thread.
+    pub(crate) fn render_now(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let family = self.family.clone();
+        let mut lines = Vec::new();
+        let asking = family
+            .children
+            .iter()
+            .filter(|child| child.activity == Activity::NeedsInput && child.available)
+            .collect::<Vec<_>>();
+        if let Some(first) = asking.first() {
+            let title = if asking.len() == 1 {
+                "A subagent is waiting for you".to_string()
+            } else {
+                format!("{} subagents are waiting for you", asking.len())
+            };
+            let (thread_id, child_title) = (first.thread_id.clone(), first.title.clone());
+            lines.push(
+                now_line(
+                    "family-now-input",
+                    Icon::new(IconName::CircleHelp)
+                        .size(IconSize::Small)
+                        .color(Color::Accent)
+                        .into_any_element(),
+                    title,
+                    Some(
+                        asking
+                            .iter()
+                            .map(|child| child.title.clone())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                    cx,
+                )
+                .child(
+                    TextButton::new("family-now-input-open", "Open")
+                        .tooltip("Open the subagent that's asking")
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.open(thread_id.clone(), child_title.clone(), window, cx)
+                        })),
+                )
+                .into_any_element(),
+            );
+        }
+        if let Some(work) = &family.background {
+            lines.push(self.render_background(work, cx));
+        }
+        if family.waiting_on_thread {
+            lines.push(
+                now_line(
+                    "family-now-waiting",
+                    Icon::new(IconName::Clock)
+                        .size(IconSize::Small)
+                        .color(Color::Muted)
+                        .into_any_element(),
+                    "Waiting on another thread".to_string(),
+                    None,
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        if let Some(error) = self.error.clone().filter(|_| !self.open) {
+            lines.push(
+                div()
+                    .debug_selector(|| "family-error".into())
+                    .child(
+                        Label::new(error)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Error),
+                    )
+                    .into_any_element(),
+            );
+        }
+        lines
     }
 
     fn render_background(&self, work: &BackgroundWork, cx: &mut Context<Self>) -> AnyElement {
@@ -937,106 +947,176 @@ impl ThreadFamilyBar {
             "background:{}",
             self.thread_id.as_deref().unwrap_or_default()
         );
-        h_flex()
-            .w_full()
-            .h(scaled(px(26.)))
-            .gap_1p5()
-            .child(Indicator::dot().color(Color::Custom(palette(cx).text_muted.hsla())))
-            .child(section_label("Background"))
-            .child(title(work.title.clone()))
-            .children(
-                work.threads
-                    .iter()
-                    .take(BACKGROUND_THREADS)
-                    .enumerate()
-                    .map(|(index, (label, thread_id))| {
-                        let this = cx.entity().downgrade();
-                        let (label, thread_id) = (label.clone(), thread_id.clone());
-                        TextButton::new(
-                            SharedString::from(format!("family-background-open-{index}")),
-                            if work.threads.len() == 1 {
-                                "Show".to_string()
-                            } else {
-                                label.clone()
-                            },
-                        )
-                        .tooltip("Open the subagent's thread")
-                        .on_click(move |_, window, cx| {
-                            let (thread_id, label) = (thread_id.clone(), label.clone());
-                            this.update(cx, |this, cx| this.open(thread_id, label, window, cx))
-                                .ok();
-                        })
-                    }),
-            )
-            .child(self.stop_button(
-                "family-background-stop".to_string(),
-                &key,
-                "Stop the agent's background work",
-                cx,
-                |this, cx| this.stop_background(cx),
-            ))
-            .into_any_element()
+        let palette = palette(cx);
+        now_line(
+            "family-now-background",
+            div()
+                .size(scaled(px(6.)))
+                .rounded_full()
+                .bg(palette.text_muted.hsla())
+                .into_any_element(),
+            work.title.clone(),
+            None,
+            cx,
+        )
+        .children(
+            work.threads
+                .iter()
+                .take(BACKGROUND_THREADS)
+                .enumerate()
+                .map(|(index, (label, thread_id))| {
+                    let this = cx.entity().downgrade();
+                    let (label, thread_id) = (label.clone(), thread_id.clone());
+                    TextButton::new(
+                        SharedString::from(format!("family-background-open-{index}")),
+                        if work.threads.len() == 1 {
+                            "Show".to_string()
+                        } else {
+                            label.clone()
+                        },
+                    )
+                    .tooltip("Open the subagent's thread")
+                    .on_click(move |_, window, cx| {
+                        let (thread_id, label) = (thread_id.clone(), label.clone());
+                        this.update(cx, |this, cx| this.open(thread_id, label, window, cx))
+                            .ok();
+                    })
+                }),
+        )
+        .child(self.stop_button(
+            "family-background-stop".to_string(),
+            &key,
+            "Stop the agent's background work",
+            cx,
+            |this, cx| this.stop_background(cx),
+        ))
+        .into_any_element()
     }
 }
 
+/// One line above the composer: an icon, what's going on and its detail, then its actions
+/// (`ThreadNowLine` in T3).
+fn now_line(
+    selector: &'static str,
+    icon: AnyElement,
+    title: String,
+    detail: Option<String>,
+    cx: &App,
+) -> gpui::Div {
+    let palette = palette(cx);
+    h_flex()
+        .debug_selector(move || selector.into())
+        .w_full()
+        .min_w_0()
+        .gap_1p5()
+        .px_1()
+        .child(
+            div()
+                .flex_none()
+                .size(scaled(px(14.)))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
+                .text_color(palette.text_muted.hsla())
+                .child(match detail {
+                    Some(detail) => format!("{title} · {detail}"),
+                    None => title,
+                }),
+        )
+}
+
 impl Render for ThreadFamilyBar {
+    /// The subagents drawer, over the right of the timeline while it's open.
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.family.is_empty() && self.error.is_none() {
-            // With nothing to show, `hidden` keeps the bar out of the view's layout.
+        let (count, working) = self.summary();
+        if !self.open || count == 0 {
+            // With nothing to show, `hidden` keeps the drawer out of the view's layout.
             return div().hidden().into_any_element();
         }
         let palette = palette(cx);
         let family = self.family.clone();
+        let settled = count - working.min(count);
+        let summary = match (working, settled) {
+            (0, settled) => format!("{settled} done"),
+            (working, 0) => format!("{working} running"),
+            (working, settled) => format!("{working} running · {settled} done"),
+        };
         v_flex()
-            .flex_none()
-            .w_full()
-            .px_4()
-            .py(scaled(px(4.)))
-            .border_b(tokens::BORDER_WIDTH)
+            .id("subagents-drawer")
+            .debug_selector(|| "subagents-drawer".into())
+            .key_context("SubagentsDrawer")
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &menu::Cancel, window, cx| {
+                this.close(cx);
+                if let Some(view) = this.thread_view.upgrade() {
+                    window.focus(&view.focus_handle(cx), cx);
+                }
+            }))
+            .occlude()
+            .absolute()
+            .top_0()
+            .right_0()
+            .bottom_0()
+            .w(scaled(px(DRAWER_WIDTH)))
+            .max_w(gpui::relative(0.92))
+            .border_l(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .bg(palette.surface.hsla())
-            .children(
-                family
-                    .parent
-                    .as_ref()
-                    .map(|parent| self.render_parent(parent, cx)),
-            )
-            .children(self.render_children(cx))
-            .children(
-                family
-                    .workflows
-                    .iter()
-                    .enumerate()
-                    .map(|(index, workflow)| self.render_workflow(index, workflow, cx)),
-            )
-            .children(
-                family
-                    .background
-                    .as_ref()
-                    .map(|work| self.render_background(work, cx)),
-            )
-            .when(family.waiting_on_thread, |this| {
-                this.child(
-                    h_flex()
-                        .h(scaled(px(24.)))
-                        .gap_1p5()
-                        .child(
-                            Icon::new(IconName::Clock)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
-                        )
-                        .child(
-                            Label::new("Waiting on another thread")
+            .shadow_lg()
+            .child(
+                h_flex()
+                    .flex_none()
+                    .px_3()
+                    .py_2()
+                    .gap_2()
+                    .border_b(tokens::BORDER_WIDTH)
+                    .border_color(palette.border.hsla())
+                    .child(
+                        Label::new("Subagents")
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::SEMIBOLD),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Label::new(summary)
                                 .size(LabelSize::XSmall)
-                                .color(Color::Muted),
+                                .color(Color::Muted)
+                                .truncate(),
                         ),
-                )
-            })
+                    )
+                    .child(
+                        div()
+                            .debug_selector(|| "subagents-drawer-close".into())
+                            .child(
+                                IconButton::new("subagents-drawer-close", IconName::Close)
+                                    .icon_size(IconSize::XSmall)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(Tooltip::text("Close"))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.close(cx);
+                                        if let Some(view) = this.thread_view.upgrade() {
+                                            window.focus(&view.focus_handle(cx), cx);
+                                        }
+                                    })),
+                            ),
+                    ),
+            )
             .when_some(self.error.clone(), |this, error| {
                 this.child(
                     div()
                         .debug_selector(|| "family-error".into())
-                        .py_0p5()
+                        .px_3()
+                        .py_1()
                         .child(
                             Label::new(error)
                                 .size(LabelSize::XSmall)
@@ -1044,6 +1124,36 @@ impl Render for ThreadFamilyBar {
                         ),
                 )
             })
+            .child(
+                v_flex()
+                    .id("subagents-drawer-list")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p(scaled(tokens::LIST_INSET))
+                    .gap_0p5()
+                    .children(
+                        family
+                            .tasks
+                            .iter()
+                            .enumerate()
+                            .map(|(index, task)| self.render_task(index, task, cx)),
+                    )
+                    .children(
+                        family
+                            .children
+                            .iter()
+                            .enumerate()
+                            .map(|(index, child)| self.render_child(index, child, cx)),
+                    )
+                    .children(
+                        family
+                            .workflows
+                            .iter()
+                            .enumerate()
+                            .map(|(index, workflow)| self.render_workflow(index, workflow, cx)),
+                    ),
+            )
             .into_any_element()
     }
 }

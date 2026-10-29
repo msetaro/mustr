@@ -104,13 +104,13 @@ pub struct AgentWork {
     pub files_changed: Option<usize>,
 }
 
-/// What the shell snapshot gives the home view.
-struct ThreadLists {
-    all: Vec<AgentThread>,
-    work: Vec<AgentWork>,
+/// What the shell snapshot gives the home view (and the Review page's Code list).
+pub(crate) struct ThreadLists {
+    pub(crate) all: Vec<AgentThread>,
+    pub(crate) work: Vec<AgentWork>,
 }
 
-/// mustr's home: the T3 connection, the inbox (pull requests waiting on the reviewer and agent
+/// The Inbox, mustr's home: the T3 connection, the inbox (pull requests waiting on the reviewer and agent
 /// threads with changes ready to review), and recent agent threads.
 pub struct HomeView {
     focus_handle: FocusHandle,
@@ -1276,7 +1276,7 @@ impl HomeView {
 /// The threads of T3's shell snapshot: the recent ones, and those with work to review. A
 /// candidate whose worktree is on this machine is kept only if git finds changes in it; one
 /// whose worktree is gone from a T3 on this machine has nothing left to diff.
-async fn load_threads(session: &T3Session) -> anyhow::Result<ThreadLists> {
+pub(crate) async fn load_threads(session: &T3Session) -> anyhow::Result<ThreadLists> {
     let snapshot = session.shell_snapshot().await?;
     let all = agent_threads(&snapshot);
     let reviewed = ReviewedMarks::new(&agent_reviews_dir()).load();
@@ -1498,25 +1498,19 @@ fn recent_threads(shell: &Shell, limit: usize) -> Vec<ThreadRow> {
     threads
         .into_iter()
         .take(limit)
-        .map(|thread| {
-            let status = match serde_json::to_value(&thread.status) {
-                Ok(serde_json::Value::String(status)) => status,
-                _ => String::new(),
-            };
-            ThreadRow {
-                id: thread.id.clone(),
-                title: if thread.title.trim().is_empty() {
-                    "Untitled thread".to_string()
-                } else {
-                    thread.title.clone()
-                },
-                status: ThreadStatus::from_shell(status, thread.pending_runtime_request.is_some()),
-                branch: thread.branch.clone(),
-                project: shell
-                    .projects
-                    .get(&thread.project_id)
-                    .map(|project| project.title.clone()),
-            }
+        .map(|thread| ThreadRow {
+            id: thread.id.clone(),
+            title: if thread.title.trim().is_empty() {
+                "Untitled thread".to_string()
+            } else {
+                thread.title.clone()
+            },
+            status: ThreadStatus::of(thread),
+            branch: thread.branch.clone(),
+            project: shell
+                .projects
+                .get(&thread.project_id)
+                .map(|project| project.title.clone()),
         })
         .collect()
 }
@@ -1571,6 +1565,8 @@ fn agents_notice(providers: &[types::ServerProvider]) -> Option<String> {
 fn status_color(status: &ThreadStatus) -> Color {
     match status {
         ThreadStatus::NeedsInput => Color::Warning,
+        // Waiting on another thread or on background work is quiet, as in T3.
+        ThreadStatus::Working(status) if status == "waiting" => Color::Muted,
         ThreadStatus::Working(_) => Color::Accent,
         ThreadStatus::Failed => Color::Error,
         ThreadStatus::Settled(_) => Color::Muted,
@@ -1697,7 +1693,7 @@ impl Item for HomeView {
     type Event = ItemEvent;
 
     fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
-        "Home".into()
+        "Inbox".into()
     }
 
     fn show_toolbar(&self) -> bool {
@@ -1862,7 +1858,7 @@ mod tests {
                 ThreadRow {
                     id: "newest".into(),
                     title: "newest".into(),
-                    status: ThreadStatus::Working("running".into()),
+                    status: ThreadStatus::Working("working".into()),
                     branch: Some("t3/newest".into()),
                     project: Some("mustr".into()),
                 },
@@ -1890,6 +1886,17 @@ mod tests {
             ]
         );
         assert_eq!(threads[1].status.label(), "needs input");
+        // A thread whose last run completed while its agent still waits on background work
+        // reads as waiting, as in the threads sidebar and the thread's header.
+        let mut watching = thread("watching", "completed", "2026-10-27T13:00:00.000Z");
+        watching["pendingBackgroundTasks"] = json!([{
+            "taskId": "task-1", "kind": "background_task",
+            "description": "Watching pull request #80"
+        }]);
+        assert_eq!(
+            recent_threads(&self::shell(vec![watching]), 1)[0].status,
+            ThreadStatus::Working("waiting".into())
+        );
         assert_eq!(
             ThreadStatus::from_shell("rolled_back".into(), false).label(),
             "rolled back"

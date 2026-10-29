@@ -1552,7 +1552,7 @@ Review of your changes:
         assert_eq!(
             format!("{error:#}"),
             "T3 refused: mustr's pairing doesn't include orchestration:operate. Pair again from \
-             the home view."
+             the Inbox."
         );
         assert!(
             cx.update(|cx| backend.reload_threads(cx))

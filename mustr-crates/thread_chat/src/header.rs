@@ -1,180 +1,303 @@
-//! A thread's header: its title and activity, its branch, model, and permission mode, how full
-//! the agent's context is (with Compact context), the agent's usage limits, and the thread's
-//! menu. Under it go the banners for the agent's status and usage (`usage.rs`).
+//! A thread's header: one calm row with the thread's title and its status, the subagents button
+//! and the thread's menu, over a muted line with its model and permission mode (and, in a
+//! subagent or fork, a link to its parent). The agent's status banner goes under it, where T3
+//! pins it above the timeline (`usage.rs`); what waits and what runs in the background is above
+//! the composer. The context window's ring is in the composer's footer, where T3 shows it
+//! (`ContextWindowMeter` in `chat/ComposerFooterControls.tsx`), and usage limits are on the
+//! Usage page: the thread shows a limit only when one stops it.
 
 use crate::{
+    ShellStatus,
+    family_bar::Relationship,
     model::{ContextUsage, ThreadActivity, ThreadState},
     thread_settings::runtime_mode_label,
     thread_view::{Connection, ThreadView},
 };
 use gpui::{
-    AnyElement, App, Context, FontWeight, Hsla, IntoElement, ParentElement as _, Styled as _,
-    WeakEntity, px,
+    AnyElement, App, Context, FontWeight, IntoElement, ParentElement as _, Styled as _, WeakEntity,
+    px,
 };
-use mustr_ui::{OverflowItem, Pill, overflow, palette, tokens, tokens::scaled};
+use mustr_ui::{MustrIcon, palette, tokens, tokens::scaled};
 use ui::{
-    Color, ContextMenu, ContextMenuEntry, IconButton, IconName, IconSize, Label, LabelCommon as _,
-    LabelSize, PopoverMenu, Tooltip, prelude::*,
+    ButtonLike, CircularProgress, Color, CommonAnimationExt as _, ContextMenu, ContextMenuEntry,
+    IconButton, IconName, IconSize, Label, LabelCommon as _, LabelSize, PopoverMenu, Tooltip,
+    prelude::*,
 };
-
-/// The narrowest the header's title gets, at mustr's design size, before the usage meters make
-/// way for it.
-const TITLE_MIN_WIDTH: gpui::Pixels = px(240.);
-
-const HEADER_TITLE: &str = "thread-header-title";
-const HEADER_USAGE: &str = "thread-header-usage";
-const HEADER_CONTEXT: &str = "thread-header-context";
-const HEADER_MENU: &str = "thread-header-menu";
 
 impl ThreadView {
-    /// In a narrow window, the usage limits go first, then the context meter, so the title keeps
-    /// [`TITLE_MIN_WIDTH`]; the thread's menu has both.
     pub(crate) fn render_header(
         &mut self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.observe_history(cx);
         let palette = palette(cx);
         let state = self.thread_state();
-        let activity = state.map(ThreadState::activity);
         let details = state.map(header_details).unwrap_or_default();
-        let usage = state.and_then(ThreadState::context_usage);
-        let loaded = state.is_some();
-        let usage_summary = self.render_usage_summary(cx);
-        let context_meter = usage.map(|usage| self.render_context_meter(usage, cx));
-        let menu = loaded.then(|| self.render_thread_menu(cx));
+        let status = self.thread_status(cx);
+        let menu = state.is_some().then(|| self.render_thread_menu(cx));
+        let subagents = self.render_subagents_button(cx);
+        let parent = self.render_parent_link(cx);
         let banners = self.render_banners(cx);
-        let gap = gpui::rems(0.75);
-        let mut items = vec![
-            OverflowItem::new(HEADER_TITLE, overflow::ALWAYS)
-                .shrinks_to(tokens::scaled_pixels(TITLE_MIN_WIDTH, cx)),
-        ];
-        if usage_summary.is_some() {
-            items.push(OverflowItem::new(HEADER_USAGE, 1));
-        }
-        if context_meter.is_some() {
-            items.push(OverflowItem::new(HEADER_CONTEXT, 2));
-        }
-        if menu.is_some() {
-            items.push(OverflowItem::new(HEADER_MENU, overflow::ALWAYS));
-        }
-        // What doesn't fit is in the thread's menu, so there's no "…" button.
-        let visible =
-            self.history
-                .header_overflow
-                .visible(&items, gap.to_pixels(window.rem_size()), px(0.));
-        let shows = |key: &str| {
-            items
-                .iter()
-                .zip(&visible)
-                .any(|(item, visible)| *visible && item.key == key)
-        };
-        let (show_usage, show_context) = (shows(HEADER_USAGE), shows(HEADER_CONTEXT));
         let title = v_flex()
             .flex_1()
             .min_w_0()
+            .gap_0p5()
             .child(
                 h_flex()
+                    .min_w_0()
                     .gap_2()
                     .child(
-                        Label::new(self.title())
-                            .weight(FontWeight::SEMIBOLD)
-                            .truncate(),
-                    )
-                    .when_some(activity, |this, activity| {
-                        this.child(activity_pill(&activity, cx))
-                    })
-                    .when(self.connection == Connection::Reconnecting, |this| {
-                        this.child(Pill::tinted("reconnecting", palette.warning))
-                    })
-                    .when(self.is_rewinding(), |this| {
-                        this.child(Pill::tinted("rewinding", palette.accent))
-                    }),
-            )
-            .when(!details.is_empty(), |this| {
-                this.child(
-                    div()
-                        .debug_selector(|| "thread-header-details".into())
-                        .child(
-                            Label::new(details.join(" · "))
-                                .size(LabelSize::Small)
-                                .color(Color::Muted)
+                        div().min_w_0().child(
+                            Label::new(self.title())
+                                .weight(FontWeight::SEMIBOLD)
                                 .truncate(),
                         ),
+                    )
+                    .children(status.map(|status| render_status(status, cx)))
+                    .when(self.connection == Connection::Reconnecting, |this| {
+                        this.child(quiet_note("reconnecting", Color::Warning))
+                    })
+                    .when(self.is_rewinding(), |this| {
+                        this.child(quiet_note("rewinding", Color::Accent))
+                    }),
+            )
+            .when(!details.is_empty() || parent.is_some(), |this| {
+                this.child(
+                    h_flex()
+                        .min_w_0()
+                        .gap_1p5()
+                        .when(!details.is_empty(), |this| {
+                            this.child(
+                                div()
+                                    .min_w_0()
+                                    .debug_selector(|| "thread-header-details".into())
+                                    .child(
+                                        Label::new(details.join(" · "))
+                                            .size(LabelSize::Small)
+                                            .color(Color::Muted)
+                                            .truncate(),
+                                    ),
+                            )
+                        })
+                        .children(parent),
                 )
             });
-        let children = [
-            (Some(HEADER_TITLE.into()), Some(title.into_any_element())),
-            (
-                Some(HEADER_USAGE.into()),
-                usage_summary.filter(|_| show_usage),
-            ),
-            (
-                Some(HEADER_CONTEXT.into()),
-                context_meter.filter(|_| show_context),
-            ),
-            (Some(HEADER_MENU.into()), menu),
-        ]
-        .into_iter()
-        .filter_map(|(key, child)| Some((key, child?)));
         v_flex()
             .flex_none()
             .w_full()
             .child(
-                div()
+                h_flex()
                     .w_full()
                     .px_4()
                     .py(scaled(px(8.)))
+                    .gap_3()
                     .border_b(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
                     .bg(palette.surface.hsla())
+                    .child(title)
                     .child(
-                        self.history
-                            .header_overflow
-                            .render(children, window)
-                            .gap(gap),
+                        h_flex()
+                            .flex_none()
+                            .gap_1()
+                            .children(subagents)
+                            .children(menu),
                     ),
             )
             .children(banners)
             .into_any_element()
     }
 
-    /// How full the agent's context is, with Compact context next to it, as T3's context meter
-    /// offers it.
-    fn render_context_meter(&self, usage: ContextUsage, cx: &mut Context<Self>) -> AnyElement {
-        let blocked = self.compact_blocked(cx);
-        h_flex()
-            .flex_none()
-            .gap_1()
-            .child(render_usage(usage, cx))
-            .child(
-                div().debug_selector(|| "thread-compact".into()).child(
-                    IconButton::new("thread-compact", IconName::Compact)
-                        .icon_size(IconSize::XSmall)
-                        .icon_color(Color::Muted)
-                        .disabled(blocked.is_some())
-                        .tooltip(Tooltip::text(match blocked {
-                            Some(reason) => format!("Compact context: {reason}"),
-                            None => "Compact context: summarize the conversation so far, to \
-                                     free up the agent's context"
-                                .to_string(),
-                        }))
-                        .on_click(
-                            cx.listener(|this, _, window, cx| this.compact_context(window, cx)),
-                        ),
-                ),
-            )
-            .into_any_element()
+    /// The thread's status as the threads sidebar shows it (`ShellStatus`), from the thread's
+    /// record in T3's shell, so the two never disagree. Before the shell has the thread, the
+    /// thread's own runs say what they can.
+    pub(crate) fn thread_status(&self, cx: &App) -> Option<ShellStatus> {
+        let thread_id = self.thread_id.as_deref()?;
+        let shells = self.history.shells.as_ref()?.read(cx);
+        match shells.thread(thread_id) {
+            Some(thread) => ShellStatus::from_shell(thread),
+            None => match self.thread_state()?.activity() {
+                ThreadActivity::NeedsInput => Some(ShellStatus::AwaitingInput),
+                ThreadActivity::Working(_) => Some(ShellStatus::Working),
+                ThreadActivity::Failed => Some(ShellStatus::Failed),
+                ThreadActivity::Idle(_) => None,
+            },
+        }
     }
 
-    /// The thread's menu: compacting, restarting the agent, and its usage limits.
+    /// The subagents button: how many subagents, delegated tasks and workflows the thread has,
+    /// with a dot while any works. It opens the subagents drawer (`family_bar.rs`).
+    fn render_subagents_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let bar = self.family_bar.read(cx);
+        let (count, working) = bar.summary();
+        if count == 0 {
+            return None;
+        }
+        let open = bar.is_open();
+        let palette = palette(cx);
+        Some(
+            h_flex()
+                .id("thread-subagents-button")
+                .debug_selector(|| "thread-subagents-button".into())
+                .flex_none()
+                .h(scaled(px(24.)))
+                .px_1p5()
+                .gap_1()
+                .rounded(scaled(tokens::CONTROL_RADIUS))
+                .cursor_pointer()
+                .when(open, |this| this.bg(palette.surface_2.hsla()))
+                .hover(|style| style.bg(palette.surface_2.hsla()))
+                .tooltip(Tooltip::text(if open {
+                    "Hide subagents"
+                } else {
+                    "Subagents"
+                }))
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.family_bar.update(cx, |bar, cx| bar.toggle(window, cx));
+                    cx.notify();
+                }))
+                .child(
+                    MustrIcon::Bot
+                        .icon()
+                        .size(IconSize::Small)
+                        .color(Color::Muted),
+                )
+                .child(
+                    Label::new(count.to_string())
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+                .when(working > 0, |this| {
+                    this.child(
+                        div()
+                            .debug_selector(|| "thread-subagents-working".into())
+                            .size(scaled(px(6.)))
+                            .rounded_full()
+                            .bg(palette.accent.hsla()),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
+    /// In a subagent or a fork, a link to the thread it came from.
+    fn render_parent_link(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let parent = self.family_bar.read(cx).parent()?.clone();
+        let palette = palette(cx);
+        let label = match parent.relationship {
+            Relationship::Subagent => "Subagent of",
+            Relationship::Fork => "Forked from",
+        };
+        let bar = self.family_bar.downgrade();
+        Some(
+            h_flex()
+                .id("family-open-parent")
+                .debug_selector(|| "family-open-parent".into())
+                .min_w_0()
+                .gap_1()
+                .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
+                .text_color(palette.text_muted.hsla())
+                .child(div().flex_none().child(format!("· {label}")))
+                .child(
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .when(parent.available, |this| {
+                            this.text_color(palette.text.hsla())
+                                .hover(|style| style.underline())
+                        })
+                        .child(parent.title.clone()),
+                )
+                .when(parent.available, |this| {
+                    this.cursor_pointer()
+                        .tooltip(Tooltip::text("Open the thread that started this one"))
+                        .on_click(move |_, window, cx| {
+                            bar.update(cx, |bar, cx| bar.open_parent(window, cx)).ok();
+                        })
+                })
+                .when(!parent.available, |this| {
+                    this.tooltip(Tooltip::text("T3 no longer lists the parent thread"))
+                })
+                .into_any_element(),
+        )
+    }
+
+    /// The context window, in the composer's footer as T3's `ContextWindowMeter`: a ring of how
+    /// full it is, with the numbers on hover, and Compact context in its menu.
+    pub(crate) fn render_context_meter(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let usage = self.thread_state()?.context_usage()?;
+        let palette = palette(cx);
+        let fraction = usage
+            .max_tokens
+            .filter(|max| *max > 0)
+            .map(|max| (usage.used_tokens as f32 / max as f32).clamp(0., 1.));
+        let numbers = context_numbers(usage);
+        let blocked = self.compact_blocked(cx);
+        let view: WeakEntity<Self> = cx.weak_entity();
+        let ring = CircularProgress::new(
+            fraction.unwrap_or(0.),
+            1.,
+            tokens::scaled_pixels(px(14.), cx),
+            cx,
+        )
+        .stroke_width(tokens::scaled_pixels(px(2.5), cx))
+        .bg_color(palette.border.hsla())
+        .progress_color(if fraction.is_some_and(|fraction| fraction > 0.9) {
+            cx.theme().status().error
+        } else {
+            palette.text_muted.hsla()
+        });
+        let tooltip = format!("Context window: {numbers}");
+        Some(
+            div()
+                .flex_none()
+                .debug_selector(|| "thread-context-meter".into())
+                .child(
+                    PopoverMenu::new("thread-context-meter")
+                        .trigger_with_tooltip(
+                            ButtonLike::new("thread-context-meter-button").child(
+                                div()
+                                    .size(scaled(px(20.)))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(ring),
+                            ),
+                            Tooltip::text(tooltip),
+                        )
+                        .anchor(gpui::Anchor::BottomRight)
+                        .menu(move |window, cx| {
+                            let view = view.clone();
+                            let numbers = numbers.clone();
+                            let blocked = blocked.clone();
+                            Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                                menu.header(format!("Context window · {numbers}")).item(
+                                    ContextMenuEntry::new("Compact Context")
+                                        .icon(IconName::Compact)
+                                        .icon_color(Color::Muted)
+                                        .disabled(blocked.is_some())
+                                        .handler(move |window, cx| {
+                                            view.update(cx, |view, cx| {
+                                                view.compact_context(window, cx)
+                                            })
+                                            .ok();
+                                        }),
+                                )
+                            }))
+                        }),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The thread's menu: compacting and restarting the agent.
     fn render_thread_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         let view: WeakEntity<Self> = cx.weak_entity();
         let compact_blocked = self.compact_blocked(cx).is_some();
         let restart_blocked = self.backend.write_blocked_reason();
         let restarting = self.is_restarting();
-        let usage_open = self.usage_panel_open();
         PopoverMenu::new("thread-header-menu")
             .trigger_with_tooltip(
                 IconButton::new("thread-header-menu-button", IconName::Ellipsis)
@@ -193,21 +316,6 @@ impl ThreadView {
                             .icon_color(Color::Muted)
                     };
                     menu.item({
-                        let view = view.clone();
-                        entry(
-                            if usage_open {
-                                "Hide Usage Limits"
-                            } else {
-                                "Show Usage Limits"
-                            },
-                            IconName::SignalMedium,
-                        )
-                        .handler(move |_, cx| {
-                            view.update(cx, |view, cx| view.toggle_usage_limits(cx))
-                                .ok();
-                        })
-                    })
-                    .item({
                         let view = view.clone();
                         entry("Compact Context", IconName::Compact)
                             .disabled(compact_blocked)
@@ -239,13 +347,10 @@ impl ThreadView {
     }
 }
 
-/// The header's second line: the thread's branch, its model, and its permission mode by T3's
-/// name for it.
+/// The header's second line: the thread's model and its permission mode by T3's name for it.
+/// The branch is in the thread's toolbar.
 pub(crate) fn header_details(state: &ThreadState) -> Vec<String> {
     let mut details = Vec::new();
-    if let Some(branch) = &state.thread.branch {
-        details.push(branch.clone());
-    }
     if let Some(model) = state.model() {
         details.push(model);
     }
@@ -253,19 +358,39 @@ pub(crate) fn header_details(state: &ThreadState) -> Vec<String> {
     details
 }
 
-fn activity_pill(activity: &ThreadActivity, cx: &App) -> Pill {
-    let palette = palette(cx);
-    let color: Hsla = match activity {
-        ThreadActivity::NeedsInput => palette.warning.hsla(),
-        ThreadActivity::Working(_) => palette.accent.hsla(),
-        ThreadActivity::Failed => cx.theme().status().error,
-        ThreadActivity::Idle(_) => palette.text_muted.hsla(),
-    };
-    Pill::tinted(activity.label(), color)
+/// The thread's status, quietly: T3's icon and the word in its color, with no fill.
+fn render_status(status: ShellStatus, cx: &App) -> AnyElement {
+    let color = status.color(cx);
+    let icon = status
+        .icon()
+        .size(IconSize::XSmall)
+        .color(Color::Custom(color));
+    h_flex()
+        .debug_selector(move || format!("thread-header-status-{}", status.label()))
+        .flex_none()
+        .gap_1()
+        .child(if status.spins() {
+            icon.with_rotate_animation(3).into_any_element()
+        } else {
+            icon.into_any_element()
+        })
+        .child(
+            Label::new(status.label())
+                .size(LabelSize::Small)
+                .color(Color::Custom(color)),
+        )
+        .into_any_element()
 }
 
-fn render_usage(usage: ContextUsage, cx: &App) -> impl IntoElement {
-    let palette = palette(cx);
+fn quiet_note(text: &'static str, color: Color) -> AnyElement {
+    Label::new(text)
+        .size(LabelSize::Small)
+        .color(color)
+        .into_any_element()
+}
+
+/// "529k / 1,000k tokens · 53% used", or the tokens alone when the window's size is unknown.
+pub(crate) fn context_numbers(usage: ContextUsage) -> String {
     let thousands = |tokens: i64| {
         if tokens >= 1000 {
             format!("{}k", (tokens + 500) / 1000)
@@ -273,35 +398,13 @@ fn render_usage(usage: ContextUsage, cx: &App) -> impl IntoElement {
             tokens.to_string()
         }
     };
-    let label = match usage.max_tokens {
-        Some(max) => format!("{} / {}", thousands(usage.used_tokens), thousands(max)),
-        None => thousands(usage.used_tokens),
-    };
-    let fraction = usage
-        .max_tokens
-        .filter(|max| *max > 0)
-        .map(|max| (usage.used_tokens as f32 / max as f32).clamp(0., 1.));
-    v_flex()
-        .id("thread-context-usage")
-        .flex_none()
-        .items_end()
-        .gap_0p5()
-        .tooltip(Tooltip::text("Tokens in the agent's context"))
-        .child(
-            Label::new(format!("{label} tokens"))
-                .size(LabelSize::XSmall)
-                .color(Color::Muted),
-        )
-        .when_some(fraction, |this, fraction| {
-            this.child(crate::usage::meter_bar(
-                fraction,
-                if fraction > 0.85 {
-                    palette.warning.hsla()
-                } else {
-                    palette.accent.hsla()
-                },
-                scaled(px(96.)),
-                cx,
-            ))
-        })
+    match usage.max_tokens.filter(|max| *max > 0) {
+        Some(max) => format!(
+            "{} / {} tokens · {}% used",
+            thousands(usage.used_tokens),
+            thousands(max),
+            (usage.used_tokens as f64 * 100. / max as f64).round() as i64
+        ),
+        None => format!("{} tokens", thousands(usage.used_tokens)),
+    }
 }

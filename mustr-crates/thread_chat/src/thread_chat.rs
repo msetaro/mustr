@@ -18,6 +18,7 @@ mod new_thread;
 mod settings_bar;
 pub mod shell;
 mod sidebar;
+pub mod status;
 mod thread_view;
 mod timeline;
 
@@ -45,7 +46,7 @@ mod thread_list_tests;
 pub mod history;
 pub mod usage;
 pub use history::{CompactContext, RestartAgentSession};
-pub use usage::{ServerConfigs, ShowUsageLimits};
+pub use usage::ServerConfigs;
 #[cfg(test)]
 mod history_tests;
 // WP9, composer mentions and slash commands:
@@ -100,6 +101,9 @@ pub use palette::{
     CopyThreadId, FindInThread, NewThreadInProject, NewThreadWithoutProject, PaletteResult,
     palette_results,
 };
+// Thread polish: subagent badges, the subagents drawer, and one status for a thread:
+pub mod agent_badge;
+pub use agent_badge::provider_icon;
 
 #[cfg(test)]
 mod tests;
@@ -144,7 +148,6 @@ pub fn init(cx: &mut App) {
     // WP5, subagents and workflows:
     // WP10, history, agent status and usage:
     history::init(cx);
-    usage::init(cx);
     // WP11, terminals, worktrees and the PR flow:
     // WP12, composer and timeline:
     mentions::init(cx);

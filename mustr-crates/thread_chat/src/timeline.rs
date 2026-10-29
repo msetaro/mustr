@@ -20,7 +20,8 @@ use gpui::{
 };
 use markdown::{Markdown, MarkdownElement, MarkdownStyle};
 use mustr_ui::{
-    ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens, tokens::scaled,
+    ButtonStyle as MustrButtonStyle, Card, TextButton, corners::inner_radius, palette, tokens,
+    tokens::scaled,
 };
 use t3_api::{
     rpc,
@@ -542,6 +543,61 @@ pub(crate) fn truncate(text: &str, max_chars: usize) -> String {
     }
 }
 
+/// What a subagent's row says under its title (T3's `SubagentTimelineLink`): what it found once
+/// it settled, else what it's doing, as one plain line, leaving out T3's generic "Child task
+/// ended with status …".
+pub(crate) fn subagent_detail(
+    settled: bool,
+    progress: Option<&str>,
+    result: Option<&str>,
+) -> Option<String> {
+    let (first, second) = if settled {
+        (result, progress)
+    } else {
+        (progress, result)
+    };
+    let raw = [first, second]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|text| !text.is_empty())?;
+    if raw
+        .get(..29)
+        .is_some_and(|start| start.eq_ignore_ascii_case("Child task ended with status "))
+    {
+        return None;
+    }
+    let mut plain = String::new();
+    let mut chars = raw.chars().peekable();
+    // Markdown links read as their text, and code marks go.
+    while let Some(char) = chars.next() {
+        match char {
+            '`' => {}
+            ']' if chars.peek() == Some(&'(') => {
+                for skipped in chars.by_ref() {
+                    if skipped == ')' {
+                        break;
+                    }
+                }
+            }
+            '[' => {}
+            char => plain.push(char),
+        }
+    }
+    let plain = plain
+        .lines()
+        .map(|line| {
+            let line = line.trim_start();
+            line.strip_prefix("- ")
+                .or_else(|| line.strip_prefix("* "))
+                .unwrap_or(line)
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let plain = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!plain.is_empty()).then_some(plain)
+}
+
 fn status_color(status: ItemStatus, cx: &App) -> Hsla {
     let palette = palette(cx);
     match status {
@@ -558,7 +614,6 @@ fn tool_icon(tool: ToolKind) -> IconName {
         ToolKind::FileSearch => IconName::ToolSearch,
         ToolKind::WebSearch => IconName::ToolWeb,
         ToolKind::Tool => IconName::ToolHammer,
-        ToolKind::Subagent => IconName::Thread,
     }
 }
 
@@ -657,34 +712,7 @@ fn work_label(item: &TimelineItem) -> String {
     }
 }
 
-/// A small round avatar with a letter, as in the mockups' agent cards.
-fn avatar(letter: &str, background: Hsla) -> impl IntoElement {
-    div()
-        .flex_none()
-        .size(scaled(px(18.)))
-        .mt(scaled(px(2.)))
-        .rounded_full()
-        .bg(background)
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_color(gpui::white())
-        .text_size(tokens::text_size(px(9.5)))
-        .font_weight(FontWeight::BOLD)
-        .child(letter.to_string())
-}
-
 impl ThreadView {
-    fn agent_letter(&self) -> String {
-        self.thread_state()
-            .map(|state| state.thread.provider_instance_id.clone())
-            .and_then(|provider| provider.chars().next())
-            .map_or_else(
-                || "A".to_string(),
-                |letter| letter.to_uppercase().to_string(),
-            )
-    }
-
     pub(crate) fn render_row(
         &mut self,
         index: usize,
@@ -795,19 +823,26 @@ impl ThreadView {
                 let files = (!files.is_empty()).then(|| render_message_files(files, cx));
                 let edit = self.render_edit_from_here(item, cx);
                 let copy = self.render_copy_message(item, text, cx);
-                h_flex()
+                // T3 draws no avatar for the user: the message is a bubble on the right, at most
+                // four fifths of the timeline wide, with its actions under it on hover
+                // (`TimelineUserMessageRow.tsx`).
+                v_flex()
                     .group(SharedString::from(format!("message-{}", item.id)))
-                    .items_start()
-                    .gap_2()
-                    .child(avatar("Y", gpui::rgb(0x6e7781).into()))
+                    .w_full()
+                    .items_end()
+                    .gap_1()
                     .child(
                         v_flex()
-                            .flex_1()
+                            .debug_selector({
+                                let id = item.id.clone();
+                                move || format!("thread-message-bubble-{id}")
+                            })
                             .min_w_0()
+                            .max_w(relative(0.8))
                             .gap_1p5()
-                            .px(scaled(px(10.)))
-                            .py(scaled(px(6.)))
-                            .rounded(scaled(tokens::CORNER_RADIUS))
+                            .px(scaled(px(12.)))
+                            .py(scaled(px(8.)))
+                            .rounded(scaled(px(14.)))
                             .bg(palette.surface_2.hsla())
                             .when(!text.trim().is_empty(), |this| {
                                 this.child(self.render_markdown(&item.id, false, window, cx))
@@ -815,7 +850,7 @@ impl ThreadView {
                             .children(thumbnails)
                             .children(files),
                     )
-                    .child(v_flex().flex_none().children(copy).children(edit))
+                    .child(h_flex().flex_none().gap_0p5().children(copy).children(edit))
                     .into_any_element()
             }
             ItemKind::AssistantMessage { streaming, text } => {
@@ -829,29 +864,33 @@ impl ThreadView {
                     self.render_quote_button(&item.id, text, cx)
                 };
                 let fork = self.render_fork(item, cx);
-                h_flex()
+                // T3 draws no avatar for the thread's own agent either: its answer reads as the
+                // page's text, full width, with its actions under it on hover
+                // (`TimelineAssistantRows.tsx`).
+                v_flex()
                     .group(SharedString::from(format!("message-{}", item.id)))
-                    .items_start()
-                    .gap_2()
-                    .child(avatar(&self.agent_letter(), palette.agent.hsla()))
+                    .debug_selector({
+                        let id = item.id.clone();
+                        move || format!("thread-message-answer-{id}")
+                    })
+                    .w_full()
+                    .min_w_0()
+                    .px_1()
+                    .gap_1()
+                    .child(self.render_markdown(&item.id, false, window, cx))
+                    .when(*streaming, |this| {
+                        this.child(
+                            div()
+                                .w(scaled(px(6.)))
+                                .h(scaled(px(12.)))
+                                .bg(palette.text.hsla())
+                                .opacity(0.7),
+                        )
+                    })
                     .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .child(self.render_markdown(&item.id, false, window, cx))
-                            .when(*streaming, |this| {
-                                this.child(
-                                    div()
-                                        .w(scaled(px(6.)))
-                                        .h(scaled(px(12.)))
-                                        .bg(palette.text.hsla())
-                                        .opacity(0.7),
-                                )
-                            }),
-                    )
-                    .child(
-                        v_flex()
+                        h_flex()
                             .flex_none()
+                            .gap_0p5()
                             .children(copy)
                             .children(quote)
                             .children(fork),
@@ -1097,10 +1136,146 @@ impl ThreadView {
                 attachment_id,
                 title,
             } => self.render_html_render(&item.id, attachment_id, title, cx),
+            ItemKind::Subagent { .. } => self.render_subagent(item, cx),
             ItemKind::Tool { .. } | ItemKind::FileChange { .. } | ItemKind::Reasoning { .. } => {
                 self.render_work(vec![item.clone()], window, cx)
             }
         }
+    }
+
+    /// A subagent the agent started, as T3's row for it (`SubagentTimelineLink`): its badge,
+    /// with the agent's icon and a status dot, its title over what it's doing or found, its
+    /// status when that says more, how long it ran, and a chevron when its thread opens.
+    fn render_subagent(&self, item: &TimelineItem, cx: &mut Context<Self>) -> AnyElement {
+        let ItemKind::Subagent {
+            subagent_id,
+            title,
+            progress,
+            result,
+            driver,
+            child_thread_id,
+            status,
+            started_at,
+            completed_at,
+            ..
+        } = &item.kind
+        else {
+            return div().into_any_element();
+        };
+        let palette = palette(cx);
+        // The projection's record is newer than the turn item's.
+        let live = self.thread_state().and_then(|state| {
+            state
+                .subagents()
+                .iter()
+                .find(|subagent| &subagent.id == subagent_id)
+        });
+        let status = live.map_or_else(|| status.clone(), |live| live.status.as_str().to_string());
+        let progress = live
+            .and_then(|live| live.progress.clone())
+            .or_else(|| progress.clone());
+        let result = live
+            .and_then(|live| live.result.clone())
+            .or_else(|| result.clone());
+        let child_thread_id = live
+            .and_then(|live| live.child_thread_id.clone())
+            .or_else(|| child_thread_id.clone());
+        let started_at = live
+            .and_then(|live| live.started_at.clone())
+            .or_else(|| started_at.clone());
+        let completed_at = live
+            .and_then(|live| live.completed_at.clone())
+            .or_else(|| completed_at.clone());
+        let settled = crate::agent_badge::subagent_settled(&status);
+        let detail = subagent_detail(settled, progress.as_deref(), result.as_deref());
+        let failed = matches!(status.as_str(), "failed" | "error");
+        let label = crate::agent_badge::subagent_status_label(&status);
+        let elapsed = started_at.as_deref().and_then(|started| {
+            let started = chrono::DateTime::parse_from_rfc3339(started).ok()?;
+            let ended = completed_at
+                .as_deref()
+                .and_then(|ended| chrono::DateTime::parse_from_rfc3339(ended).ok())
+                .map(|ended| ended.with_timezone(&chrono::Utc))
+                .unwrap_or_else(chrono::Utc::now);
+            Some(crate::agent_badge::elapsed_label(
+                (ended - started.with_timezone(&chrono::Utc)).num_seconds(),
+            ))
+        });
+        let item_id = item.id.clone();
+        let opens = child_thread_id.clone();
+        let open_title = title.clone();
+        h_flex()
+            .id(SharedString::from(format!("subagent-{item_id}")))
+            .debug_selector({
+                let item_id = item_id.clone();
+                move || format!("thread-subagent-{item_id}")
+            })
+            .w_full()
+            .min_w_0()
+            .gap(scaled(px(10.)))
+            .px_2()
+            .py(scaled(px(6.)))
+            .rounded(scaled(tokens::CONTROL_RADIUS))
+            .when_some(opens, |this, thread_id| {
+                this.cursor_pointer()
+                    .hover(|style| style.bg(palette.surface_2.hsla()))
+                    .tooltip(ui::Tooltip::text(format!("Open {open_title}")))
+                    .on_click(move |_, window, cx| {
+                        let Some(workspace) = workspace::Workspace::for_window(window, cx) else {
+                            return;
+                        };
+                        crate::open_thread(
+                            thread_id.clone(),
+                            open_title.clone().into(),
+                            workspace.downgrade(),
+                            window,
+                            cx,
+                        );
+                    })
+            })
+            .child(crate::agent_badge::subagent_badge(
+                format!("thread-subagent-badge-{item_id}"),
+                Some(driver),
+                Some(&status),
+                cx,
+            ))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        Label::new(title.clone())
+                            .size(LabelSize::Small)
+                            .weight(FontWeight::MEDIUM)
+                            .truncate(),
+                    )
+                    .child(
+                        Label::new(detail.clone().unwrap_or_else(|| label.to_string()))
+                            .size(LabelSize::XSmall)
+                            .color(if failed { Color::Error } else { Color::Muted })
+                            .truncate(),
+                    ),
+            )
+            .when(detail.is_some() && status != "completed", |this| {
+                this.child(Label::new(label).size(LabelSize::XSmall).color(if failed {
+                    Color::Error
+                } else {
+                    Color::Muted
+                }))
+            })
+            .children(elapsed.map(|elapsed| {
+                Label::new(elapsed)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+            }))
+            .when(child_thread_id.is_some(), |this| {
+                this.child(
+                    Icon::new(IconName::ChevronRight)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+            })
+            .into_any_element()
     }
 
     /// The agent's request for a secret: a masked input with Save and Decline while it waits,
@@ -1395,7 +1570,17 @@ impl ThreadView {
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_image_preview(name.clone(), preview.clone(), window, cx)
                     }))
-                    .child(img(image).size_full().object_fit(fit))
+                    // The image rounds the frame's corners: GPUI clips it to a rectangle, not
+                    // to the frame's rounded border (`mustr_ui::corners`).
+                    .child(
+                        img(image)
+                            .size_full()
+                            .rounded(inner_radius(tokens::scaled_pixels(
+                                tokens::CONTROL_RADIUS,
+                                cx,
+                            )))
+                            .object_fit(fit),
+                    )
                     .into_any_element()
             }
             AssetState::Loading => frame

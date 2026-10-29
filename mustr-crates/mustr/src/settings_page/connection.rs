@@ -1,6 +1,5 @@
 //! Connection: which T3 Code server mustr runs agents on (this computer's T3 Code, mustr's own
-//! engine, or a saved server), as the title bar's connection chip switches them
-//! (`servers.rs`), and the saved servers' dialog.
+//! engine, or a saved server; `servers.rs`), and the saved servers' dialog.
 
 use super::rows::{self, Callback, Group, SettingRow};
 use crate::{
@@ -36,17 +35,17 @@ fn status_line(cx: &App) -> String {
         }
         ConnectionStatus::Connecting(step) => format!("Connecting: {step}"),
         ConnectionStatus::NeedsPairing(_) => {
-            "This server needs pairing. Home shows how.".to_string()
+            "This server needs pairing. The Inbox shows how.".to_string()
         }
         ConnectionStatus::NeedsSetup(_) => {
-            "T3 Code needs setting up first. Home shows how.".to_string()
+            "T3 Code needs setting up first. The Inbox shows how.".to_string()
         }
         ConnectionStatus::Failed(error) => format!("Couldn't connect: {error}"),
     }
 }
 
-/// Connects to `target`, as the title bar's menu does, and lets that pick last at the next
-/// launch too: a `"t3"` engine pinned in the settings would win over it.
+/// Connects to `target`, and lets that pick last at the next launch too: a `"t3"` engine pinned
+/// in the settings would win over it.
 fn switch(target: ServerTarget, cx: &mut App) {
     crate::app_settings::update_mustr_setting(&["t3"], None, cx);
     servers::switch_server(target, cx);

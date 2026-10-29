@@ -81,9 +81,10 @@ pub struct ThreadView {
     pub(crate) composer: Entity<Editor>,
     /// In the composer's bottom row.
     pub(crate) settings_bar: Entity<ThreadSettingsBar>,
-    /// Under the header.
-    family_bar: Entity<ThreadFamilyBar>,
-    /// Above the timeline (`worktree_setup.rs`).
+    /// The subagents drawer, over the right of the timeline, and the subagents and background
+    /// work above the composer (`family_bar.rs`).
+    pub(crate) family_bar: Entity<ThreadFamilyBar>,
+    /// Above the composer (`worktree_setup.rs`).
     worktree_setup: Entity<WorktreeSetupCard>,
     /// Find in thread's matches (`find_bar.rs`).
     pub(crate) find: crate::find_bar::FindState,
@@ -519,29 +520,29 @@ impl Render for ThreadView {
             .into_any_element(),
         };
         // When the pane is short (a terminal panel open at the default size), the header, its
-        // banners and the timeline give way, and the composer keeps its whole height, so its
-        // buttons and a pending request's answers stay in view. The column is positioned
-        // absolutely so its height never pushes the pane under the dock: Zed's center doesn't
-        // shrink below what its item needs.
+        // banner, the timeline and what's above the composer give way, and the composer keeps
+        // its whole height, so its buttons and a pending request's answers stay in view. The
+        // column is positioned absolutely so its height never pushes the pane under the dock:
+        // Zed's center doesn't shrink below what its item needs.
+        let thread = self.new_thread.is_none();
         let above_composer = v_flex()
             .flex_1()
             .min_h_0()
             .w_full()
             .overflow_hidden()
-            .when(self.new_thread.is_none(), |this| {
-                this.child(self.render_header(window, cx))
-                    .child(self.family_bar.clone())
-                    .child(self.worktree_setup.clone())
-            })
+            .when(thread, |this| this.child(self.render_header(window, cx)))
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
                     .w_full()
+                    .relative()
                     .flex()
                     .flex_col()
-                    .child(body),
-            );
+                    .child(body)
+                    .when(thread, |this| this.child(self.family_bar.clone())),
+            )
+            .when(thread, |this| this.child(self.render_waiting(window, cx)));
         div()
             .key_context("ThreadView")
             .track_focus(&self.focus_handle)
@@ -556,6 +557,48 @@ impl Render for ThreadView {
                         .child(self.render_composer(window, cx)),
                 ),
             )
+    }
+}
+
+impl ThreadView {
+    /// What T3 shows between the timeline and the composer, in its order: the worktree's setup,
+    /// subagents waiting for the user, the agent's background work and goal (`ThreadNow`), the
+    /// queued messages, then the banner of a usage limit that stopped the thread. The agent's
+    /// requests follow, in the composer (`composer.rs`). It scrolls when the pane is short.
+    fn render_waiting(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let mut items: Vec<AnyElement> = self
+            .family_bar
+            .update(cx, |family_bar, cx| family_bar.render_now(cx));
+        items.extend(self.render_goal(cx));
+        let state = self.thread_state();
+        let running = state.is_some_and(ThreadState::is_running);
+        let queued = state.map(ThreadState::queued_messages).unwrap_or_default();
+        if !queued.is_empty() {
+            items.push(self.render_queue(queued, running, cx).into_any_element());
+        }
+        items.extend(self.render_limit_banner(cx));
+        v_flex()
+            .id("thread-above-composer")
+            .debug_selector(|| "thread-above-composer".into())
+            // In a short pane, the timeline gives way first, then this scrolls.
+            .flex_shrink(1.)
+            .min_h_0()
+            .w_full()
+            .max_h(window.viewport_size().height * 0.4)
+            .overflow_y_scroll()
+            .child(self.worktree_setup.clone())
+            .when(!items.is_empty(), |this| {
+                this.child(
+                    h_flex().w_full().justify_center().px_4().pt_2().child(
+                        v_flex()
+                            .w_full()
+                            .max_w(scaled(px(CONTENT_MAX_WIDTH)))
+                            .gap_1p5()
+                            .children(items),
+                    ),
+                )
+            })
+            .into_any_element()
     }
 }
 

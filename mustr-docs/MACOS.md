@@ -49,7 +49,7 @@ A checklist for the first launch of a release, such as on a work laptop.
 1. **Install** in Terminal, then open mustr from Applications or Spotlight:
    `curl -fsSL https://github.com/msetaro/mustr/releases/latest/download/install.sh | sh`
 2. **With T3 Code installed** (its `t3` command and background service): within a few seconds
-   Home says "Connected to <your Mac's name>", and the title bar's chip shows `T3 · <name>`.
+   the Inbox says "Connected to <your Mac's name>", and the status bar says "Synced".
    - mustr pairs by itself: it runs `t3 auth pairing create` for `orchestration:read`,
      `orchestration:operate`, `source-control:write`, `filesystem:read`, `terminal:read`,
      `terminal:operate`, `settings:write`, `providers:manage` and `diagnostics:read`, and the
@@ -60,22 +60,24 @@ A checklist for the first launch of a release, such as on a work laptop.
      probably asks again after each update (not yet seen on a Mac).
    - **Pairing again** happens by itself when the token expires (after about 30 days), when T3
      revokes it, or when a newer mustr needs another scope. To start over, revoke the "mustr"
-     session (`t3 auth session revoke <id>`), then choose Reconnect on Home.
+     session (`t3 auth session revoke <id>`), then choose Reconnect in the Inbox.
    - If T3's service is installed but stopped, mustr runs `t3 service restart` once. If nothing
-     runs T3, Home offers **Run T3 Code in the background** (`t3 service install`). If T3 Code
-     speaks an older protocol, Home offers **Update T3 Code** (`t3 update`); an older 0.1.x works
-     and Home says quietly that 0.1.3 is available.
-3. **With no T3 Code:** Home shows "Set up the agents engine" with **Install the agents engine**
+     runs T3, the Inbox offers **Run T3 Code in the background** (`t3 service install`). If T3
+     Code speaks an older protocol, the Inbox offers **Update T3 Code** (`t3 update`); an older
+     0.1.x works and the Inbox says quietly that 0.1.3 is available.
+3. **With no T3 Code:** the Inbox shows "Set up the agents engine" with **Install the agents engine**
    (T3 Code 0.1.3, about 100 MB, installed as T3's own installer does: `~/.t3`, the `t3` command
    in `~/.local/bin`, and its launch agent), or **Use mustr's own engine**: a private T3 Code in
    mustr's data folder, with its own projects and threads, that runs only while mustr does.
 4. **With only T3's desktop app** (no `t3` command): while T3's app is open, mustr finds the
-   server it runs but can't pair by itself, so Home shows "Pair mustr with T3 Code" and a field.
+   server it runs but can't pair by itself, so the Inbox shows "Pair mustr with T3 Code" and a
+   field.
    In T3's app, open Settings › Sharing & access, create a pairing link with the scopes above,
    and paste it into the field. mustr then works while T3's app is open. To stop depending on it,
-   quit T3's app and choose Install the agents engine on Home (T3's app can then use that
+   quit T3's app and choose Install the agents engine in the Inbox (T3's app can then use that
    background service too), or use mustr's own engine.
-5. **Check the Agents page** (the rail's grid icon, or "mustr: open agents" in the command
+5. **Check the agents setup page** (Agents on the rail, then the last button under the threads,
+   or "mustr: open agents" in the command
    palette, ⌘⇧P): Claude and Codex should say **Ready**, with "2 ready" in the heading. If one is
    signed out, sign in there, or in Terminal with `claude auth login` or `codex login`, then choose
    Check again. The agents' logins are their own CLIs', shared with T3 Code.
@@ -169,6 +171,35 @@ cargo run -p mustr
   at a fixed size, move down to stay centered. Drag an empty part of the bar to move the window.
   Double-clicking it does what System Settings › Desktop & Dock › "Double-click a window's title
   bar to" says. mustr draws no window buttons of its own on macOS.
+- **The rail.** The strip of buttons down the left side has mustr's four places, top to bottom,
+  and Settings (the gear) at the bottom. Each button's tooltip names it and its shortcut.
+  - **Inbox** (⌘1): what needs you (pull requests and agent work), the connection to T3 Code, and
+    your projects. It's where mustr starts.
+  - **Edit** (⌘2): Zed's editor on one folder. The picker at the top of the file tree lists T3's
+    projects whose folders are on this Mac, the folders you opened recently, and Open Folder…;
+    mustr remembers the last one. Files open as tabs in the title bar, ⌘P finds a file in the
+    folder, and ⌘⇧F searches it. A thread's Open in menu has **Open in mustr's editor** for its
+    worktree, and file links in agent messages open here, in the thread's folder. Clicking Edit
+    again shows or hides the files.
+  - **Review** (⌘3): what there is to review. Pull requests come in sections, each a name and a
+    query in GitHub's search syntax (`is:open is:pr review-requested:@me` for Review requested,
+    `author:@me` for Yours, and the projects' other open pull requests), across all of T3's
+    projects, with their checks and reviews. A section's **…** menu edits its query, renames or
+    removes it; **Add section** adds one; Settings › Review lists them too. Under them, **Code**
+    lists the agent work waiting for review: threads whose runs finished with changes you haven't
+    reviewed, with Review changes. The search box narrows everything. A row opens the pull
+    request's or the thread's review, with its files next to the rail; in a review, Review goes
+    back to the list, and on the list it loads it again.
+  - **Agents** (⌘4): the agent threads, and the thread you pick. Under the threads, four buttons
+    open the scheduled tasks, the worktrees, usage (⌘U), and agents setup (installing and signing
+    in to agents). Clicking Agents again shows or hides the threads.
+- **One view at a time.** Outside Edit there are no tabs: opening a thread, a review or a page
+  shows it in place of what was there, and the title bar says where you are. ⌘[ and ⌘] (and a
+  mouse's back and forward buttons, and the arrows in the title bar) go back and forward through
+  what you looked at, from one place to another, as in a browser. Each rail button brings back
+  what its place showed last. Outside Edit, ⌘W goes back (it never closes anything you'd lose);
+  in Edit, ⌘W closes the file, and ⌘[ and ⌘] indent as in Zed. mustr starts with the Inbox each
+  time; it doesn't reopen the views or files of the last session.
 - **Keys.** mustr loads Zed's macOS keymap (`assets/keymaps/default-macos.json`), so shortcuts use
   ⌘: ⌘⇧P opens the command palette, and ⌘, opens Settings. In a thread's composer, ↩ or
   ⌘↩ sends, ⇧↩ adds a new line, and ⌘⇧↩ steers the running agent. In a review, `c` comments on
@@ -207,14 +238,15 @@ threads as T3 Code's own app.
    writes while it runs. T3's launch agent (`com.t3tools.t3code.service`) keeps that server
    running.
    - If T3's launch agent is installed but stopped, mustr runs `t3 service restart` once.
-   - If nothing runs, Home offers to set up T3's launch agent (`t3 service install`), or to use
+   - If nothing runs, the Inbox offers to set up T3's launch agent (`t3 service install`), or to use
      mustr's own engine.
-   - If T3 Code isn't installed, Home offers to install it the way T3's `install.sh` does: the
+   - If T3 Code isn't installed, the Inbox offers to install it the way T3's `install.sh` does: the
      runtime in `~/.t3/runtime/versions/`, the `t3` command in `~/.local/bin`, and the launch
      agent.
 2. **Version check.** mustr speaks T3's orchestration protocol 2 and is built for T3 Code 0.1.3
    (`mustr-crates/t3_client/T3_VERSION`). Other T3 Code versions on protocol 2 work; for an older
-   one, Home says quietly that 0.1.3 is available. If your T3 Code speaks an older protocol, Home
+   one, the Inbox says quietly that 0.1.3 is available. If your T3 Code speaks an older protocol,
+   the Inbox
    offers `t3 update`. If it speaks a newer one, mustr needs updating.
 3. **Pairing.** mustr finds T3's `t3` command and asks it for a one-time credential:
    `t3 auth pairing create --scope orchestration:read --scope orchestration:operate --scope
@@ -226,7 +258,7 @@ threads as T3 Code's own app.
      first, then `t3` on your `PATH`, then the newest runtime.
    - It exchanges the credential for a token, which lasts about 30 days. The session shows as
      "mustr" in `t3 auth session list`.
-   - If there's no `t3` command (for example, with only T3 Code's desktop app installed), Home
+   - If there's no `t3` command (for example, with only T3 Code's desktop app installed), the Inbox
      shows that command. Run it where T3's CLI is installed, then paste the credential or the
      pairing link it prints.
 4. **Keychain.** mustr stores the token in your login keychain as an internet password named
@@ -254,7 +286,9 @@ looked at on a Mac yet.
 
 - **Not checked on a Mac:** the Dock icon, the About panel, the menu bar, the title bar's layout
   around the traffic lights and their moving when you zoom, the zoom keys (only their bindings are
-  tested, on Linux), keychain prompts, and mustr's tests on macOS. Nor are the installer (its logic
+  tested, on Linux), keychain prompts, Open in's app icons (found by bundle identifier with
+  `NSWorkspace` and drawn by `iconForFile:`; on Linux mustr draws T3's icons instead), and mustr's
+  tests on macOS. Nor are the installer (its logic
   ran on Linux with stand-ins for `ditto`, `plutil`, and `osascript`) and the updater's `ditto`,
   `codesign`, and relaunch steps (its download, checks, and bundle swap ran in tests with stand-in
   bundles). The launch agent and `t3` command handling was reviewed against T3's

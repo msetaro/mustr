@@ -1,21 +1,26 @@
-//! mustr's status bar items: the T3 sync state and drafts on the left, and key hints for the
-//! active item on the right. They replace Zed's items, which mustr never adds (Zed adds them in
+//! mustr's status bar items: the T3 connection's state and drafts on the left, and key hints for
+//! the active item on the right. The connection's state is the only place it shows outside Home
+//! (the title bar has no connection chip): clicking it reconnects, opens Settings › Connection
+//! to switch servers, or Home to pair or set up. They replace Zed's items, which mustr never adds (Zed adds them in
 //! `initialize_workspace`, crates/zed/src/zed.rs), and the dock buttons that `Workspace::new`
 //! adds, which mustr removes; the icon rail replaces them.
 
 use crate::{
-    t3_connection::{ConnectionStatus, T3Connection},
+    navigation, settings_page,
+    t3_connection::{ConnectionStatus, EngineKind, EngineSetup, T3Connection},
     t3_engine::T3Mode,
+    thread_git::{MenuSlot, menu_position},
 };
 use gpui::{
-    App, AppContext as _, Context, Entity, Hsla, IntoElement, ParentElement as _, Pixels, Render,
-    SharedString, Styled as _, Subscription, Task, Window, div, px,
+    App, AppContext as _, ClickEvent, Context, Entity, Hsla, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _,
+    Styled as _, Subscription, Task, WeakEntity, Window, div, px,
 };
 use mustr_ui::{StatusHint, tokens, tokens::scaled};
 use review::ReviewView;
 use std::time::{Duration, Instant};
 use theme::ActiveTheme as _;
-use ui::{FluentBuilder as _, h_flex};
+use ui::{ContextMenu, FluentBuilder as _, Tooltip, h_flex};
 use workspace::{HideStatusItem, ItemHandle, StatusItemView, Workspace, dock::PanelButtons};
 
 pub fn init(cx: &mut App) {
@@ -23,7 +28,8 @@ pub fn init(cx: &mut App) {
         let Some(window) = window else {
             return;
         };
-        let sync_status = cx.new(SyncStatus::new);
+        let weak_workspace = cx.weak_entity();
+        let sync_status = cx.new(|cx| SyncStatus::new(weak_workspace, cx));
         let drafts = cx.new(|_| DraftsStatus::default());
         let key_hints = cx.new(|_| KeyHints::default());
         workspace.status_bar().update(cx, |status_bar, cx| {
@@ -47,17 +53,112 @@ fn status_text(color: Hsla, text: impl Into<SharedString>) -> impl IntoElement {
         .child(text.into())
 }
 
-/// `● Synced 12s ago`, or why mustr isn't connected to T3.
+/// How the connection's state reads in the status bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tone {
+    Ok,
+    Busy,
+    Warning,
+    Error,
+}
+
+/// The connection's state as the status bar shows it: a dot, a few words, the details in a
+/// tooltip, and what its menu offers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SyncState {
+    tone: Tone,
+    text: SharedString,
+    tooltip: SharedString,
+    /// Reconnect, or Try again, when it can.
+    retry: Option<&'static str>,
+    /// Whether Home has what fixes it (pairing, setting up, the error's details).
+    on_home: bool,
+}
+
+fn sync_state(status: &ConnectionStatus, embedded: bool, synced: Option<String>) -> SyncState {
+    match status {
+        ConnectionStatus::Connected {
+            server_version,
+            engine,
+            ..
+        } => {
+            let version = server_version.as_ref().map_or_else(
+                || "T3 Code".to_string(),
+                |version| format!("T3 Code {version}"),
+            );
+            SyncState {
+                tone: Tone::Ok,
+                text: match synced {
+                    Some(ago) => format!("Synced {ago}").into(),
+                    None => "Synced".into(),
+                },
+                tooltip: match engine {
+                    EngineKind::Embedded => format!("Running mustr's own engine, {version}").into(),
+                    EngineKind::Installed | EngineKind::External => {
+                        format!("Connected to {version}").into()
+                    }
+                },
+                retry: Some("Reconnect"),
+                on_home: false,
+            }
+        }
+        ConnectionStatus::Connecting(step) => SyncState {
+            tone: Tone::Busy,
+            text: if embedded {
+                "Starting agents engine…".into()
+            } else {
+                "Connecting to T3…".into()
+            },
+            tooltip: step.clone(),
+            retry: None,
+            on_home: false,
+        },
+        ConnectionStatus::NeedsPairing(reason) => SyncState {
+            tone: Tone::Warning,
+            text: "Not paired with T3".into(),
+            tooltip: reason.clone(),
+            retry: Some("Try again"),
+            on_home: true,
+        },
+        ConnectionStatus::NeedsSetup(setup) => SyncState {
+            tone: Tone::Warning,
+            text: "Agents engine needs setup".into(),
+            tooltip: match setup {
+                EngineSetup::NotInstalled { .. } => "The agents engine isn't installed.".into(),
+                EngineSetup::NotRunning { .. } => "T3 Code isn't running.".into(),
+                EngineSetup::Incompatible { message, .. } => message.clone(),
+            },
+            retry: Some("Try again"),
+            on_home: true,
+        },
+        ConnectionStatus::Failed(error) => SyncState {
+            tone: Tone::Error,
+            text: if embedded {
+                "Agents engine stopped".into()
+            } else {
+                "T3 offline".into()
+            },
+            tooltip: error.clone(),
+            retry: Some("Try again"),
+            on_home: true,
+        },
+    }
+}
+
+/// `● Synced 12s ago`, or why mustr isn't connected to T3. Clicking it opens a menu to reconnect,
+/// switch servers (Settings › Connection), or see the connection on Home.
 pub struct SyncStatus {
     connection: Entity<T3Connection>,
+    workspace: WeakEntity<Workspace>,
     /// When the connection last delivered a fresh session, which reloads every view.
     synced_at: Option<Instant>,
+    menu: MenuSlot,
     _refresh: Task<()>,
     _subscription: Subscription,
 }
 
 impl SyncStatus {
-    fn new(cx: &mut Context<Self>) -> Self {
+    fn new(workspace: WeakEntity<Workspace>, cx: &mut Context<Self>) -> Self {
         let connection = T3Connection::global(cx);
         let subscription = cx.observe(&connection, |this, connection, cx| {
             this.synced_at = connection
@@ -88,10 +189,69 @@ impl SyncStatus {
         });
         Self {
             connection,
+            workspace,
             synced_at,
+            menu: MenuSlot::default(),
             _refresh: refresh,
             _subscription: subscription,
         }
+    }
+
+    fn state(&self, cx: &App) -> SyncState {
+        let connection = self.connection.read(cx);
+        sync_state(
+            connection.status(),
+            connection.effective_mode() == T3Mode::Embedded,
+            self.synced_at.map(|synced_at| ago(synced_at.elapsed())),
+        )
+    }
+
+    fn deploy_menu(&mut self, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.state(cx);
+        let connection = self.connection.clone();
+        let workspace = self.workspace.clone();
+        let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            menu = menu.header(state.tooltip.clone());
+            if let Some(retry) = state.retry {
+                let connection = connection.clone();
+                menu = menu.entry(retry, None, move |_, cx| {
+                    connection.update(cx, |connection, cx| connection.reconnect(cx))
+                });
+            }
+            let settings = workspace.clone();
+            menu = menu.entry("Connection settings…", None, move |window, cx| {
+                settings
+                    .update(cx, |workspace, cx| {
+                        settings_page::show(
+                            workspace,
+                            settings_page::Section::Connection,
+                            None,
+                            window,
+                            cx,
+                        )
+                    })
+                    .ok();
+            });
+            let home = workspace.clone();
+            menu.entry(
+                if state.on_home {
+                    "Fix it in the Inbox"
+                } else {
+                    "Connection details"
+                },
+                None,
+                move |window, cx| {
+                    home.update(cx, |workspace, cx| {
+                        navigation::show_home(workspace, window, cx)
+                    })
+                    .ok();
+                },
+            )
+        });
+        // The menu flips above the click, at the bottom of the window.
+        let position = menu_position(event, window);
+        self.menu
+            .deploy(position, menu, window, cx, |this| &mut this.menu);
     }
 }
 
@@ -120,32 +280,30 @@ fn until_label_changes(elapsed: Duration) -> Duration {
 impl Render for SyncStatus {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = mustr_ui::palette(cx);
-        let (dot, text): (Hsla, SharedString) = match self.connection.read(cx).status() {
-            ConnectionStatus::Connected { .. } => (
-                palette.ok.hsla(),
-                match self.synced_at {
-                    Some(synced_at) => format!("Synced {}", ago(synced_at.elapsed())).into(),
-                    None => "Synced".into(),
-                },
-            ),
-            ConnectionStatus::Connecting(_) => (
-                palette.text_muted.hsla(),
-                if self.connection.read(cx).effective_mode() == T3Mode::Embedded {
-                    "Starting agents engine…".into()
-                } else {
-                    "Connecting to T3…".into()
-                },
-            ),
-            ConnectionStatus::NeedsPairing(_) => {
-                (palette.warning.hsla(), "Not paired with T3".into())
-            }
-            ConnectionStatus::NeedsSetup(_) => {
-                (palette.warning.hsla(), "Agents engine needs setup".into())
-            }
-            ConnectionStatus::Failed(_) => (cx.theme().status().error, "T3 offline".into()),
+        let state = self.state(cx);
+        let dot: Hsla = match state.tone {
+            Tone::Ok => palette.ok.hsla(),
+            Tone::Busy => palette.text_muted.hsla(),
+            Tone::Warning => palette.warning.hsla(),
+            Tone::Error => cx.theme().status().error,
         };
+        // Only a problem is in color.
+        let text_color = match state.tone {
+            Tone::Error => cx.theme().status().error,
+            _ => palette.text_muted.hsla(),
+        };
+        let menu_open = self.menu.is_open();
+        let tooltip = format!("{}\nClick to reconnect or switch servers", state.tooltip);
         h_flex()
+            .id("status-bar-connection")
             .pl(scaled(px(5.)))
+            .rounded(scaled(tokens::CONTROL_RADIUS))
+            .cursor_pointer()
+            .hover(|style| style.bg(palette.surface_2.hsla()))
+            .when(menu_open, |this| this.bg(palette.surface_2.hsla()))
+            .when(!menu_open, |this| this.tooltip(Tooltip::text(tooltip)))
+            .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+            .on_click(cx.listener(|this, event, window, cx| this.deploy_menu(event, window, cx)))
             .child(
                 div()
                     .flex_none()
@@ -153,7 +311,8 @@ impl Render for SyncStatus {
                     .rounded_full()
                     .bg(dot),
             )
-            .child(status_text(palette.text_muted.hsla(), text))
+            .child(status_text(text_color, state.text))
+            .children(self.menu.render())
     }
 }
 
@@ -321,6 +480,63 @@ mod tests {
         // With "Restart to update" next to them.
         assert_eq!(hints_that_fit(px(756.), px(260.), px(26.)), 0);
         assert_eq!(hints_that_fit(px(1512.), px(260.), px(26.)), 4);
+    }
+
+    /// Every state but connecting can be acted on from the status bar; only an error is in color,
+    /// and what fixes pairing or setup is on Home.
+    #[test]
+    fn the_connection_state_reads_and_acts() {
+        let connected = ConnectionStatus::Connected {
+            environment: "matts-macbook".into(),
+            server_version: Some("0.1.3".into()),
+            engine: EngineKind::Installed,
+        };
+        let state = sync_state(&connected, false, Some("12s ago".into()));
+        assert_eq!(
+            state,
+            SyncState {
+                tone: Tone::Ok,
+                text: "Synced 12s ago".into(),
+                tooltip: "Connected to T3 Code 0.1.3".into(),
+                retry: Some("Reconnect"),
+                on_home: false,
+            }
+        );
+        // The machine's name isn't shown.
+        assert!(!state.tooltip.contains("matts-macbook"));
+
+        let failed = sync_state(
+            &ConnectionStatus::Failed("Connection refused.".into()),
+            false,
+            None,
+        );
+        assert_eq!(
+            (
+                failed.tone,
+                failed.text.as_ref(),
+                failed.retry,
+                failed.on_home
+            ),
+            (Tone::Error, "T3 offline", Some("Try again"), true)
+        );
+        assert_eq!(failed.tooltip, "Connection refused.");
+        let stopped = sync_state(&ConnectionStatus::Failed("Exited.".into()), true, None);
+        assert_eq!(stopped.text, "Agents engine stopped");
+
+        let pairing = sync_state(
+            &ConnectionStatus::NeedsPairing("Paste a credential.".into()),
+            false,
+            None,
+        );
+        assert_eq!(
+            (pairing.tone, pairing.text.as_ref(), pairing.on_home),
+            (Tone::Warning, "Not paired with T3", true)
+        );
+        let connecting = sync_state(&ConnectionStatus::Connecting("Pairing".into()), true, None);
+        assert_eq!(
+            (connecting.tone, connecting.text.as_ref(), connecting.retry),
+            (Tone::Busy, "Starting agents engine…", None)
+        );
     }
 
     #[test]

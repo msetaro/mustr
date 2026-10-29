@@ -1,21 +1,10 @@
-//! Moving a thread's work to another thread or agent (`mustr-docs/PARITY.md` §2.8), from the
-//! thread toolbar:
-//!
-//! - **Merge back** brings a fork's result back to the thread it was forked from
-//!   (`thread.merge_back`), as T3's `chat/ThreadRelationshipsControl.tsx` does: from the fork's
-//!   latest finished run, into its parent, which then opens. T3 starts nothing: the parent's next
-//!   message carries the fork's work to its agent.
-//! - **Hand off to another agent** switches a thread to another agent
-//!   (`thread.model-selection.set`, as picking another agent in the settings bar does), when the
-//!   thread's agent can hand its context over (`threadSupportsProviderHandoff` in T3's
-//!   `client-runtime`). T3 plans the switch, and the thread's next message carries a summary of
-//!   the conversation to the new agent ("Context handoff" in T3's timeline). Until then the
-//!   toolbar says a handoff is pending (`resolvePendingHandoff`).
+//! Merge back, from a fork's thread toolbar (`mustr-docs/PARITY.md` §2.8): brings a fork's
+//! result back to the thread it was forked from (`thread.merge_back`), as T3's
+//! `chat/ThreadRelationshipsControl.tsx` does: from the fork's latest finished run, into its
+//! parent, which then opens. T3 starts nothing: the parent's next message carries the fork's work
+//! to its agent.
 
 use gpui::{App, SharedString, Task, WeakEntity, Window};
-use t3_client::t3_api::types::{
-    ModelSelection, OrchestrationV2ThreadHistoryOrigin, ServerProvider,
-};
 use t3_client::t3_api::{
     tagged::{
         OrchestrationV2Command, OrchestrationV2ThreadForkSourcePoint,
@@ -28,15 +17,8 @@ use t3_client::t3_api::{
         OrchestrationV2ThreadForkSourcePointRunType, OrchestrationV2ThreadShell,
     },
 };
-use thread_chat::{
-    Access, ThreadShells,
-    model::ThreadState,
-    thread_settings::{self, AgentChoice},
-};
+use thread_chat::{Access, ThreadShells, model::ThreadState};
 use workspace::{Toast, Workspace, notifications::NotificationId};
-
-// ---------------------------------------------------------------------------------------------
-// Merge back
 
 /// The thread a fork merges back into: the thread of the run it was forked from, or its parent
 /// (`resolveMergeBackTargetThreadId` in T3). Only forks merge back.
@@ -217,161 +199,6 @@ impl MergeBack {
     }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Hand off to another agent
-
-/// An agent and model, for the toolbar: `Codex · gpt-5.5`.
-fn endpoint_label(selection: &ModelSelection, providers: &[ServerProvider]) -> String {
-    let instance = thread_settings::selection_instance_id(selection).unwrap_or_default();
-    let agent = providers
-        .iter()
-        .find(|provider| provider.instance_id == instance)
-        .and_then(|provider| provider.display_name.clone())
-        .unwrap_or_else(|| instance.to_string());
-    match thread_settings::selection_model(selection) {
-        Some(model) if !model.is_empty() => format!("{agent} · {model}"),
-        _ => agent,
-    }
-}
-
-/// A handoff the thread's next message makes: from the agent its last run used to the one it's
-/// set to now.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PendingHandoff {
-    pub from: String,
-    pub to: String,
-}
-
-/// Whether the thread's next message hands its context to another agent
-/// (`resolvePendingHandoff` in T3's `client-runtime`): its last run that started used another
-/// agent (or a model the agent can't switch to in place), and the timeline has something to hand
-/// over. mustr changes a thread's agent at once (`thread.model-selection.set`), so the thread's
-/// own selection is the one the next message uses.
-pub fn pending_handoff(
-    state: &ThreadState,
-    providers: &[ServerProvider],
-) -> Option<PendingHandoff> {
-    if state.items().is_empty() {
-        return None;
-    }
-    let from = &state
-        .runs()
-        .iter()
-        .filter(|run| run.status != OrchestrationV2RunStatus::RolledBack)
-        .filter(|run| {
-            run.started_at.is_some()
-                || (run.status == OrchestrationV2RunStatus::Starting
-                    && run.context_handoff_id.is_some())
-        })
-        .max_by_key(|run| run.ordinal)?
-        .model_selection;
-    let to = &state.thread.model_selection;
-    let from_instance = thread_settings::selection_instance_id(from);
-    let to_instance = thread_settings::selection_instance_id(to);
-    let provider = |instance: Option<&str>| {
-        providers
-            .iter()
-            .find(|provider| Some(provider.instance_id.as_str()) == instance)
-    };
-    let (source, target) = (provider(from_instance), provider(to_instance));
-    let needs_handoff = if from_instance == to_instance {
-        thread_settings::selection_model(from) != thread_settings::selection_model(to)
-            && target
-                .is_some_and(|target| target.requires_new_thread_for_model_change == Some(true))
-    } else {
-        let group = |provider: Option<&ServerProvider>| {
-            provider
-                .and_then(|provider| provider.continuation.as_ref())
-                .map(|continuation| continuation.group_key.clone())
-        };
-        group(source).is_none()
-            || source.map(|source| &source.driver) != target.map(|target| &target.driver)
-            || group(source) != group(target)
-    };
-    needs_handoff.then(|| PendingHandoff {
-        from: endpoint_label(from, providers),
-        to: endpoint_label(to, providers),
-    })
-}
-
-/// Whether the thread's agent can hand its context to another (`threadSupportsProviderHandoff`
-/// in T3): its session says so; without one, it isn't running, and it's new, imported, or has a
-/// conversation of its own to hand over.
-pub fn supports_handoff(state: &ThreadState) -> bool {
-    if let Some(session) = state.provider_session() {
-        return session
-            .capabilities
-            .sessions
-            .supports_provider_switching_via_handoff;
-    }
-    if state.active_run().is_some() {
-        return false;
-    }
-    state.runs().is_empty()
-        || state.thread.history_origin == Some(OrchestrationV2ThreadHistoryOrigin::V1Import)
-        || state.thread.active_provider_thread_id.is_some()
-}
-
-/// The agents the thread can be handed to: every other agent T3 can run, on its default model.
-pub fn handoff_targets(state: &ThreadState, providers: &[ServerProvider]) -> Vec<AgentChoice> {
-    let current = thread_settings::selection_instance_id(&state.thread.model_selection)
-        .unwrap_or(state.thread.provider_instance_id.as_str())
-        .to_string();
-    thread_settings::agent_choices(providers)
-        .into_iter()
-        .filter(|agent| agent.instance_id != current && agent.default_model.is_some())
-        .collect()
-}
-
-/// Switches the thread to `agent`'s default model (`thread.model-selection.set`); T3 plans the
-/// switch, and the next message carries the conversation over.
-pub fn handoff_command(
-    thread_id: &str,
-    agent: &AgentChoice,
-    command_id: String,
-) -> Option<OrchestrationV2Command> {
-    let model = &agent.models.get(agent.default_model?)?.slug;
-    Some(thread_settings::set_model_selection(
-        thread_id,
-        thread_settings::model_selection(&agent.instance_id, model, &[]),
-        command_id,
-    ))
-}
-
-/// Hands the thread to `agent`, saying in a toast what happens next, or why it couldn't.
-pub fn hand_off(
-    thread_id: String,
-    agent: AgentChoice,
-    workspace: WeakEntity<Workspace>,
-    cx: &mut App,
-) {
-    let Some(backend) = thread_chat::backend(cx) else {
-        return;
-    };
-    let Some(command) = handoff_command(&thread_id, &agent, thread_chat::commands::new_id()) else {
-        return;
-    };
-    if let Some(reason) = backend.blocked_reason(Access::Operate) {
-        show_toast(&workspace, &thread_id, reason, cx);
-        return;
-    }
-    let dispatch = backend.dispatch(command);
-    cx.spawn(async move |cx| {
-        let message = match dispatch.await {
-            Ok(_) => format!(
-                "The thread's next message goes to {}, with a summary of the conversation.",
-                agent.name
-            ),
-            Err(error) => {
-                log::error!("couldn't hand the thread off: {error:#}");
-                format!("Couldn't hand off to {}: {error:#}", agent.name)
-            }
-        };
-        cx.update(|cx| show_toast(&workspace, &thread_id, message, cx));
-    })
-    .detach();
-}
-
 fn show_toast(workspace: &WeakEntity<Workspace>, key: &str, message: String, cx: &mut App) {
     let id = NotificationId::composite::<MergeBack>(key.to_string());
     workspace
@@ -382,5 +209,5 @@ fn show_toast(workspace: &WeakEntity<Workspace>, key: &str, message: String, cx:
 }
 
 #[cfg(test)]
-#[path = "thread_handoff_tests.rs"]
+#[path = "merge_back_tests.rs"]
 mod tests;

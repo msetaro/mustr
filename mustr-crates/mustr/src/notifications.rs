@@ -909,7 +909,7 @@ fn open_thread_from_notification(thread_id: String, cx: &mut App) {
             if let Some(app_state) = AppState::try_global(cx) {
                 cx.set_global(crate::window::StartupThreads {
                     open_thread: Some(thread_id),
-                    new_thread: false,
+                    ..Default::default()
                 });
                 crate::window::open_home_window(app_state, cx);
             }
