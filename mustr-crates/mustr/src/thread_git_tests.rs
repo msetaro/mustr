@@ -1259,7 +1259,7 @@ async fn threads_move_between_worktrees_and_the_projects_checkout(cx: &mut TestA
         assert_eq!(
             git.notice(),
             Some(&Notice::Done(
-                "Moved the thread to the project's checkout, on main".into()
+                "Moved to the project's checkout, on main".into()
             ))
         )
     });

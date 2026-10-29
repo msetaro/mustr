@@ -1487,12 +1487,11 @@ impl ThreadGit {
             self.set_notice(Notice::Error(reason.into()), cx);
             return;
         }
-        let destination = target
-            .worktree_path
-            .clone()
-            .unwrap_or_else(|| "the project's checkout".to_string());
-        let Some((backend, checkout)) =
-            self.start_busy(format!("Moving the thread to {destination}…"), cx)
+        let destination = match &target.worktree_path {
+            Some(_) => "its worktree",
+            None => "the project's checkout",
+        };
+        let Some((backend, checkout)) = self.start_busy(format!("Moving to {destination}…"), cx)
         else {
             return;
         };
@@ -1530,7 +1529,7 @@ impl ThreadGit {
                     )
                     .await
                     .context("moving the thread")?;
-                anyhow::Ok(format!("Moved the thread to {destination}, on {branch}"))
+                anyhow::Ok(format!("Moved to {destination}, on {branch}"))
             }
             .await;
             this.update(cx, |this, cx| this.end_busy(result, cx)).ok();
@@ -1613,10 +1612,7 @@ impl ThreadGit {
                     }
                     return Err(error.context("moving the thread"));
                 }
-                anyhow::Ok(format!(
-                    "Moved the thread to a new worktree on {}",
-                    created.ref_name
-                ))
+                anyhow::Ok(format!("Moved to a new worktree on {}", created.ref_name))
             }
             .await;
             this.update(cx, |this, cx| this.end_busy(result, cx)).ok();

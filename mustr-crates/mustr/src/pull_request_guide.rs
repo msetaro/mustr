@@ -11,7 +11,8 @@
 //! `write_pull_request_guides` tool.
 //!
 //! The guide shows in a dialog over the review: Next and Previous (or `j` and `k`) step through
-//! the stops, and a stop's files scroll the review to them.
+//! the stops, and a stop's files scroll the review to them. Debug builds can show one from a file
+//! (`MUSTR_DEBUG_REVIEW_GUIDE`).
 
 use crate::pull_request_review;
 use anyhow::Result;
@@ -147,7 +148,21 @@ impl GuideState {
 }
 
 /// Reads the guide (`pullRequests.reviewGuide`). A server without guides has none.
+///
+/// Debug builds can show a guide from a file instead (`MUSTR_DEBUG_REVIEW_GUIDE=<result.json>`,
+/// T3's `PullRequestReviewGuideResult`), to look at the dialog without an agent writing one.
 pub fn load(reference: &PullRequestRef, cx: &App) -> Task<GuideState> {
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("MUSTR_DEBUG_REVIEW_GUIDE") {
+        let state = std::fs::read_to_string(&path)
+            .map_err(anyhow::Error::from)
+            .and_then(|text| Ok(serde_json::from_str(&text)?))
+            .map(GuideState::Loaded)
+            .unwrap_or_else(|error: anyhow::Error| {
+                GuideState::Failed(format!("{}: {error:#}", path.display()).into())
+            });
+        return Task::ready(state);
+    }
     let Some(backend) = thread_chat::backend(cx) else {
         return Task::ready(GuideState::Unknown);
     };
@@ -463,8 +478,14 @@ impl Render for ReviewGuideDialog {
         } else {
             None
         };
-        let rail = v_flex().w(scaled(px(200.))).flex_none().gap_0p5().children(
-            stops.iter().enumerate().map(|(ix, stop)| {
+        let rail = v_flex()
+            .id("review-guide-stops")
+            .w(scaled(px(200.)))
+            .flex_none()
+            .h_full()
+            .overflow_y_scroll()
+            .gap_0p5()
+            .children(stops.iter().enumerate().map(|(ix, stop)| {
                 let selected = ix == self.stop;
                 h_flex()
                     .id(("guide-stop", ix))
@@ -497,8 +518,7 @@ impl Render for ReviewGuideDialog {
                         this.stop = ix;
                         cx.notify();
                     }))
-            }),
-        );
+            }));
         let next = stops.get(self.stop + 1).map(|stop| stop.title.clone());
         v_flex()
             .key_context("ReviewGuide")
@@ -507,7 +527,7 @@ impl Render for ReviewGuideDialog {
             .on_action(cx.listener(Self::previous_stop))
             .on_action(cx.listener(|_, _: &menu::Cancel, _, cx| cx.emit(DismissEvent)))
             .w(tokens::modal_width(rems(60.), window))
-            .max_h(window.viewport_size().height * 0.8)
+            .max_h(window.viewport_size().height * 0.75)
             .p_4()
             .gap_3()
             .rounded(scaled(tokens::CORNER_RADIUS))
@@ -553,15 +573,23 @@ impl Render for ReviewGuideDialog {
                     .clone()
                     .map(|error| Label::new(error).size(LabelSize::Small).color(Color::Error)),
             )
+            // The stops and the one shown scroll, so the buttons stay in the window.
             .children(current.map(|stop| {
-                h_flex().items_start().gap_4().child(rail).child(
-                    v_flex()
-                        .id("review-guide-stop")
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_y_scroll()
-                        .child(self.render_stop(&stop, cx)),
-                )
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .items_start()
+                    .gap_4()
+                    .child(rail)
+                    .child(
+                        v_flex()
+                            .id("review-guide-stop")
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .overflow_y_scroll()
+                            .child(self.render_stop(&stop, cx)),
+                    )
             }))
             .when(!stops.is_empty(), |this| {
                 this.child(

@@ -49,8 +49,8 @@ fn the_rules_are_the_servers_or_its_policys() {
     );
     assert_eq!(
         server.summary(),
-        "T3 removes worktrees merged, inactive after 8 days; it keeps those with uncommitted \
-         changes"
+        "T3 removes worktrees: merged, inactive for 8 days. It keeps those with uncommitted \
+         changes."
     );
     // A custom policy replaces them; an off one turns every rule off.
     let custom = CleanupRules::of(&settings(json!({

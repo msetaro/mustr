@@ -673,6 +673,8 @@ impl ThreadTerminalPanel {
             .is_some_and(|(store, _)| store.read(cx).blocked_reason(cx).is_none());
         let this = cx.weak_entity();
         let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            // The pencil and the plus, which `secondary-enter` presses too, as in Zed's menus.
+            menu = menu.end_slot_action(Box::new(menu::SecondaryConfirm));
             for script in &project {
                 let run = this.clone();
                 let command = script.command.clone();
@@ -684,7 +686,7 @@ impl ThreadTerminalPanel {
                 menu = match script.source.clone().filter(|_| editable) {
                     Some(source) => {
                         let edit = this.clone();
-                        menu.entry_with_end_slot_on_hover(
+                        menu.entry_with_end_slot(
                             label,
                             None,
                             run_it,
@@ -717,7 +719,7 @@ impl ThreadTerminalPanel {
                     menu = if editable {
                         let import = this.clone();
                         let script = script.clone();
-                        menu.entry_with_end_slot_on_hover(
+                        menu.entry_with_end_slot(
                             script.menu_label(),
                             None,
                             run_it,
@@ -736,12 +738,13 @@ impl ThreadTerminalPanel {
             }
             if editable {
                 let add = this.clone();
-                menu = menu
-                    .separator()
-                    .entry("Add action…", None, move |window, cx| {
-                        add.update(cx, |this, cx| this.edit_script(None, window, cx))
-                            .ok();
-                    });
+                if !project.is_empty() || !file.is_empty() {
+                    menu = menu.separator();
+                }
+                menu = menu.entry("Add action…", None, move |window, cx| {
+                    add.update(cx, |this, cx| this.edit_script(None, window, cx))
+                        .ok();
+                });
             }
             menu
         });

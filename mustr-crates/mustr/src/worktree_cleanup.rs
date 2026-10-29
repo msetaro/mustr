@@ -101,7 +101,7 @@ impl CleanupRules {
     pub fn summary(&self) -> String {
         let mut rules = Vec::new();
         if self.on_delete {
-            rules.push("with deleted threads".to_string());
+            rules.push("of deleted threads".to_string());
         }
         if self.on_merge {
             rules.push("merged".to_string());
@@ -121,7 +121,7 @@ impl CleanupRules {
             return "Off: T3 removes no worktrees on its own".to_string();
         }
         format!(
-            "T3 removes worktrees {}; it keeps those with {}",
+            "T3 removes worktrees: {}. It keeps those with {}.",
             rules.join(", "),
             keep_when_summary(&self.keep_when)
         )
@@ -142,8 +142,8 @@ impl CleanupRules {
 
 fn days_label(days: i64) -> String {
     match days {
-        1 => "after 1 day".to_string(),
-        days => format!("after {days} days"),
+        1 => "for 1 day".to_string(),
+        days => format!("for {days} days"),
     }
 }
 
@@ -502,7 +502,10 @@ impl WorktreeCleanup {
             .map(|(days, label)| (*days, label.to_string()))
             .collect();
         if !segments.iter().any(|(days, _)| *days == value) {
-            segments.push((value, value.map(days_label).unwrap_or_default()));
+            segments.push((
+                value,
+                value.map(|days| format!("{days} days")).unwrap_or_default(),
+            ));
         }
         let selected = segments
             .iter()
@@ -607,7 +610,7 @@ const SETTLED_DAYS: &[(Option<i64>, &str)] =
     &[(None, "Off"), (Some(0), "Next run"), (Some(7), "7 days")];
 
 impl Render for WorktreeCleanup {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = palette(cx);
         let rules = self.rules();
         let blocked = self.blocked();
@@ -779,9 +782,13 @@ impl Render for WorktreeCleanup {
                     cx,
                 ),
             ];
+            // The rules scroll in part of the window, so the worktrees stay in view.
             card = card.child(
                 v_flex()
+                    .id("worktree-cleanup-rules")
                     .mt_1()
+                    .max_h(window.viewport_size().height * 0.4)
+                    .overflow_y_scroll()
                     .border_t(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
                     .children(rows),
