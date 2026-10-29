@@ -565,8 +565,8 @@ async fn the_palette_offers_the_toolbar_on_the_focused_thread(cx: &mut TestAppCo
     );
 }
 
-/// The toolbar's items that show at `width`, after the toolbar has measured itself, at mustr's
-/// default size (26), and what its "…" menu offers.
+/// The toolbar's items that show at `width`, after the toolbar has measured itself, at twice
+/// mustr's default size (26), and what its "…" menu offers.
 fn toolbar_at(
     toolbar: &Entity<ThreadToolbar>,
     width: f32,

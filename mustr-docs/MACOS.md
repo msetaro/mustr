@@ -86,8 +86,8 @@ A checklist for the first launch of a release, such as on a work laptop.
    open, with no more asking. A project you trusted before covers its worktrees from the start.
    Untrusted projects still ask, and only the worktrees T3 lists for the project's threads on this
    Mac inherit; **Trust Only This Worktree** trusts just the one.
-7. **Zoom:** ⌘= and ⌘- make everything bigger or smaller, and ⌘0 goes back to the default size.
-   mustr starts at twice the size its designs are drawn at; try ⌘- once or twice on a laptop.
+7. **Zoom:** ⌘= and ⌘- make everything bigger or smaller, about 10% a step, and ⌘0 goes back to
+   the default size. mustr remembers the size you pick.
 8. **Settings and logs** are in `~/Library/Application Support/mustr/`: `config/settings.json`
    (⌘, opens it), `logs/mustr.log` (with `logs/mustr.log.old` before it), and
    `logs/t3-engine.log` for mustr's own engine. T3 Code's own log is where `t3 service status`
@@ -173,7 +173,7 @@ cargo run -p mustr
   the selected lines, ⌘↩ adds the comment, and ⎋ cancels it.
 - **Zoom.** ⌘= (or ⌘+) and ⌘- make all of mustr bigger or smaller, about 10% a step, the way a
   browser zooms a page: text, code, and layout together. ⌘0 goes back to mustr's default size,
-  `ui_font_size` and `buffer_font_size` 26, twice the size its designs are drawn at.
+  `ui_font_size` and `buffer_font_size` 13, the size its designs are drawn at.
   They work wherever the focus is. A zoom changes `ui_font_size` and `buffer_font_size` in your
   settings file, by the same factor, so it lasts; ⌘0 removes both. The command palette has them
   too: "mustr: zoom in", "mustr: zoom out", and "mustr: reset zoom".

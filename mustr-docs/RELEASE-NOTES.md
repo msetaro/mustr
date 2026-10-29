@@ -1,5 +1,12 @@
 # mustr release notes
 
+## 0.1.1
+
+- **Back to the original size.** 0.1.0 started at twice the size of mustr's designs, which was too
+  big on a laptop. The default `ui_font_size` and `buffer_font_size` are 13 again. If you zoomed in
+  0.1.0, mustr keeps your size; ⌘0 goes back to the new default. ⌘= and ⌘- still zoom the whole
+  app, about 10% a step.
+
 ## 0.1.0
 
 The first release. mustr is a review-first desktop app for working with coding agents: agents
@@ -76,7 +83,7 @@ the first launch.
 **The app**
 - Notifications, sounds and the Dock badge for threads that need you.
 - The command palette has mustr's actions, including "New thread in <project>".
-- Zoom the whole app with `⌘=`, `⌘-` and `⌘0`; the default size is twice the designs'.
+- Zoom the whole app with `⌘=`, `⌘-` and `⌘0`; mustr remembers your size.
 - It updates itself (below).
 
 ### Known gaps

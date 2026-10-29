@@ -889,8 +889,8 @@ mod tests {
         nav_panel.read_with(cx, |nav_panel, _| nav_panel.sidebar())
     }
 
-    /// On a MacBook's screen at mustr's default size (26), the sidebar takes a third of the
-    /// window; at the design size (13), the window has room for its full width.
+    /// On a MacBook's screen zoomed to twice mustr's default size (26), the sidebar takes a
+    /// third of the window; at the default size (13), the window has room for its full width.
     #[gpui::test]
     async fn the_sidebar_takes_a_third_of_a_laptops_window(cx: &mut TestAppContext) {
         let (workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;

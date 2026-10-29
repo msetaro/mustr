@@ -51,8 +51,8 @@ engine. Every P0 and P1 row is done, and 33 of the 38 P2 rows (the counts are at
 
 mustr sends 38 of T3's 55 orchestration command types (most of the rest are the server's own) and
 calls about 90 of its RPCs, with the scopes listed at the end of §2. It works against T3 0.1.1,
-0.1.3 and the 0.1.4 nightlies (all protocol 2). It fits a MacBook's window at its default size (26, twice the designs' 13)
-and at 13. §3 lists what's left after v0.1.0.
+0.1.3 and the 0.1.4 nightlies (all protocol 2). It fits a MacBook's window at its default size (13) and
+zoomed to twice that (26). §3 lists what's left after v0.1.0.
 
 ## 2. Features by area
 

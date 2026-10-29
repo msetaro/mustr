@@ -98,8 +98,8 @@ const SHOWN_THREAD_KEY: &str = "mustr-thread-terminals-shown";
 const DEFAULT_HEIGHT: Pixels = px(300.);
 
 /// The most of the window's height the panel takes when it first opens, so the thread above it
-/// keeps its timeline and composer: at mustr's default size (26), 300 is 600 pixels, more than
-/// half of a MacBook's window.
+/// keeps its timeline and composer: zoomed to twice mustr's default size (26), 300 is 600
+/// pixels, more than half of a MacBook's window.
 const MAX_HEIGHT_SHARE: f32 = 0.4;
 
 /// The panel's height when it first opens in a window `window_height` tall: `scaled_height`
