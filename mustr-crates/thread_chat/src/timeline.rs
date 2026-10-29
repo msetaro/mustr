@@ -251,6 +251,12 @@ impl ThreadView {
         }
     }
 
+    /// Expands or collapses a run of work (`work:<id>`) or a tool call, for tests.
+    #[cfg(test)]
+    pub(crate) fn toggle_expanded_for_test(&mut self, key: &str, cx: &mut Context<Self>) {
+        self.toggle_expanded(key.to_string(), cx);
+    }
+
     fn toggle_expanded(&mut self, key: String, cx: &mut Context<Self>) {
         if !self.expanded.remove(&key) {
             self.expanded.insert(key);
@@ -1070,6 +1076,10 @@ impl ThreadView {
                 )
                 .child(div().flex_1().h(px(1.)).bg(palette.border.hsla()))
                 .into_any_element(),
+            ItemKind::HtmlRender {
+                attachment_id,
+                title,
+            } => self.render_html_render(&item.id, attachment_id, title, cx),
             ItemKind::Tool { .. } | ItemKind::FileChange { .. } | ItemKind::Reasoning { .. } => {
                 self.render_work(vec![item.clone()], window, cx)
             }
@@ -1634,6 +1644,32 @@ impl ThreadView {
             None
         };
         let item_id = item.id.clone();
+        // A page a preview tool opened opens in the browser too.
+        let link = match &item.kind {
+            ItemKind::Tool {
+                link: Some(link), ..
+            } => Some(link.clone()),
+            _ => None,
+        };
+        let open_link = link.map(|link| {
+            div()
+                .flex_none()
+                .debug_selector({
+                    let item_id = item.id.clone();
+                    move || format!("thread-preview-open-{item_id}")
+                })
+                .child(
+                    TextButton::new(
+                        SharedString::from(format!("preview-open-{}", item.id)),
+                        "Open in browser",
+                    )
+                    .tooltip(link.clone())
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        cx.open_url(&link)
+                    }),
+                )
+        });
         v_flex()
             .gap_0p5()
             .child(
@@ -1657,6 +1693,7 @@ impl ThreadView {
                             .font_buffer(cx)
                             .child(truncate(&work_label(item), 160)),
                     )
+                    .children(open_link)
                     .child(
                         div()
                             .flex_none()

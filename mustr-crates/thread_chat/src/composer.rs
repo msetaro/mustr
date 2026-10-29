@@ -118,6 +118,8 @@ pub struct ComposerState {
     pub(crate) stash: crate::stash::StashState,
     /// Whether the composer's Markdown highlighting was asked for (`formatting.rs`).
     pub(crate) markdown_highlighting: bool,
+    /// HTML renders being loaded to open in the browser (`html_renders.rs`).
+    pub(crate) opening_renders: collections::HashSet<String>,
     _save_draft: Option<gpui::Task<()>>,
 }
 

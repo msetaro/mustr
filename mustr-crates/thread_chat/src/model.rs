@@ -149,6 +149,14 @@ pub enum ItemKind {
         /// How many images the output holds, such as a browser tool's screenshots. They load
         /// by index (`tool-output-image`).
         images: usize,
+        /// The page a preview tool opened, for Open in browser (`html_renders.rs`).
+        link: Option<String>,
+    },
+    /// A page the agent made with T3's `html_render`, kept as an attachment
+    /// (`html_renders.rs`).
+    HtmlRender {
+        attachment_id: String,
+        title: String,
     },
     FileChange {
         path: String,
@@ -423,6 +431,7 @@ impl TimelineItem {
                     output: non_empty(item.output.as_ref()),
                     output_omitted: item.output_omitted.unwrap_or(false),
                     images: 0,
+                    link: None,
                 }
             ),
             OrchestrationV2TurnItem::FileSearch(item) => item!(
@@ -445,6 +454,7 @@ impl TimelineItem {
                     }),
                     output_omitted: false,
                     images: 0,
+                    link: None,
                 }
             ),
             OrchestrationV2TurnItem::WebSearch(item) => item!(
@@ -462,8 +472,24 @@ impl TimelineItem {
                     output: None,
                     output_omitted: false,
                     images: 0,
+                    link: None,
                 }
             ),
+            OrchestrationV2TurnItem::DynamicTool(item)
+                if item.status == OrchestrationV2TurnItemStatus::Completed
+                    && let Some((attachment_id, title)) = crate::html_renders::html_render_of(
+                        item.tool_name.as_deref(),
+                        item.output.as_ref(),
+                    ) =>
+            {
+                item!(
+                    item,
+                    ItemKind::HtmlRender {
+                        attachment_id,
+                        title
+                    }
+                )
+            }
             OrchestrationV2TurnItem::DynamicTool(item) => item!(
                 item,
                 ItemKind::Tool {
@@ -484,6 +510,10 @@ impl TimelineItem {
                     } else {
                         item.output.as_ref().map_or(0, tool_output_images)
                     },
+                    link: crate::html_renders::preview_link_of(
+                        item.tool_name.as_deref(),
+                        &item.input,
+                    ),
                 }
             ),
             OrchestrationV2TurnItem::Subagent(item) => item!(
@@ -497,6 +527,7 @@ impl TimelineItem {
                         .or_else(|| non_empty(item.progress.as_ref())),
                     output_omitted: false,
                     images: 0,
+                    link: None,
                 }
             ),
             OrchestrationV2TurnItem::ApprovalRequest(item) => item!(

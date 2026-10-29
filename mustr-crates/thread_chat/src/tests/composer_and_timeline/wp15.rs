@@ -627,3 +627,92 @@ async fn the_composer_highlights_markdown_and_has_t3s_formatting_keys(cx: &mut T
     cx.dispatch_action(crate::ToggleBold);
     assert_eq!(composer_text(&view, cx), "Use retries here");
 }
+
+// HTML renders and previews.
+
+#[gpui::test]
+async fn an_html_render_opens_in_the_browser(cx: &mut TestAppContext) {
+    let mut projection = finished_thread();
+    projection.items.push(item(
+        "dynamic_tool",
+        "i6",
+        6,
+        Some("run-1"),
+        "completed",
+        json!({
+            "toolName": "mcp__t3-code__html_render",
+            "input": { "html": "<h1>p95</h1>", "title": "Latency" },
+            "output": {
+                "structuredContent": {
+                    "htmlRender": { "attachmentId": "att-render-1", "title": "Latency", "height": 400 },
+                    "message": "Rendered."
+                }
+            }
+        }),
+    ));
+    projection.items.push(item(
+        "dynamic_tool",
+        "i7",
+        7,
+        Some("run-1"),
+        "completed",
+        json!({
+            "toolName": "mcp__t3-code__preview_open",
+            "input": { "url": "http://localhost:5173/" },
+            "output": { "content": [{ "type": "text", "text": "Opened." }] }
+        }),
+    ));
+    let backend = FakeBackend::with_thread(projection, 10);
+    backend.raw_responses.lock().push(json!({
+        "relativeUrl": "/api/assets/att-render-1.html?signature=x",
+        "expiresAt": 1_800_000_000_000_i64
+    }));
+    let (view, cx) = open_view(backend.clone(), Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(1200.)));
+    cx.run_until_parked();
+    // The render is a row of its own, not a step of the work.
+    assert!(matches!(
+        view.read_with(cx, |view, _| view.thread_state().unwrap().items()[5].kind.clone()),
+        ItemKind::HtmlRender { attachment_id, title }
+            if attachment_id == "att-render-1" && title == "Latency"
+    ));
+    let open = cx
+        .debug_bounds("thread-html-open-i6")
+        .expect("the render has its card");
+    cx.simulate_click(open.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(
+        *backend.raw_calls.lock(),
+        [RawCall {
+            tag: "assets.createUrl".into(),
+            payload: json!({
+                "resource": {
+                    "_tag": "attachment", "attachmentId": "att-render-1",
+                    "fileName": "Latency.html", "mimeType": "text/html", "disposition": "inline"
+                }
+            }),
+            access: Access::Read,
+        }]
+    );
+    assert_eq!(
+        *backend.fetched_assets.lock(),
+        ["/api/assets/att-render-1.html?signature=x"]
+    );
+    let opened = cx.opened_url().expect("the page opened");
+    assert!(
+        opened.starts_with("file://") && opened.ends_with("/Latency.html"),
+        "{opened}"
+    );
+    let path = opened.trim_start_matches("file://");
+    assert_eq!(std::fs::read(path).unwrap(), super::png(4, 3));
+
+    // The preview's page opens too, from its tool call.
+    view.update(cx, |view, cx| view.toggle_expanded_for_test("work:i7", cx));
+    cx.run_until_parked();
+    let preview = cx
+        .debug_bounds("thread-preview-open-i7")
+        .expect("the preview has its page");
+    cx.simulate_click(preview.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(cx.opened_url().as_deref(), Some("http://localhost:5173/"));
+}

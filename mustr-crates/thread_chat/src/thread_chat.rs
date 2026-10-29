@@ -70,6 +70,7 @@ pub use snooze::SnoozeThread;
 mod answers;
 mod file_links;
 mod formatting;
+mod html_renders;
 pub use find_bar::open_thread_with_find;
 pub use formatting::{ToggleBold, ToggleInlineCode, ToggleItalic};
 mod quote;
