@@ -342,6 +342,12 @@ impl RemoteTerminal {
         (size.0 > 0 && size.1 > 0).then(|| clamp_size(size))
     }
 
+    /// Types `command` into the shell and runs it, as T3 runs a project script: with a space
+    /// first, which keeps it out of the shell's history.
+    pub(crate) fn run_command(&mut self, command: &str, cx: &mut Context<Self>) {
+        self.send(format!(" {command}\r"), cx);
+    }
+
     /// Ends the shell and deletes its history, when the user closes the terminal. If T3 can't
     /// close it, it types `exit`, as T3's app does.
     pub(crate) fn close(&mut self, cx: &mut Context<Self>) {

@@ -112,6 +112,8 @@ fn input_is_split_between_characters() {
 struct TerminalBackend {
     inner: Arc<FakeBackend>,
     listed: Mutex<Value>,
+    /// What `projects.readFile` reads.
+    file: Mutex<Option<Value>>,
     calls: Mutex<Vec<RawCall>>,
     attaches: Mutex<Vec<(Value, mpsc::UnboundedSender<Result<Value>>)>>,
 }
@@ -125,6 +127,7 @@ impl TerminalBackend {
         Arc::new(Self {
             inner,
             listed: Mutex::new(listed),
+            file: Mutex::default(),
             calls: Mutex::default(),
             attaches: Mutex::default(),
         })
@@ -227,6 +230,17 @@ impl ThreadBackend for TerminalBackend {
         payload: Value,
         access: Access,
     ) -> BoxFuture<'static, Result<Value>> {
+        if tag == rpc::ProjectsReadFile::TAG
+            && let Some(file) = self.file.lock().clone()
+        {
+            assert_eq!(access, Access::FilesystemRead);
+            self.calls.lock().push(RawCall {
+                tag: tag.to_string(),
+                payload,
+                access,
+            });
+            return futures::future::ready(Ok(file)).boxed();
+        }
         if !tag.starts_with("terminal.") {
             return self.inner.call_raw(tag, payload, access);
         }
@@ -639,4 +653,81 @@ async fn add_to_chat_sends_the_selection_to_the_threads_composer(cx: &mut TestAp
         "{}",
         context.label
     );
+}
+
+#[test]
+fn t3_json_scripts_read_as_t3_reads_them() {
+    use crate::terminal_panel::file_scripts;
+    let scripts = file_scripts(
+        r#"{ "scripts": [
+            { "name": "Test", "command": "npm test", "icon": "test" },
+            { "name": "Install", "command": "pnpm install", "runOnWorktreeCreate": true,
+              "runOnSettle": true },
+            { "name": "  ", "command": "nothing" },
+            { "command": "no name" }
+        ] }"#,
+    );
+    let labels = scripts
+        .iter()
+        .map(|script| (script.menu_label(), script.command.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        [
+            ("Test".to_string(), "npm test"),
+            ("Install (setup, on settle)".to_string(), "pnpm install"),
+        ]
+    );
+    assert!(file_scripts("not json").is_empty());
+}
+
+#[gpui::test]
+async fn scripts_run_in_a_new_terminal_on_t3s_machine(cx: &mut TestAppContext) {
+    let backend = TerminalBackend::new(json!([]));
+    backend.inner.shell.lock()["projects"][0]["scripts"] = json!([{
+        "id": "dev", "name": "Dev", "command": "npm run dev", "icon": "play",
+        "runOnWorktreeCreate": false
+    }]);
+    *backend.file.lock() = Some(json!({
+        "relativePath": "t3.json", "byteLength": 100, "truncated": false, "exists": true,
+        "contents": r#"{ "scripts": [
+            { "name": "dev", "command": "npm run dev -- --port 3000" },
+            { "name": "Test", "command": "npm test" }
+        ] }"#
+    }));
+    let (_workspace, panel, cx) = panel_for(backend.clone(), cx).await;
+    assert_eq!(
+        backend
+            .calls
+            .lock()
+            .iter()
+            .filter(|call| call.tag == rpc::ProjectsReadFile::TAG)
+            .map(|call| call.payload.clone())
+            .collect::<Vec<_>>(),
+        [json!({ "cwd": "/wt/a", "relativePath": "t3.json", "allowMissing": true })]
+    );
+    // The project's own scripts, then t3.json's it doesn't have (by name or command).
+    let (project, file) = panel.read_with(cx, |panel, cx| panel.scripts(cx));
+    assert_eq!(
+        (
+            project
+                .iter()
+                .map(|script| script.name.as_str())
+                .collect::<Vec<_>>(),
+            file.iter()
+                .map(|script| script.name.as_str())
+                .collect::<Vec<_>>()
+        ),
+        (vec!["Dev"], vec!["Test"])
+    );
+
+    panel.update_in(cx, |panel, window, cx| {
+        panel.run_script("npm test".into(), window, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(backend.attach_payloads(), vec![first_attach()]);
+    backend.send(0, snapshot("term-1", "$ ", "Terminal 1"));
+    cx.run_until_parked();
+    assert_eq!(backend.typed(), " npm test\r");
+    assert_eq!(remote_terminals(&panel, cx).len(), 1);
 }
