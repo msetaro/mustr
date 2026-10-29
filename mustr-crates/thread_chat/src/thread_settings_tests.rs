@@ -1273,3 +1273,33 @@ async fn new_thread_in_worktree_opens_a_filled_in_draft(cx: &mut TestAppContext)
     cx.run_until_parked();
     assert!(bar.read_with(cx, |bar, _| bar.open_menus()[0]));
 }
+
+#[gpui::test]
+fn follow_ups_queue_or_steer_while_the_agent_works(cx: &mut TestAppContext) {
+    use crate::commands::Delivery;
+    use crate::thread_settings::FollowUpBehavior;
+    cx.update(|cx| {
+        // mustr queues by default, as it always has.
+        let behavior = FollowUpBehavior::get(cx);
+        assert_eq!(behavior, FollowUpBehavior::Queue);
+        assert_eq!(
+            (
+                behavior.delivery(),
+                behavior.other_delivery(),
+                behavior.hint()
+            ),
+            (Delivery::Queue, Delivery::Steer, "queue")
+        );
+        // Without the app's database (as in tests), the choice still holds for the session.
+        FollowUpBehavior::Steer.set(cx);
+        let behavior = FollowUpBehavior::get(cx);
+        assert_eq!(
+            (
+                behavior.delivery(),
+                behavior.other_delivery(),
+                behavior.hint()
+            ),
+            (Delivery::Steer, Delivery::Queue, "steer")
+        );
+    });
+}

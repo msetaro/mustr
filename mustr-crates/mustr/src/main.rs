@@ -47,6 +47,8 @@ mod notifications;
 // WP12, composer and timeline:
 // WP13, thread list and navigation:
 // WP14, agent setup and T3's settings:
+mod agent_setup;
+mod t3_settings;
 // Zoom:
 mod zoom;
 // Releases and self-update:
@@ -477,6 +479,8 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     // WP12, composer and timeline:
     // WP13, thread list and navigation:
     // WP14, agent setup and T3's settings:
+    agent_setup::init(cx);
+    t3_settings::init(cx);
     // Zoom:
     zoom::init(cx);
     // Releases and self-update:

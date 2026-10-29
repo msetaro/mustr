@@ -3,10 +3,12 @@
 //!
 //! [`AddProject`] is in the palette and the threads sidebar's header. The app handles it
 //! (`mustr/src/home.rs`): it knows which engine it's connected to, and mustr's own engine takes
-//! new projects even in a dry run. This module builds what's sent.
+//! new projects even in a dry run. This module builds what's sent, and reads T3's answer when the
+//! folder is already a project ([`AlreadyAProject`]).
 
 use anyhow::{Context as _, Result, anyhow};
 use gpui::actions;
+use serde_json::Value;
 use std::path::Path;
 use t3_api::{tagged::ProjectMutation, types};
 
@@ -25,8 +27,71 @@ pub struct NewProject {
     pub title: String,
 }
 
+/// Adding a folder that's already a project: mustr says so, and selects that project, instead
+/// of T3's "Failed to mutate project."
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AlreadyAProject {
+    /// The folder, as T3 or mustr resolved it.
+    pub folder: String,
+    /// The project that has the folder, when known.
+    pub project_id: Option<String>,
+}
+
+impl std::fmt::Display for AlreadyAProject {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} is already a project", self.folder)
+    }
+}
+
+impl std::error::Error for AlreadyAProject {}
+
+/// The project `error` says has the folder, if it's T3's answer to adding a folder that's
+/// already a project: `projects.mutate`'s `ProjectMutationError` caused by a
+/// `ProjectConflictError` (`apps/server/src/ws.ts` and `project/ProjectService.ts` in T3). Its
+/// cause comes as Effect encodes a defect, `{name, message}`, so the folder and the project are
+/// read from the message ("Workspace <folder> already belongs to project <id>."); a
+/// `ProjectConflictError` sent with its own fields is read too. `folder` is what was added.
+pub fn project_conflict(error: &Value, folder: &str) -> Option<AlreadyAProject> {
+    const CONFLICT: &str = "ProjectConflictError";
+    let tag = |value: &Value| {
+        ["_tag", "name"]
+            .iter()
+            .any(|key| value.get(*key).and_then(Value::as_str) == Some(CONFLICT))
+    };
+    let conflict = if tag(error) {
+        error
+    } else {
+        error
+            .get("cause")
+            .filter(|cause| tag(cause) || conflict_message(cause).is_some())?
+    };
+    let from_message = conflict_message(conflict);
+    let field = |key: &str| {
+        conflict
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    };
+    Some(AlreadyAProject {
+        folder: field("workspaceRoot")
+            .or_else(|| from_message.as_ref().map(|(root, _)| root.clone()))
+            .unwrap_or_else(|| folder.to_string()),
+        project_id: field("conflictingProjectId").or(from_message.map(|(_, id)| id)),
+    })
+}
+
+/// The folder and project of T3's `ProjectConflictError` message.
+fn conflict_message(conflict: &Value) -> Option<(String, String)> {
+    let message = conflict.get("message")?.as_str()?;
+    let rest = message.strip_prefix("Workspace ")?;
+    let (root, project) = rest.rsplit_once(" already belongs to project ")?;
+    let project = project.trim_end_matches('.');
+    (!root.is_empty() && !project.is_empty()).then(|| (root.to_string(), project.to_string()))
+}
+
 /// Checks that `path` is a folder that isn't a project yet, and names the project after it.
-/// `existing` is each project's title and workspace root. It reads the file system.
+/// `existing` is each project's id and workspace root. It reads the file system. A folder that
+/// is a project already fails with [`AlreadyAProject`].
 pub fn new_project<'a>(
     path: &Path,
     existing: impl IntoIterator<Item = (&'a str, &'a str)>,
@@ -41,11 +106,14 @@ pub fn new_project<'a>(
         .to_str()
         .with_context(|| format!("{} isn't a valid UTF-8 path", path.display()))?
         .to_string();
-    if let Some((title, _)) = existing
+    if let Some((project_id, _)) = existing
         .into_iter()
         .find(|(_, root)| *root == workspace_root)
     {
-        return Err(anyhow!("{workspace_root} is already the project {title}"));
+        return Err(anyhow::Error::new(AlreadyAProject {
+            folder: workspace_root,
+            project_id: Some(project_id.to_string()),
+        }));
     }
     let title = path.file_name().map_or_else(
         || workspace_root.clone(),
@@ -129,13 +197,81 @@ mod tests {
                 .title,
             "hello"
         );
-        let error = new_project(&folder, [("Hello", root.as_str())]).unwrap_err();
+        let error = new_project(&folder, [("project-1", root.as_str())]).unwrap_err();
+        assert_eq!(error.to_string(), format!("{root} is already a project"));
         assert_eq!(
-            error.to_string(),
-            format!("{root} is already the project Hello")
+            error.downcast_ref::<AlreadyAProject>(),
+            Some(&AlreadyAProject {
+                folder: root,
+                project_id: Some("project-1".into())
+            })
         );
         assert!(new_project(&dir.join("file.txt"), []).is_err());
         assert!(new_project(&dir.join("missing"), []).is_err());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn t3s_conflict_says_the_folder_is_already_a_project() {
+        // `projects.mutate`'s typed error, its cause encoded as Effect encodes a defect.
+        let error = json!({
+            "_tag": "ProjectMutationError",
+            "commandId": "command-1",
+            "message": "Failed to mutate project.",
+            "cause": {
+                "name": "ProjectConflictError",
+                "message": "Workspace /src/my app already belongs to project project-7."
+            }
+        });
+        let conflict = project_conflict(&error, "/src/my app").unwrap();
+        assert_eq!(
+            conflict,
+            AlreadyAProject {
+                folder: "/src/my app".into(),
+                project_id: Some("project-7".into())
+            }
+        );
+        assert_eq!(conflict.to_string(), "/src/my app is already a project");
+
+        // The message alone is enough, and so is the error with its own fields.
+        let unnamed = json!({ "cause": { "message":
+            "Workspace /src/api already belongs to project project-1." } });
+        assert_eq!(
+            project_conflict(&unnamed, "/src/api").unwrap().project_id,
+            Some("project-1".into())
+        );
+        let tagged = json!({
+            "_tag": "ProjectConflictError", "projectId": "new",
+            "workspaceRoot": "/src/api", "conflictingProjectId": "project-1"
+        });
+        assert_eq!(
+            project_conflict(&tagged, "/src/api/").unwrap(),
+            AlreadyAProject {
+                folder: "/src/api".into(),
+                project_id: Some("project-1".into())
+            }
+        );
+        let named = json!({ "cause": { "name": "ProjectConflictError", "message": "" } });
+        assert_eq!(
+            project_conflict(&named, "/src/api").unwrap(),
+            AlreadyAProject {
+                folder: "/src/api".into(),
+                project_id: None
+            }
+        );
+
+        // Other failures aren't.
+        let other = json!({
+            "_tag": "ProjectMutationError",
+            "commandId": "command-1",
+            "message": "Failed to mutate project.",
+            "cause": { "name": "ProjectOperationError",
+                       "message": "Project operation 'normalize-workspace' failed." }
+        });
+        assert_eq!(project_conflict(&other, "/src/api"), None);
+        assert_eq!(
+            project_conflict(&json!({ "_tag": "ProjectMutationError" }), "/src/api"),
+            None
+        );
     }
 }

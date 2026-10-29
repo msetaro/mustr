@@ -1305,7 +1305,7 @@ impl ThreadView {
         let running = self.thread_state().is_some_and(|state| state.is_running());
         self.send(
             if running {
-                Delivery::Queue
+                crate::thread_settings::FollowUpBehavior::get(cx).delivery()
             } else {
                 Delivery::Auto
             },
@@ -1318,7 +1318,7 @@ impl ThreadView {
         let running = self.thread_state().is_some_and(|state| state.is_running());
         self.send(
             if running {
-                Delivery::Steer
+                crate::thread_settings::FollowUpBehavior::get(cx).other_delivery()
             } else {
                 Delivery::Auto
             },
@@ -2278,7 +2278,7 @@ impl ThreadView {
                     Label::new(if declines {
                         "decline"
                     } else if running {
-                        "queue"
+                        crate::thread_settings::FollowUpBehavior::get(cx).hint()
                     } else {
                         "send"
                     })

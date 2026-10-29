@@ -8,7 +8,7 @@ use crate::{
     t3_engine::T3Mode,
     worktree_git::LocalGit,
 };
-use anyhow::{Context as _, anyhow};
+use anyhow::anyhow;
 use editor::Editor;
 use futures::StreamExt as _;
 use gpui::{
@@ -21,8 +21,11 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use t3_client::t3_api::{rpc, types};
-use thread_chat::{Shell, ThreadShells};
+use t3_client::{
+    RpcError,
+    t3_api::{rpc, types},
+};
+use thread_chat::{Shell, ThreadListFilter, ThreadShells, projects::AlreadyAProject};
 use ui::{Button, ButtonStyle, DiffStat, Divider, Indicator, prelude::*};
 use workspace::{
     Toast, Workspace,
@@ -125,6 +128,10 @@ pub struct HomeView {
     agent_work: Loadable<Vec<AgentWork>>,
     adding_project: Option<Task<()>>,
     project_error: Option<SharedString>,
+    /// "<folder> is already a project", after adding a folder T3 has.
+    project_notice: Option<SharedString>,
+    /// The project the last Add project found, highlighted in the projects card.
+    selected_project: Option<String>,
     add_project_on_load: Option<PathBuf>,
     /// Why no agent can run yet (from T3's provider status), if none can.
     agents_notice: Option<SharedString>,
@@ -171,6 +178,8 @@ impl HomeView {
             agent_work: Loadable::NotLoaded,
             adding_project: None,
             project_error: None,
+            project_notice: None,
+            selected_project: None,
             add_project_on_load: options.add_project,
             agents_notice: None,
             all_threads: Vec::new(),
@@ -703,6 +712,7 @@ impl HomeView {
     /// shell then brings the project to every view.
     fn add_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.project_error = None;
+        self.project_notice = None;
         let task = add_project(path, cx);
         self.adding_project = Some(cx.spawn_in(window, async move |this, cx| {
             let result = task.await;
@@ -710,10 +720,18 @@ impl HomeView {
                 this.adding_project = None;
                 match result {
                     Ok(title) => log::info!("added the project {title}"),
-                    Err(error) => {
-                        log::error!("couldn't add the project: {error:#}");
-                        this.project_error = Some(format!("{error:#}").into());
-                    }
+                    Err(error) => match error.downcast_ref::<AlreadyAProject>() {
+                        Some(existing) => {
+                            log::info!("{existing}");
+                            this.project_notice = Some(format!("{existing}.").into());
+                            this.selected_project = existing.project_id.clone();
+                            select_project(existing, cx);
+                        }
+                        None => {
+                            log::error!("couldn't add the project: {error:#}");
+                            this.project_error = Some(format!("{error:#}").into());
+                        }
+                    },
                 }
                 cx.notify();
             })
@@ -739,12 +757,16 @@ impl HomeView {
                 ))
             }
             (projects, true, _) => {
+                let selected_background = cx.theme().colors().element_selected;
                 body = body.children(projects.iter().map(|project| {
+                    let selected = self.selected_project.as_ref() == Some(&project.id);
                     h_flex()
                         .w_full()
                         .gap_3()
                         .px_2()
                         .py_1p5()
+                        .rounded(scaled(tokens::CONTROL_RADIUS))
+                        .when(selected, |this| this.bg(selected_background))
                         .child(
                             Icon::new(IconName::Folder)
                                 .size(IconSize::Small)
@@ -804,6 +826,13 @@ impl HomeView {
                     ),
             )
             .child(Divider::horizontal())
+            .when_some(self.project_notice.clone(), |this, notice| {
+                this.child(
+                    div()
+                        .debug_selector(|| "home-project-notice".into())
+                        .child(muted_line(notice)),
+                )
+            })
             .child(body)
             .when_some(self.project_error.clone(), |this, error| {
                 this.child(error_line(error))
@@ -818,9 +847,26 @@ impl HomeView {
                     .gap_2()
                     .child(Indicator::dot().color(Color::Warning))
                     .child(
-                        Label::new(notice)
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
+                        div().flex_1().min_w_0().child(
+                            Label::new(notice)
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .debug_selector(|| "home-set-up-agents".into())
+                            .child(
+                                mustr_ui::TextButton::new("home-set-up-agents", "Set up agents")
+                                    .tooltip("Install agents and sign in to them")
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(crate::agent_setup::OpenAgents),
+                                            cx,
+                                        )
+                                    }),
+                            ),
                     ),
             ),
         )
@@ -1283,10 +1329,16 @@ fn choose_and_add_project(workspace: WeakEntity<Workspace>, window: &mut Window,
             };
             let message = match result {
                 Ok(title) => format!("Added the project {title}."),
-                Err(error) => {
-                    log::error!("couldn't add the project: {error:#}");
-                    format!("Couldn't add the project: {error:#}")
-                }
+                Err(error) => match error.downcast_ref::<AlreadyAProject>() {
+                    Some(existing) => {
+                        cx.update(|_, cx| select_project(existing, cx)).ok();
+                        format!("{existing}.")
+                    }
+                    None => {
+                        log::error!("couldn't add the project: {error:#}");
+                        format!("Couldn't add the project: {error:#}")
+                    }
+                },
             };
             workspace
                 .update(cx, |workspace, cx| {
@@ -1327,7 +1379,7 @@ fn add_project(path: PathBuf, cx: &mut App) -> Task<anyhow::Result<String>> {
             shell
                 .projects
                 .values()
-                .map(|project| (project.title.clone(), project.workspace_root.clone()))
+                .map(|project| (project.id.clone(), project.workspace_root.clone()))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -1336,16 +1388,35 @@ fn add_project(path: PathBuf, cx: &mut App) -> Task<anyhow::Result<String>> {
             &path,
             existing
                 .iter()
-                .map(|(title, root)| (title.as_str(), root.as_str())),
+                .map(|(id, root)| (id.as_str(), root.as_str())),
         )?;
         let created = session
             .rpc()
             .call::<rpc::ProjectsMutate>(thread_chat::projects::create_mutation(&project))
             .await
-            .map_err(|error| anyhow!(error.error_detail().unwrap_or_else(|| error.to_string())))
-            .with_context(|| format!("adding {}", project.workspace_root))?;
+            .map_err(|error| add_project_error(&error, &project.workspace_root))?;
         Ok(created.title)
     })
+}
+
+/// What adding `folder` failed with: [`AlreadyAProject`] when T3 says the folder is a project
+/// already (the shell may not have it yet), or T3's own words.
+fn add_project_error(error: &RpcError, folder: &str) -> anyhow::Error {
+    if let RpcError::Failed { error: value, .. } = error
+        && let Some(existing) = thread_chat::projects::project_conflict(value, folder)
+    {
+        return anyhow::Error::new(existing);
+    }
+    anyhow!(error.error_detail().unwrap_or_else(|| error.to_string()))
+        .context(format!("adding {folder}"))
+}
+
+/// Selects the project that already has the folder, as T3's Add project opens it: the threads
+/// sidebar shows that project's threads.
+fn select_project(existing: &AlreadyAProject, cx: &mut App) {
+    if let Some(project_id) = &existing.project_id {
+        ThreadListFilter::set_project(Some(project_id.clone()), cx);
+    }
 }
 
 /// The shell's projects, by title.
@@ -1451,8 +1522,7 @@ fn agents_notice(providers: &[types::ServerProvider]) -> Option<String> {
         })
         .collect::<Vec<_>>();
     Some(format!(
-        "No agent can run yet: {}. Install an agent's CLI on this computer and sign in to it, \
-         then choose Reconnect.",
+        "No agent can run yet: {}. Set up an agent to install it and sign in.",
         problems.join("; ")
     ))
 }
@@ -1847,9 +1917,81 @@ mod tests {
             "message": "Claude Code 1.0 is too old.",
         }))])
         .unwrap();
-        assert!(
-            notice.contains("yet: claudeAgent: Claude Code 1.0 is too old. Install"),
-            "{notice}"
+        assert_eq!(
+            notice,
+            "No agent can run yet: claudeAgent: Claude Code 1.0 is too old. Set up an agent to \
+             install it and sign in."
         );
+    }
+
+    #[test]
+    fn adding_a_folder_t3_has_says_it_is_already_a_project() {
+        // `projects.mutate`'s typed error, as T3 0.1.3 sends it for a folder it already has.
+        let conflict = RpcError::Failed {
+            tag: "projects.mutate".into(),
+            error: json!({
+                "_tag": "ProjectMutationError",
+                "commandId": "command-1",
+                "message": "Failed to mutate project.",
+                "cause": {
+                    "name": "ProjectConflictError",
+                    "message": "Workspace /src/hello already belongs to project project-7."
+                }
+            }),
+        };
+        let error = add_project_error(&conflict, "/src/hello");
+        assert_eq!(error.to_string(), "/src/hello is already a project");
+        assert_eq!(
+            error.downcast_ref::<AlreadyAProject>(),
+            Some(&AlreadyAProject {
+                folder: "/src/hello".into(),
+                project_id: Some("project-7".into()),
+            })
+        );
+
+        // Other failures keep T3's words.
+        let other = RpcError::Failed {
+            tag: "projects.mutate".into(),
+            error: json!({
+                "_tag": "ProjectMutationError",
+                "commandId": "command-1",
+                "message": "Failed to mutate project.",
+            }),
+        };
+        let error = add_project_error(&other, "/src/hello");
+        assert!(error.downcast_ref::<AlreadyAProject>().is_none());
+        assert_eq!(
+            format!("{error:#}"),
+            "adding /src/hello: Failed to mutate project."
+        );
+    }
+
+    #[gpui::test]
+    fn selecting_the_project_that_has_the_folder(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            select_project(
+                &AlreadyAProject {
+                    folder: "/src/hello".into(),
+                    project_id: Some("project-7".into()),
+                },
+                cx,
+            );
+            assert_eq!(
+                ThreadListFilter::get(cx).project_id.as_deref(),
+                Some("project-7")
+            );
+            // Without the project's id, the list stays as it is.
+            select_project(
+                &AlreadyAProject {
+                    folder: "/src/other".into(),
+                    project_id: None,
+                },
+                cx,
+            );
+            assert_eq!(
+                ThreadListFilter::get(cx).project_id.as_deref(),
+                Some("project-7")
+            );
+        });
     }
 }

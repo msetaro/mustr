@@ -9,7 +9,8 @@
 //!   `thread.metadata.update` `{limitRecovery}`. Resuming now is the composer's Resume.
 //!
 //! The agents' status comes from T3's server config: [`ServerConfigs`] follows
-//! `subscribeServerConfig` for the whole app.
+//! `subscribeServerConfig` for the whole app, with T3's settings and where it runs. The banner's
+//! Set up opens the agents page ([`OpenAgentSetup`], handled by `mustr/src/agent_setup.rs`).
 
 use crate::{
     backend::{Access, ThreadBackend, ThreadBackendExt as _},
@@ -21,22 +22,24 @@ use crate::{
 use anyhow::Result;
 use futures::StreamExt as _;
 use gpui::{
-    AnyElement, App, AppContext as _, AsyncApp, Context, Entity, FontWeight, Global, Hsla,
+    Action, AnyElement, App, AppContext as _, AsyncApp, Context, Entity, FontWeight, Global, Hsla,
     IntoElement, ParentElement as _, Rems, Styled as _, Task, WeakEntity, actions, div, px,
     relative,
 };
 use mustr_ui::{ButtonStyle, Card, TextButton, palette, tokens, tokens::scaled};
+use schemars::JsonSchema;
+use serde::Deserialize;
 use std::sync::Arc;
 use t3_api::{
     rpc,
     tagged::{OrchestrationV2Command, ServerConfigStreamEvent},
     types::{
-        OrchestrationV2CommandThreadMetadataUpdate, OrchestrationV2CommandThreadMetadataUpdateType,
-        OrchestrationV2LimitRecoveryUpdate, OrchestrationV2ProviderFailureClass,
-        OrchestrationV2ThreadShell, ServerProvider, ServerProviderAuthStatus,
-        ServerProviderAvailability, ServerProviderCompatibilityAdvisory,
+        ExecutionEnvironmentDescriptor, OrchestrationV2CommandThreadMetadataUpdate,
+        OrchestrationV2CommandThreadMetadataUpdateType, OrchestrationV2LimitRecoveryUpdate,
+        OrchestrationV2ProviderFailureClass, OrchestrationV2ThreadShell, ServerProvider,
+        ServerProviderAuthStatus, ServerProviderAvailability, ServerProviderCompatibilityAdvisory,
         ServerProviderCompatibilityStatus, ServerProviderState, ServerProviderUsageLimits,
-        ServerProviderUsageLimitsUnavailableReason, SubscribeServerConfigPayload,
+        ServerProviderUsageLimitsUnavailableReason, ServerSettings, SubscribeServerConfigPayload,
     },
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
@@ -55,12 +58,26 @@ actions!(
     ]
 );
 
+/// Opens the agents page, where agents are installed and signed in to, with `instance_id`'s
+/// agent first when given. Handled by `mustr/src/agent_setup.rs` (WP14); the provider banner's
+/// Set up dispatches it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, JsonSchema, Action)]
+#[action(namespace = thread_chat)]
+#[serde(deny_unknown_fields)]
+pub struct OpenAgentSetup {
+    #[serde(default)]
+    pub instance_id: Option<String>,
+}
+
 // T3's server config, for the whole app.
 
-/// T3's agents as its server config reports them, kept current by `subscribeServerConfig`.
-/// It starts following T3 when a view first asks for it.
+/// T3's agents as its server config reports them, kept current by `subscribeServerConfig`, with
+/// T3's settings and the machine it runs on. It starts following T3 when a view first asks for
+/// it.
 pub struct ServerConfigs {
     providers: Option<Vec<ServerProvider>>,
+    settings: Option<ServerSettings>,
+    environment: Option<ExecutionEnvironmentDescriptor>,
     _follow: Option<Task<()>>,
 }
 
@@ -77,6 +94,8 @@ impl ServerConfigs {
         let configs = cx.new(|cx| {
             let mut configs = Self {
                 providers: None,
+                settings: None,
+                environment: None,
                 _follow: None,
             };
             configs.follow(cx);
@@ -95,6 +114,29 @@ impl ServerConfigs {
     /// T3's agents, once the config has loaded.
     pub fn providers(&self) -> Option<&[ServerProvider]> {
         self.providers.as_deref()
+    }
+
+    /// T3's settings, once the config has loaded, as `settingsUpdated` keeps them.
+    pub fn settings(&self) -> Option<&ServerSettings> {
+        self.settings.as_ref()
+    }
+
+    /// The machine T3 runs on, once the config has loaded.
+    pub fn environment(&self) -> Option<&ExecutionEnvironmentDescriptor> {
+        self.environment.as_ref()
+    }
+
+    /// Takes T3's agents as a call returned them (`server.refreshProviders`), before the
+    /// config's own event catches up.
+    pub fn set_providers(&mut self, providers: Vec<ServerProvider>, cx: &mut Context<Self>) {
+        self.providers = Some(providers);
+        cx.notify();
+    }
+
+    /// Takes T3's settings as a write returned them (`server.updateSettings`).
+    pub fn set_settings(&mut self, settings: ServerSettings, cx: &mut Context<Self>) {
+        self.settings = Some(settings);
+        cx.notify();
     }
 
     /// One agent, by its instance id.
@@ -140,17 +182,29 @@ async fn follow_config(
         Access::Read,
     )?;
     while let Some(event) = stream.next().await {
-        let providers = match event {
-            Ok(ServerConfigStreamEvent::Snapshot(snapshot)) => snapshot.config.providers,
-            Ok(ServerConfigStreamEvent::ProviderStatuses(statuses)) => statuses.payload.providers,
-            Ok(_) => continue,
+        let event = match event {
+            Ok(event) => event,
             Err(error) => {
                 log::warn!("skipping a server config event mustr can't read: {error:#}");
                 continue;
             }
         };
         this.update(cx, |this, cx| {
-            this.providers = Some(providers);
+            match event {
+                ServerConfigStreamEvent::Snapshot(snapshot) => {
+                    let config = snapshot.config;
+                    this.providers = Some(config.providers);
+                    this.settings = Some(config.settings);
+                    this.environment = Some(config.environment);
+                }
+                ServerConfigStreamEvent::ProviderStatuses(statuses) => {
+                    this.providers = Some(statuses.payload.providers)
+                }
+                ServerConfigStreamEvent::SettingsUpdated(updated) => {
+                    this.settings = Some(updated.payload.settings)
+                }
+                _ => return,
+            }
             cx.notify();
         })?;
     }
@@ -247,8 +301,18 @@ fn incompatible_version(provider: &ServerProvider) -> Option<&ServerProviderComp
         .then_some(advisory)
 }
 
-/// What's wrong with the agent, in words (`getProviderStatusMessage` in T3, without its pointers
-/// to T3's provider setup, which mustr doesn't have yet).
+/// Whether T3 can install the agent or sign in to it itself (`hasProviderSetup` in T3), so the
+/// agents page can do it; for the others it says which commands to run.
+pub fn has_provider_setup(provider: &ServerProvider) -> bool {
+    provider.driver == "antigravity"
+        || provider
+            .setup
+            .as_ref()
+            .is_some_and(|setup| setup.can_authenticate || setup.can_install)
+}
+
+/// What's wrong with the agent, in words (`getProviderStatusMessage` in T3, pointing at the
+/// banner's Set up where T3 points at its provider setup).
 fn provider_status_message(provider: &ServerProvider) -> String {
     if provider.auth.status != ServerProviderAuthStatus::Unauthenticated
         && let Some(advisory) = &provider.compatibility_advisory
@@ -265,14 +329,25 @@ fn provider_status_message(provider: &ServerProvider) -> String {
         return message.clone();
     }
     let name = provider_name(provider);
+    let has_setup = has_provider_setup(provider);
     if !provider.installed {
+        if has_setup {
+            return format!(
+                "Choose Set up to install {} where T3 Code runs.",
+                driver_label(&provider.driver)
+            );
+        }
         return format!(
             "Install {} where T3 Code runs, then restart the agent session.",
             driver_label(&provider.driver)
         );
     }
     if provider.auth.status == ServerProviderAuthStatus::Unauthenticated {
-        return "Sign in via the CLI to authenticate again.".to_string();
+        return match (has_setup, provider.driver.as_str()) {
+            (true, "antigravity") => "Choose Set up to sign in with Google.".to_string(),
+            (true, _) => "Choose Set up to sign in.".to_string(),
+            (false, _) => "Sign in via the CLI to authenticate again.".to_string(),
+        };
     }
     match provider.status {
         ServerProviderState::Ready => "No models are available for this provider.".to_string(),
@@ -758,6 +833,9 @@ impl ThreadView {
             palette.warning.hsla()
         };
         let key = banner.key.clone();
+        let instance_id = self
+            .provider(cx)
+            .map(|provider| provider.instance_id.clone());
         banner_card(color)
             .child(
                 h_flex()
@@ -790,6 +868,22 @@ impl ThreadView {
                                 Label::new(banner.message)
                                     .size(LabelSize::Small)
                                     .color(Color::Muted),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .debug_selector(|| "thread-provider-banner-set-up".into())
+                            .child(
+                                TextButton::new("thread-provider-banner-set-up", "Set up")
+                                    .tooltip("Install or sign in to this agent")
+                                    .on_click(move |_, window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(OpenAgentSetup {
+                                                instance_id: instance_id.clone(),
+                                            }),
+                                            cx,
+                                        )
+                                    }),
                             ),
                     )
                     .child(
@@ -1160,4 +1254,80 @@ fn register(workspace: &mut Workspace) {
             view.update(cx, |view, cx| view.toggle_usage_limits(cx));
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use serde_json::json;
+
+    fn provider(fields: serde_json::Value) -> ServerProvider {
+        let mut provider = json!({
+            "instanceId": "codex", "driver": "codex", "displayName": "Codex",
+            "enabled": true, "installed": true, "status": "error",
+            "auth": { "status": "unauthenticated" },
+            "checkedAt": "2026-10-28T12:00:00.000Z", "version": "0.156.1", "models": []
+        });
+        if let (Some(provider), serde_json::Value::Object(fields)) =
+            (provider.as_object_mut(), fields)
+        {
+            provider.extend(fields);
+        }
+        serde_json::from_value(provider).unwrap()
+    }
+
+    #[test]
+    fn banners_point_at_set_up_for_agents_t3_sets_up() {
+        // T3 signs in to its own Codex itself, so the banner points at Set up.
+        let managed = provider(json!({
+            "message": null, "setup": { "canAuthenticate": true, "canInstall": true }
+        }));
+        assert!(has_provider_setup(&managed));
+        assert_eq!(
+            provider_banner(&managed).unwrap().message,
+            "Choose Set up to sign in."
+        );
+        let missing = provider(json!({
+            "installed": false, "status": "warning", "auth": { "status": "unknown" },
+            "setup": { "canAuthenticate": true, "canInstall": true }
+        }));
+        assert_eq!(
+            provider_banner(&missing).unwrap().message,
+            "Choose Set up to install Codex where T3 Code runs."
+        );
+        let antigravity = provider(json!({
+            "instanceId": "antigravity", "driver": "antigravity", "displayName": "Antigravity"
+        }));
+        assert_eq!(
+            provider_banner(&antigravity).unwrap().message,
+            "Choose Set up to sign in with Google."
+        );
+        // An agent on its own CLI is signed in to there.
+        let cli = provider(json!({
+            "setup": { "canAuthenticate": false, "canInstall": false }
+        }));
+        assert!(!has_provider_setup(&cli));
+        assert_eq!(
+            provider_banner(&cli).unwrap().message,
+            "Sign in via the CLI to authenticate again."
+        );
+    }
+
+    #[test]
+    fn set_up_opens_the_agents_page_for_the_agent() {
+        let action = OpenAgentSetup::build(json!({ "instance_id": "codex" })).unwrap();
+        assert_eq!(
+            action.as_any().downcast_ref::<OpenAgentSetup>(),
+            Some(&OpenAgentSetup {
+                instance_id: Some("codex".into())
+            })
+        );
+        // The palette builds it without an agent.
+        let action = OpenAgentSetup::build(json!({})).unwrap();
+        assert_eq!(
+            action.as_any().downcast_ref::<OpenAgentSetup>(),
+            Some(&OpenAgentSetup::default())
+        );
+    }
 }
