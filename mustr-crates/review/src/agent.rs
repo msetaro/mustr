@@ -11,7 +11,7 @@ use gpui::{
     Action, AnyElement, App, ClickEvent, IntoElement, ParentElement as _, SharedString,
     Styled as _, WeakEntity, Window,
 };
-use mustr_ui::tokens;
+use mustr_ui::{MustrIcon, tokens};
 use serde::Deserialize;
 use ui::{
     Button, ButtonSize, ButtonStyle, Color, ContextMenu, Icon, IconButton, IconName, IconPosition,
@@ -201,7 +201,8 @@ pub(crate) fn render_agent_header(
             .flex_none()
             .gap_1()
             .child(
-                Icon::new(IconName::ZedAgent)
+                MustrIcon::Agent
+                    .icon()
                     .size(IconSize::XSmall)
                     .color(Color::Custom(mustr_ui::palette(cx).agent.hsla())),
             )
@@ -267,7 +268,7 @@ pub(crate) fn render_agent_header(
                 .children(render_scope_picker(header, review))
                 .when(restricted_worktree, |this| {
                     let tooltip = "Restricted Mode: language servers don't run in this worktree \
-                                   until you trust it. Click to review Zed's trust options.";
+                                   until you trust it. Click to trust it or stay in Restricted Mode.";
                     let trust = |_: &ClickEvent, window: &mut Window, cx: &mut App| {
                         window.dispatch_action(Box::new(workspace::ToggleWorktreeSecurity), cx)
                     };
