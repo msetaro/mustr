@@ -200,6 +200,7 @@ fn main() {
             zlog::init_output_stdout();
         }
     }
+    log_panics();
 
     #[cfg(unix)]
     util::increase_open_file_limit().log_err();
@@ -299,6 +300,19 @@ fn main() {
         cx.activate(true);
         window::open_home_window(app_state, cx);
     });
+}
+
+/// Writes a panic's message, place and backtrace to `mustr.log` before Rust's own hook prints it.
+/// mustr leaves out Zed's crash reporter, and an app started from the Dock has no terminal, so
+/// without this a crash leaves nothing to report.
+fn log_panics() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        log::error!("panic: {info}\n{backtrace}");
+        log::logger().flush();
+        default_hook(info);
+    }));
 }
 
 fn parse_review_scope(scope: &str) -> Result<review::ReviewScope, String> {

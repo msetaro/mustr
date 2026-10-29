@@ -42,6 +42,62 @@ keeps working. Then the status bar shows **Restart to update**. mustr never rest
   `Updates: off, because …` and don't, so a local build never turns into the published release.
 - Cutting releases is in `mustr-docs/RELEASING.md`.
 
+## First run on a new Mac
+
+A checklist for the first launch of a release, such as on a work laptop.
+
+1. **Install** in Terminal, then open mustr from Applications or Spotlight:
+   `curl -fsSL https://github.com/msetaro/mustr/releases/latest/download/install.sh | sh`
+2. **With T3 Code installed** (its `t3` command and background service): within a few seconds
+   Home says "Connected to <your Mac's name>", and the title bar's chip shows `T3 · <name>`.
+   - mustr pairs by itself: it runs `t3 auth pairing create` for `orchestration:read`,
+     `orchestration:operate`, `source-control:write`, `filesystem:read`, `terminal:read`,
+     `terminal:operate`, `settings:write`, `providers:manage` and `diagnostics:read`, and the
+     session shows as "mustr" in `t3 auth session list`. It never asks for `access:*` or `relay:*`.
+   - **Keychain:** the token goes in your login keychain as `mustr-t3:<server URL>`. Saving it
+     doesn't prompt; the next launch does: "mustr wants to use your confidential information…".
+     Enter your login password and choose **Always Allow**. The app is signed ad hoc, so macOS
+     probably asks again after each update (not yet seen on a Mac).
+   - **Pairing again** happens by itself when the token expires (after about 30 days), when T3
+     revokes it, or when a newer mustr needs another scope. To start over, revoke the "mustr"
+     session (`t3 auth session revoke <id>`), then choose Reconnect on Home.
+   - If T3's service is installed but stopped, mustr runs `t3 service restart` once. If nothing
+     runs T3, Home offers **Run T3 Code in the background** (`t3 service install`). If T3 Code
+     speaks an older protocol, Home offers **Update T3 Code** (`t3 update`); an older 0.1.x works
+     and Home says quietly that 0.1.3 is available.
+3. **With no T3 Code:** Home shows "Set up the agents engine" with **Install the agents engine**
+   (T3 Code 0.1.3, about 100 MB, installed as T3's own installer does: `~/.t3`, the `t3` command
+   in `~/.local/bin`, and its launch agent), or **Use mustr's own engine**: a private T3 Code in
+   mustr's data folder, with its own projects and threads, that runs only while mustr does.
+4. **With only T3's desktop app** (no `t3` command): while T3's app is open, mustr finds the
+   server it runs but can't pair by itself, so Home shows "Pair mustr with T3 Code" and a field.
+   In T3's app, open Settings › Sharing & access, create a pairing link with the scopes above,
+   and paste it into the field. mustr then works while T3's app is open. To stop depending on it,
+   quit T3's app and choose Install the agents engine on Home (T3's app can then use that
+   background service too), or use mustr's own engine.
+5. **Check the Agents page** (the rail's grid icon, or "mustr: open agents" in the command
+   palette, ⌘⇧P): Claude and Codex should say **Ready**, with "2 ready" in the heading. If one is
+   signed out, sign in there, or in Terminal with `claude auth login` or `codex login`, then choose
+   Check again. The agents' logins are their own CLIs', shared with T3 Code.
+6. **Zoom:** ⌘= and ⌘- make everything bigger or smaller, and ⌘0 goes back to the default size.
+   mustr starts at twice the size its designs are drawn at; try ⌘- once or twice on a laptop.
+7. **Settings and logs** are in `~/Library/Application Support/mustr/`: `config/settings.json`
+   (⌘, opens it), `logs/mustr.log` (with `logs/mustr.log.old` before it), and
+   `logs/t3-engine.log` for mustr's own engine. T3 Code's own log is where `t3 service status`
+   says.
+8. **Reporting a problem:** say what you did and what you saw (a screenshot helps), and send:
+   - the version and server line: the `starting mustr` line and the `Connected to T3
+     environment …` line from `mustr.log`;
+   - the warnings and errors around the time it happened:
+     `grep -E "starting mustr|Connected to T3|ERROR|WARN|panic" ~/Library/Application\ Support/mustr/logs/mustr.log | tail -100`;
+   - for a crash, the `panic:` lines with the backtrace under them in `mustr.log`, or the report in
+     Console › Crash Reports (`~/Library/Logs/DiagnosticReports/mustr-*.ips`);
+   - for an engine problem in mustr's own engine, the end of `t3-engine.log`.
+
+   mustr doesn't write tokens or pairing credentials to its log; still, look it over for
+   repository and file names you'd rather not share. Right after launch, a few `… mustr isn't connected to T3` warnings are normal:
+   views restored from last time load before the connection is up, then load again.
+
 ## Prerequisites
 
 - **An Apple silicon Mac.** mustr builds on an Intel Mac too, but T3 Code publishes no engine for

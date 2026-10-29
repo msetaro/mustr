@@ -515,11 +515,16 @@ impl Render for ThreadView {
             .size_full()
             .into_any_element(),
         };
-        v_flex()
-            .key_context("ThreadView")
-            .track_focus(&self.focus_handle)
-            .size_full()
-            .bg(palette.background.hsla())
+        // When the pane is short (a terminal panel open at the default size), the header, its
+        // banners and the timeline give way, and the composer keeps its whole height, so its
+        // buttons and a pending request's answers stay in view. The column is positioned
+        // absolutely so its height never pushes the pane under the dock: Zed's center doesn't
+        // shrink below what its item needs.
+        let above_composer = v_flex()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .overflow_hidden()
             .when(self.new_thread.is_none(), |this| {
                 this.child(self.render_header(window, cx))
                     .child(self.family_bar.clone())
@@ -533,8 +538,21 @@ impl Render for ThreadView {
                     .flex()
                     .flex_col()
                     .child(body),
+            );
+        div()
+            .key_context("ThreadView")
+            .track_focus(&self.focus_handle)
+            .relative()
+            .size_full()
+            .bg(palette.background.hsla())
+            .child(
+                v_flex().absolute().inset_0().child(above_composer).child(
+                    v_flex()
+                        .flex_none()
+                        .w_full()
+                        .child(self.render_composer(window, cx)),
+                ),
             )
-            .child(self.render_composer(window, cx))
     }
 }
 
