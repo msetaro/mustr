@@ -106,6 +106,7 @@ pub fn init(cx: &mut App) {
     // WP12, composer and timeline:
     // WP13, thread list and navigation:
     // WP14, agent setup and T3's settings:
+    thread_settings::FollowUpBehavior::load(cx);
 }
 
 /// mustr's key bindings for threads. The app binds them after Zed's, so users can rebind them:

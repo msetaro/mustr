@@ -717,6 +717,120 @@ pub fn worktrees<'a>(refs: &'a [RefChoice], project_root: &str) -> Vec<&'a RefCh
         .collect()
 }
 
+// T3's settings.
+
+/// T3's server settings (`server.getSettings`). The 0.1.4 nightlies dropped that call; their
+/// server config carries the settings, as every T3's does, so they're read there instead.
+pub async fn load_server_settings(
+    backend: &std::sync::Arc<dyn crate::ThreadBackend>,
+) -> anyhow::Result<ServerSettings> {
+    use crate::backend::{Access, ThreadBackendExt as _};
+    use t3_api::{
+        rpc,
+        types::{ServerGetConfigPayload, ServerGetSettingsPayload},
+    };
+    let settings = backend
+        .call::<rpc::ServerGetSettings>(ServerGetSettingsPayload(Default::default()), Access::Read)
+        .await;
+    match settings {
+        Err(error) if crate::backend::is_unsupported_rpc(&error) => backend
+            .call::<rpc::ServerGetConfig>(ServerGetConfigPayload(Default::default()), Access::Read)
+            .await
+            .map(|config| config.settings),
+        settings => settings,
+    }
+}
+
+// Follow-ups.
+
+/// What the composer's Enter does with a message while the agent works: queue it for after the
+/// run, or steer the run with it; `secondary-shift-enter` does the other. T3 keeps this in its
+/// app's own settings (`followUpBehavior`), not on its server, so mustr keeps its own, in its
+/// database. mustr queues by default, as it always has; T3's app steers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FollowUpBehavior {
+    #[default]
+    Queue,
+    Steer,
+}
+
+impl gpui::Global for FollowUpBehavior {}
+
+const FOLLOW_UP_KEY: &str = "mustr-follow-up-behavior";
+
+impl FollowUpBehavior {
+    /// The app's choice.
+    pub fn get(cx: &gpui::App) -> Self {
+        cx.try_global::<Self>().copied().unwrap_or_default()
+    }
+
+    /// Changes the app's choice and saves it.
+    pub fn set(self, cx: &mut gpui::App) {
+        use gpui::AppContext as _;
+        cx.set_global(self);
+        if cx.has_global::<db::AppDatabase>() {
+            let store = db::kvp::KeyValueStore::global(cx);
+            let value = self.as_str().to_string();
+            cx.background_spawn(async move {
+                if let Err(error) = store.write_kvp(FOLLOW_UP_KEY.to_string(), value).await {
+                    log::error!("couldn't save the follow-up behavior: {error:#}");
+                }
+            })
+            .detach();
+        }
+    }
+
+    /// Reads the saved choice. Call once at startup.
+    pub(crate) fn load(cx: &mut gpui::App) {
+        if !cx.has_global::<db::AppDatabase>() {
+            return;
+        }
+        let saved = db::kvp::KeyValueStore::global(cx)
+            .read_kvp(FOLLOW_UP_KEY)
+            .ok()
+            .flatten();
+        if let Some(behavior) = saved.as_deref().and_then(Self::parse) {
+            cx.set_global(behavior);
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Queue => "queue",
+            Self::Steer => "steer",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "queue" => Some(Self::Queue),
+            "steer" => Some(Self::Steer),
+            _ => None,
+        }
+    }
+
+    /// How Enter sends while the agent works.
+    pub fn delivery(self) -> crate::commands::Delivery {
+        match self {
+            Self::Queue => crate::commands::Delivery::Queue,
+            Self::Steer => crate::commands::Delivery::Steer,
+        }
+    }
+
+    /// How `secondary-shift-enter` sends while the agent works: the other way.
+    pub fn other_delivery(self) -> crate::commands::Delivery {
+        match self {
+            Self::Queue => crate::commands::Delivery::Steer,
+            Self::Steer => crate::commands::Delivery::Queue,
+        }
+    }
+
+    /// The composer's key hint for Enter while the agent works.
+    pub fn hint(self) -> &'static str {
+        self.as_str()
+    }
+}
+
 #[cfg(test)]
 #[path = "thread_settings_tests.rs"]
 mod tests;
