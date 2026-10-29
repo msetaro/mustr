@@ -428,7 +428,16 @@ mod tests {
 
         let defaults: Value =
             settings::parse_json_with_comments(&settings::default_settings()).unwrap();
-        let overrides: Value = settings::parse_json_with_comments(DEFAULT_OVERRIDES).unwrap();
+        let mut overrides: Value = settings::parse_json_with_comments(DEFAULT_OVERRIDES).unwrap();
+        // A language's settings are the same keys as the top-level language settings.
+        if let Some(Value::Object(languages)) = overrides
+            .as_object_mut()
+            .and_then(|overrides| overrides.remove("languages"))
+        {
+            for (language, settings) in languages {
+                assert_paths_exist(&settings, &defaults, &format!("/languages/{language}"));
+            }
+        }
         assert_paths_exist(&overrides, &defaults, "");
 
         let merged: Value = serde_json::from_str(&merged_default_settings().unwrap()).unwrap();
@@ -497,6 +506,77 @@ mod tests {
             assert!(!host.ends_with("zed.dev"), "{server_url}");
             // Refused before any DNS lookup.
             assert!(crate::zed_services::is_blocked_host(&host), "{server_url}");
+        });
+    }
+
+    /// The changed words of a diff keep the theme's syntax colors: Zed's contrast adjustment for
+    /// text over highlights would otherwise recolor them over their word highlights.
+    #[gpui::test]
+    fn changed_words_keep_their_syntax_colors(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            apply_default_overrides(cx).unwrap();
+            let min_contrast =
+                editor::EditorSettings::get_global(cx).minimum_contrast_for_highlights;
+
+            let mut families = vec![mustr_ui::theme_family_content().unwrap()];
+            families.push(
+                theme_settings::deserialize_user_theme(
+                    include_str!("../../../assets/themes/one/one.json").as_bytes(),
+                )
+                .unwrap(),
+            );
+            let mut recolored = Vec::new();
+            for theme in families
+                .into_iter()
+                .flat_map(|family| theme_settings::refine_theme_family(family).themes)
+            {
+                let colors = theme.colors();
+                for word in [
+                    colors.version_control_word_added,
+                    colors.version_control_word_deleted,
+                ] {
+                    let background = colors.editor_background.blend(word);
+                    let syntax = theme.syntax();
+                    for index in 0_usize.. {
+                        let Some(style) = syntax.get(index) else {
+                            break;
+                        };
+                        let Some(color) = style.color else { continue };
+                        let name = syntax.get_capture_name(index).unwrap_or_default();
+                        if ui::utils::ensure_minimum_contrast(color, background, min_contrast)
+                            != color
+                        {
+                            recolored.push(format!("{}: {name}", theme.name));
+                        }
+                    }
+                }
+            }
+            assert_eq!(recolored, Vec::<String>::new());
+        });
+    }
+
+    #[gpui::test]
+    fn added_languages_start_no_language_servers(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            apply_default_overrides(cx).unwrap();
+
+            // The servers Zed's `languages` crate attaches to these languages by name.
+            let attached = ["tailwindcss-language-server", "eslint", "vtsls"]
+                .map(|name| language::LanguageServerName(name.into()));
+            let languages = language::language_settings::AllLanguageSettings::get_global(cx);
+            for name in ["HTML", "PHP", "Svelte", "Vue.js"] {
+                let name = language::LanguageName::new_static(name);
+                let settings = languages.language(None, Some(&name), cx);
+                assert_eq!(
+                    settings.customized_language_servers(&attached),
+                    Vec::<language::LanguageServerName>::new(),
+                    "{name}"
+                );
+            }
         });
     }
 

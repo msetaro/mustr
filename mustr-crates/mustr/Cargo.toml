@@ -54,6 +54,7 @@ log.workspace = true
 lsp_locations.workspace = true
 menu.workspace = true
 migrator.workspace = true
+mustr_languages = { path = "../mustr_languages" }
 mustr_release = { path = "../mustr_release" }
 mustr_ui = { path = "../mustr_ui" }
 node_runtime.workspace = true

@@ -550,4 +550,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     updates::init(cx);
     // Worktree trust: T3's worktrees inherit their project's trust.
     worktree_trust::init(cx);
+    // Syntax highlighting for the languages Zed gets from extensions:
+    mustr_languages::init(&app_state.languages);
 }
