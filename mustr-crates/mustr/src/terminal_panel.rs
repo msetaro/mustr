@@ -79,6 +79,20 @@ actions!(
 
 const KEY_CONTEXT: &str = "ThreadTerminals";
 
+/// The panel's height at mustr's design size, in a window tall enough for it.
+const DEFAULT_HEIGHT: Pixels = px(300.);
+
+/// The most of the window's height the panel takes when it first opens, so the thread above it
+/// keeps its timeline and composer: at mustr's default size (26), 300 is 600 pixels, more than
+/// half of a MacBook's window.
+const MAX_HEIGHT_SHARE: f32 = 0.4;
+
+/// The panel's height when it first opens in a window `window_height` tall: `scaled_height`
+/// ([`DEFAULT_HEIGHT`], scaled), or [`MAX_HEIGHT_SHARE`] of the window if that's less.
+fn default_height(window_height: Pixels, scaled_height: Pixels) -> Pixels {
+    scaled_height.min(window_height * MAX_HEIGHT_SHARE)
+}
+
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, action: &OpenThreadTerminal, window, cx| {
@@ -1609,8 +1623,11 @@ impl Panel for ThreadTerminalPanel {
 
     fn set_position(&mut self, _: DockPosition, _: &mut Window, _: &mut Context<Self>) {}
 
-    fn default_size(&self, _: &Window, cx: &App) -> Pixels {
-        tokens::scaled_pixels(px(300.), cx)
+    fn default_size(&self, window: &Window, cx: &App) -> Pixels {
+        default_height(
+            window.viewport_size().height,
+            tokens::scaled_pixels(DEFAULT_HEIGHT, cx),
+        )
     }
 
     fn set_active(&mut self, active: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -1682,6 +1699,16 @@ mod tests {
 
     fn shell_thread(worktree: Option<&str>) -> OrchestrationV2ThreadShell {
         serde_json::from_value(thread("a", worktree)).unwrap()
+    }
+
+    /// At mustr's default size the panel would take 600 pixels, more than half of a MacBook's
+    /// window, so it takes 40% of it; at the design size it takes its full 300.
+    #[test]
+    fn the_panel_leaves_the_thread_room_on_a_laptop() {
+        let height = default_height(px(982.), px(600.));
+        assert!((height - px(392.8)).abs() < px(0.01), "{height:?}");
+        assert_eq!(default_height(px(982.), px(300.)), px(300.));
+        assert_eq!(default_height(px(1964.), px(600.)), px(600.));
     }
 
     #[test]
