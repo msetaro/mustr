@@ -155,6 +155,48 @@ fn closing_a_window_tab_does_not_activate_it(cx: &mut TestAppContext) {
     assert_eq!(*log.borrow(), ["close"]);
 }
 
+/// A segmented control in `width`, counting its view's renders.
+struct Segments {
+    width: Pixels,
+    renders: Rc<std::cell::Cell<usize>>,
+}
+
+impl Render for Segments {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        ui::h_flex().w(self.width).child(
+            SegmentedControl::new("theme")
+                .segment("Dark")
+                .segment("Light")
+                .segment("Colorblind-safe")
+                .segment("Match system")
+                .selected(3),
+        )
+    }
+}
+
+/// How many times the view renders before it settles, and whether the segments wrapped.
+fn segments_in(width: Pixels, cx: &mut TestAppContext) -> (usize, bool) {
+    let renders = Rc::new(std::cell::Cell::new(0));
+    let (_, cx) = cx.add_window_view({
+        let renders = renders.clone();
+        move |_, _| Segments { width, renders }
+    });
+    cx.run_until_parked();
+    let first = cx.debug_bounds("segment-Dark").unwrap();
+    let last = cx.debug_bounds("segment-Match system").unwrap();
+    (renders.get(), last.top() > first.top())
+}
+
+/// The selected segment's fill rounds the corners of the control it touches. On one line those
+/// are the ends; a control whose segments wrap measures where they went and draws once more.
+#[gpui::test]
+fn a_segmented_control_draws_again_only_when_its_segments_wrap(cx: &mut TestAppContext) {
+    init_test(cx);
+    assert_eq!(segments_in(px(1000.), cx), (1, false));
+    assert_eq!(segments_in(px(120.), cx), (2, true));
+}
+
 /// mustr's components are drawn in rems of `ui_font_size` (`tokens::scaled`), so at twice the
 /// font size each one is twice as big, as when a web page zooms. Line heights round to whole
 /// pixels and hairline borders stay 1px, so allow a pixel or two.

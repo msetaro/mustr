@@ -1,7 +1,13 @@
-use crate::{palette, tokens, tokens::scaled};
+use crate::{
+    ChildPosition, RoundedCorners as _,
+    corners::{inner_radius, touched_corners},
+    palette, tokens,
+    tokens::scaled,
+};
 use gpui::{
-    App, ElementId, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
-    RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    App, Axis, Corners, ElementId, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement as _, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Window, div, px,
 };
 use std::rc::Rc;
 use ui::{FluentBuilder as _, Tooltip, h_flex};
@@ -65,13 +71,50 @@ impl SegmentedControl {
 }
 
 impl RenderOnce for SegmentedControl {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = palette(cx);
         let selected = self.selected;
         let on_select = self.on_select;
+        let count = self.segments.len();
+        // The selected segment's fill rounds the corners of the control it touches, which GPUI
+        // doesn't clip to. Those are the ends of a single line, until the segments wrap: then
+        // they're the ones the last layout put them in.
+        let radius = inner_radius(scaled(tokens::CONTROL_RADIUS).to_pixels(window.rem_size()));
+        let measured = window.use_keyed_state((self.id.clone(), "corners"), cx, |_, _| {
+            Vec::<Corners<bool>>::new()
+        });
+        let corners = {
+            let measured = measured.read(cx);
+            (0..count)
+                .map(|index| match measured.get(index) {
+                    Some(corners) if measured.len() == count => *corners,
+                    _ => ChildPosition::of(index, count).corners(Axis::Horizontal),
+                })
+                .collect::<Vec<_>>()
+        };
+        let drawn = corners.clone();
         // In a row too narrow for every segment, the segments wrap inside the control rather
         // than running out of it.
         h_flex()
+            .on_children_prepainted(move |bounds, _, cx| {
+                let mut bounds = bounds.into_iter();
+                let Some(inside) = bounds.next() else {
+                    return;
+                };
+                let touched = bounds
+                    .map(|segment| touched_corners(inside, segment))
+                    .collect::<Vec<_>>();
+                if touched != drawn {
+                    // The view can't be invalidated while it's being drawn.
+                    let measured = measured.clone();
+                    cx.defer(move |cx| {
+                        measured.update(cx, |measured, cx| {
+                            *measured = touched;
+                            cx.notify();
+                        })
+                    });
+                }
+            })
             .id(self.id)
             .flex_shrink_1()
             .min_w_0()
@@ -81,6 +124,8 @@ impl RenderOnce for SegmentedControl {
             .rounded(scaled(tokens::CONTROL_RADIUS))
             .overflow_hidden()
             .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
+            // The control's inside, measured first.
+            .child(div().absolute().inset_0())
             .children(
                 self.segments
                     .into_iter()
@@ -94,6 +139,7 @@ impl RenderOnce for SegmentedControl {
                             .flex_none()
                             .px(scaled(px(8.)))
                             .py(scaled(px(1.)))
+                            .rounded_corners(corners[index], radius)
                             .whitespace_nowrap()
                             .map(|this| {
                                 if is_selected {
