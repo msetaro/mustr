@@ -3,7 +3,7 @@
 What T3 Code's web and desktop app does for agent-driven development, what mustr does today, and
 what to build so a developer can stop opening T3's app.
 
-- **Compared:** mustr at `m3/next` (`3ed3b218a0`, after WP0–WP10 landed) against T3 Code `v0.1.3`
+- **Compared:** mustr at `m3/next` (`ed22321621`, after WP0–WP14 landed) against T3 Code `v0.1.3`
   (`d2c44031`, 2026-10-26). The list was first written at `m2/threads` (`a96368ce93`). Since
   2026-10-28 mustr's `t3_api` is generated from T3 0.1.3 contracts (`t3_client/T3_VERSION`); the
   local server is still 0.1.1. Calls added after 0.1.1 are marked *(0.1.3)*: a 0.1.1 server
@@ -25,21 +25,27 @@ what to build so a developer can stop opening T3's app.
 
 ## 1. Where mustr stands
 
-With WP0–WP10 in, mustr covers T3's app for daily agent work on the user's own T3 or on mustr's
-own engine. 40 of the 41 P0 rows are done: thread settings and the new-thread form, images, drafts
-and prompt recall, the sidebar in T3's sections with settle, archive, pin and rename, commit, push
-and PR from the thread toolbar with link, watch, merge and Work on PR, the family bar for
-subagents, delegated tasks and workflows, the schedules page, per-thread terminals and the
-worktrees page. The `@`, `#`, `/` and `$` menu, notifications with the Dock badge, Edit from here,
-Fork, Compact, live command output, secret requests and usage limits are in too. mustr now sends 29
-of the roughly 50 orchestration command types and calls 54 of 0.1.1's 198 RPCs.
+With WP0–WP14 in, mustr covers T3's app for daily agent work on the user's own T3 or on mustr's
+own engine. All 41 P0 rows are done: thread settings and the new-thread form, images, drafts and
+prompt recall, the sidebar in T3's sections with settle, archive, pin and rename, commit, push and
+PR from the thread toolbar with link, watch, merge and Work on PR, the family bar for subagents,
+delegated tasks and workflows, the schedules page, per-thread terminals (T3's own, for threads on
+another machine) and the worktrees page. The `@`, `#`, `/` and `$` menu, notifications with the
+Dock badge, Edit from here, Fork, Compact, live command output, secret requests and usage limits
+are in too.
 
-The one open P0 is terminals for threads on another machine; local threads, the user's case, have
-them. 13 P1 rows are open: file attachments and big pastes, worktree setup progress, find in
-thread, the visit watermark, terminal and review-comment chips, a PR's threads, reordering pinned
-threads, searching message text, keys and palette entries for the thread toolbar, T3's settings,
-and installing and signing in to agents. Decline with feedback needed the 0.1.3 pin, which is in. §3
-groups what's left into four packages.
+Wave 3 closed 12 of the 13 open P1 rows: worktree setup progress, a PR's threads, the toolbar's
+keys and palette entries, T3's settings, installing and signing in to agents, file attachments and
+big pastes, terminal and review-comment chips, find in thread, the visit line, decline with
+feedback, dragging pinned and active threads, and message matches in the thread search. The one
+partial P1 is the command palette, which has the thread actions but not T3's "new thread in…".
+mustr now sends about 37 of the roughly 50 orchestration command types and calls about 70 of T3's
+RPCs. §3 lists what's left.
+
+mustr also fits a MacBook's window at its default size (26, twice the designs' 13): toolbars and
+headers move what doesn't fit into a "…" menu or onto a second line, the sidebar takes a third of
+the window (and stays out of the way in a half-screen one), and the title bar, status bar, pages
+and dialogs narrow with the window.
 
 ## 2. Features by area
 
@@ -61,7 +67,7 @@ groups what's left into four packages.
 | Add a project | Adds a local folder as a project (`components/AddProjectToMachineDialog.tsx`, `CommandPaletteAddProject.tsx`) | `projects.mutate` `{project.create}` (or `POST /api/projects/mutate`); `filesystem.browse` for remote | Done (`thread_chat/src/projects.rs`, `mustr/src/home.rs`): from Home, the threads sidebar and the palette. A folder that's already a project (T3's `ProjectConflictError`) says "<folder> is already a project" and selects it | — | P0: with mustr's own engine there's no other way |
 | New thread: project, agent, model | Draft composer with a project heading and model picker | `orchestration.launchThread` | Done (`thread_chat/src/new_thread.rs`) | — | P0 |
 | Worktree from a base branch | Picks the base branch from a paged list, with a "Start from remote" switch (`components/WorktreeBaseBranchPicker.tsx`) | `launchThread` `workspaceStrategy: worktree{baseRef}`, `vcs.listRefs` | Done (`new_thread.rs`, `thread_settings.rs`): `vcs.listRefs` with search and "Start from remote" | — | P0: user's must-have |
-| Existing worktree or branch | "New thread in this worktree"; `mod+shift+l` reuses the previous worktree | `existing_worktree{worktreePath}`, `root{branch}` | Done (`new_thread.rs`, and "New Thread on <branch>" in the thread menu, `organize.rs`). No `mod+shift+l` | — | P0: user's must-have |
+| Existing worktree or branch | "New thread in this worktree"; `mod+shift+l` reuses the previous worktree | `existing_worktree{worktreePath}`, `root{branch}` | Done (`new_thread.rs`, and "New Thread on <branch>" in the thread menu, `organize.rs`); `mod+shift+l` picks the project's previous worktree on a draft (`sidebar.rs`) | — | P0: user's must-have |
 | Scratch thread (no project) | Runs in `~/.t3/scratch/<date-slug>` (`docs/user/thread-sidebar.md`) | `projects.ensureScratch`, then `launchThread` | Done (`new_thread.rs`: "No project") | — | P0: 19 scratch threads in `~/.t3/scratch` this month |
 | Start in background | `mod+Enter` starts the thread and opens another draft | `launchThread` | Missing | S | P2 |
 | One prompt, several models | Shift-click models; one thread and worktree each (`chat/useMultipleModelSend.ts`) | `launchThread` once per model | Missing | S | P2 |
@@ -80,9 +86,9 @@ groups what's left into four packages.
 | Model options | Effort, fast mode, thinking, context window, `mod+shift+e` (`chat/TraitsPicker.tsx`) | `ModelSelection.options[{id,value}]` from provider capabilities in `server.getConfig` | Done (`settings_bar.rs`, `thread_settings.rs`) | — | P0 |
 | Plan mode, Implement plan | Toggle plan mode, or type `/plan` or `/default`. The plan card offers Implement, Refine, Implement in a new thread, Copy and Save to workspace (`chat/ProposedPlanCard.tsx`, `chat/useProposedPlanSend.ts`) | `thread.interaction-mode.set`; `message.dispatch` with `sourcePlanRef`; `thread.create` for a new thread | Done (`settings_bar.rs` Build or Plan, `slash_commands.rs`, the plan card in `timeline.rs`). No Save to workspace | — | P0 |
 | Provider status | Banner when an agent is signed out or outdated (`chat/ProviderStatusBanner.tsx`) | `server.getConfig`, `subscribeServerConfig` | Done (`thread_chat/src/usage.rs`); Home says when no agent can run. Both have Set up, which opens the agents page | — | P1 |
-| Restart agent session | Picks up new skills or MCP servers (command palette) | `provider-session.detach` | Done (`thread_chat/src/history.rs`: header menu and palette). Doesn't ask first while the agent runs | — | P1 |
+| Restart agent session | Picks up new skills or MCP servers (command palette) | `provider-session.detach` | Done (`thread_chat/src/history.rs`: header menu and palette); asks first while the agent works | — | P1 |
 | Custom models, model visibility | `settings/CustomModelEditor.tsx`, `modelPickerVisibility.ts` | `server.updateSettings` | Partial: custom models on the agents page (`mustr/src/agent_setup.rs`), by id, without per-model options. No model visibility | S | P2 |
-| Goals | `/goal …` keeps the agent working until done, with a goal line | Message text; shell `goal` | Partial: `/goal` is in the slash menu; the goal line isn't shown | S | P2 |
+| Goals | `/goal …` keeps the agent working until done, with a goal line | Message text; shell `goal` | Done (`slash_commands.rs`, `composer.rs`): `/goal` in the slash menu, and the goal line above the composer with T3's titles and usage, Resume and Clear | — | P2 |
 
 ### 2.4 Composer
 
@@ -90,8 +96,8 @@ groups what's left into four packages.
 |---|---|---|---|---|---|
 | Send, queue, steer, stop | Enter sends; follow-up behavior; `mod+Enter` does the opposite | `message.dispatch` (`dispatchMode`, `deliveryIntent`), `thread.stop` | Done (`thread_chat/src/composer.rs`, `commands.rs`) | — | P0 |
 | Image attachments | Paste, drag or pick images, up to 10 MiB each (`chat/ComposerAttachmentStrip.tsx`, `chat/useComposerAttachmentIntake.ts`) | `attachments.createUploadUrl`, then `POST /api/attachments/upload/:token`, then `message.dispatch.attachments` | Done (`thread_chat/src/attachments.rs`, `t3_client/src/attachments.rs`): paste, drop or pick, with progress, Retry and remove | — | P0: screenshots are a daily input |
-| File attachments, big pastes | Up to 100 files at 50 MiB each; pastes of 32 KiB or more become files (`chat/composerAttachmentFiles.ts`) | Same, with `type: "file"` | Missing: images only; a big paste goes in as text | S | P1 |
-| @-mentions and context chips | `@` for files, folders and threads, and `#` for PRs; terminal excerpts and review comments show as inline chips (`chat/useComposerMenuItems.ts`, `components/ContextChip.tsx`) | `projects.searchEntries` (needs `filesystem:read`), `pullRequests.list`; `message.dispatch.context` | Partial: `@` and `#` with chips (`thread_chat/src/mentions.rs`; files on this machine through Zed's fuzzy matcher, `projects.searchEntries` when T3's folders are elsewhere). No terminal-excerpt or review-comment chips | M | P1 |
+| File attachments, big pastes | Up to 100 files at 50 MiB each; pastes of 32 KiB or more become files (`chat/composerAttachmentFiles.ts`) | Same, with `type: "file"` | Done (`thread_chat/src/attachments.rs`): any file, dropped, picked or pasted, up to 100 at 50 MiB (or the server's limit), as tiles with progress, Retry and remove, and chips on sent messages; pastes of 32 KiB or more go as `pasted-text.txt` (`mod+shift+v` pastes text). No image or file context records | — | P1 |
+| @-mentions and context chips | `@` for files, folders and threads, and `#` for PRs; terminal excerpts and review comments show as inline chips (`chat/useComposerMenuItems.ts`, `components/ContextChip.tsx`) | `projects.searchEntries` (needs `filesystem:read`), `pullRequests.list`; `message.dispatch.context` | Done: `@` and `#` with chips (`thread_chat/src/mentions.rs`; files on this machine through Zed's fuzzy matcher, `projects.searchEntries` when T3's folders are elsewhere), and terminal-excerpt and review-comment chips (`composer.rs`, through `AddComposerContext`), sent as T3's context records and kept in drafts | — | P1 |
 | Slash commands, skills | A `/` menu and `$skill`. T3's own commands are `/model`, `/plan` and `/default`; providers add `/compact` and `/goal` (`chat/ComposerCommandMenu.tsx`, `providerSkillSearch.ts`) | Skills and commands in `server.getConfig` providers; `message.dispatch` | Done (`thread_chat/src/slash_commands.rs`) | — | P1 |
 | Drafts kept per thread | Drafts survive closing and reloading (`composerDraftStore.ts`) | Local | Done (`composer.rs`): per thread, and across restarts in Zed's key-value store | — | P1: PLAN's "drafts are never lost" |
 | Recall a sent prompt | ArrowUp in an empty composer (`chat/composerPromptHistory.ts`) | Local | Done (`composer.rs`) | — | P1 |
@@ -107,8 +113,8 @@ groups what's left into four packages.
 | Promote or cancel queued | "Up next" list (`chat/QueuedRunsControl.tsx`) | `queued-message.promote-to-steer`, `queued-run.cancel` | Done (`composer.rs` `render_queue`) | — | P0 |
 | Resume | Resume in an empty composer restarts a held queue or continues an interrupted or limited turn (`chat/useComposerResume.ts`) | `queue.resume`; `message.dispatch` with `manualContinuationOfRunId` | Done (`composer.rs`) | — | P0 |
 | Edit a queued message | Pencil opens it in the composer (`chat/queuedMessageEdit.ts`) | `queued-run.edit` | Done (`composer.rs`) | — | P1 |
-| Reorder the queue | Drag handle | `queued-run.reorder` | Missing | S | P2 |
-| Send a queued message now | "Send now" on a queued message | `queued-run.start` *(0.1.3)* | Missing: unblocked by the 0.1.3 pin | S | P2 |
+| Reorder the queue | Drag handle | `queued-run.reorder` | Done (`composer.rs`): drag and arrows, when the agent's session takes queued messages | — | P2 |
+| Send a queued message now | "Send now" on a queued message | `queued-run.start` *(0.1.3)* | Done (`composer.rs`): while nothing runs, on 0.1.3 or later (hidden on older servers) | — | P2 |
 | Usage-limit recovery | Resume at reset, or snooze until reset (`chat/UsageLimitRecoveryBanner.tsx`) | `thread.metadata.update` `{limitRecovery}`, `thread.snooze`; shell `usageLimitResetAt` | Done (`thread_chat/src/usage.rs`): Resume at reset, Snooze until reset, and Resume now | — | P1 |
 | Worktree setup progress, retry | Setup card with retry and cancel (`chat/WorktreeSetupCard.tsx`) | `subscribeWorktreeSetup`, `prepared-run.retry`, `worktreeSetup.cancel` | Done (`thread_chat/src/worktree_setup.rs`): the card above the timeline with stages, the script's last lines, Details, Cancel, and Retry for a failed preparation. No Open terminal or Work locally | — | P1 |
 
@@ -118,7 +124,7 @@ groups what's left into four packages.
 |---|---|---|---|---|---|
 | Approve, approve for session, decline | Inline approval panel (`chat/ComposerPendingApprovalPanel.tsx`) | `runtime-request.respond` `{decision}` | Done (`composer.rs` `render_pending`) | — | P0 |
 | Answer questions | Options plus free text; dismiss (`chat/ComposerPendingUserInputPanel.tsx`) | `runtime-request.respond` `{answers}`, `thread.user-input.dismiss` | Done (`composer.rs`) | — | P0 |
-| Decline with feedback | Typing a reply declines a Claude approval and tells the agent why | `runtime-request.respond` `{feedback}` *(0.1.3)* | Missing: unblocked by the 0.1.3 pin, which adds `feedback`, with `supportsFeedback` on the request (0.1.1 has neither) | S | P1 |
+| Decline with feedback | Typing a reply declines a Claude approval and tells the agent why | `runtime-request.respond` `{feedback}` *(0.1.3)* | Done (`composer.rs`): Decline with feedback when the request `supportsFeedback`; older servers queue the reply as before | — | P1 |
 | Secret requests | The agent asks for a token; a masked input answers it (`chat/SecretRequestCard.tsx`) | `secrets.answerRequest` | Done (`timeline.rs` card, `composer.rs`) | — | P1: the agent waits until it's answered |
 | Attachments in answers | `questionAttachments.ts` | `runtime-request.respond.attachmentsByQuestionId` | Missing | S | P2 |
 | MCP elicitation | Request kinds `mcp-elicitation` and `permission` | `runtime-request.respond` | Partial: the generic approval card | S | P2 |
@@ -132,9 +138,9 @@ groups what's left into four packages.
 | Images in messages | Thumbnails and a zoom dialog for attachments and tool screenshots (`chat/ZoomableImage.tsx`, `chat/ExpandedImageDialog.tsx`) | `assets.createUrl`, then `GET /api/assets/*` | Done (`attachments.rs`, `timeline.rs`) | — | P0 (goes with attachments) |
 | Live command output | Output streams while a command runs (`chat/CommandOutputPanel.tsx`) | `orchestration.subscribeCommandOutput` | Done (`timeline.rs`, while expanded) | — | P1 |
 | Copy a message or code block | `chat/MessageCopyButton.tsx` | — | Done (`timeline.rs`) | — | P1 |
-| Find in thread | `mod+F` (`chat/ThreadFindBar.tsx`) | `orchestration.searchThread` | Missing | S | P1 |
+| Find in thread | `mod+F` (`chat/ThreadFindBar.tsx`) | `orchestration.searchThread` | Done (`thread_chat/src/find_bar.rs`): `mod+f` opens Zed's search bar over the thread, with T3's matches across the whole history highlighted, or what's loaded on servers without the call. It doesn't scroll inside a long message to its match, and a message-search match in the sidebar doesn't open it | S (the rest) | P1 |
 | Subagents | The subagent bar in a child ("Open parent") and the parent's lineage list, to open or stop a child (`chat/ProviderSubagentBar.tsx`, `chat/ThreadRelationshipsControl.tsx`) | On 0.1.1: shell `lineage` (`parentThreadId`, `rootThreadId`, `relationshipToParent: subagent`), the subagent item's `childThreadId`, `subagent.stop` `{runId, subagentId}`. *(0.1.3)* adds `orchestration.getThreadFamily` | Done (`thread_chat/src/family_bar.rs`): Open parent in a child; a parent's children with Open and Stop, from `getThreadFamily` merged behind the shell's `lineage`, or the `lineage` alone on 0.1.1 | — | P0: user's must-have |
-| "New since last visit" | Visit watermark (`chat/ThreadVisitWatermark.tsx`) | `thread.visit` | Partial: visits are recorded (`sidebar.rs`); no watermark in the timeline | S | P1 |
+| "New since last visit" | Visit watermark (`chat/ThreadVisitWatermark.tsx`) | `thread.visit` | Done (`sidebar.rs` records visits; `timeline.rs` draws the line above what began after the last one) | — | P1 |
 | Markdown extras | Mermaid, math, tables, file links that open the file (`chat/MarkdownMermaidCodeBlock.tsx`, `chat/MarkdownFileLink.tsx`) | — | Partial: Zed markdown; file links don't open in mustr | M | P2 |
 | Inline charts, HTML renders | `chat/HtmlRenderFrame.tsx` (agents' `html_render`, `html_preview`) | `assets.createUrl` | Missing | M | P2: mustr has no HTML engine; open in the system browser |
 | Minimap, history paging | `chat/TimelineMinimap.tsx`; history pages | `GET /api/orchestration/threads/:id/history` | Partial: bounded snapshot, no minimap | M | P2 |
@@ -155,7 +161,7 @@ groups what's left into four packages.
 |---|---|---|---|---|---|
 | Whole-thread changes | Branch vs. base, uncommitted included (`components/DiffPanel.tsx`) | `review.getDiffPreview`, `orchestration.getFullThreadDiff` | Done: local git when the worktree is here (`mustr/src/worktree_git.rs`, `mustr/src/agent_review.rs`) | — | P0 |
 | Per-turn diff | Turn picker in the diff panel | `orchestration.getTurnDiff` | Done (`agent_review.rs`) | — | P0 |
-| Diff comments to the agent | Review comments become composer chips (`reviewCommentContext.ts`) | `message.dispatch` (`context`: review-comment) | Done: batched as text (`agent_review.rs`); chips are §2.4 | — | P0 |
+| Diff comments to the agent | Review comments become composer chips (`reviewCommentContext.ts`) | `message.dispatch` (`context`: review-comment) | Done (`agent_review.rs`): Send to agent sends T3's review-comment records, one per comment | — | P0 |
 | Diff from the thread | The chat header toggles the diff panel (`chat/ChatHeader.tsx`) | — | Done (`mustr/src/thread_toolbar.rs`: Review changes) | — | P0 |
 | Open the worktree in mustr's editor | T3 has a file tree, file picker, content search and editable file viewer (`components/files/`) | `projects.listEntries`, `searchEntries`, `searchContents`, `readFile`, `writeFile` | Done (`mustr/src/worktrees.rs`): Open adds the worktree to the window's project and shows the file finder | — | P1 |
 | Uncommitted-only diff | Diff panel source `working-tree`, besides branch and turn (`diffPanelStore.ts`) | `review.getDiffPreview` | Partial: folded into Changes | S | P2 |
@@ -176,7 +182,7 @@ groups what's left into four packages.
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
 | Commit, push, create PR | One control for commit, push and PR, with progress. T3 writes the commit message and PR text, and links the PR to the thread (`components/GitActionsControl.tsx`) | `git.runStackedAction` (stream; `commit`, `push`, `create_pr`, `commit_push`, `commit_push_pr`), `subscribeVcsStatus` | Done (`mustr/src/thread_git.rs`): Commit ▾ in the thread toolbar and the agent review header | — | P0 |
-| The thread's PR | PR chip with checks in the header and sidebar (`components/ThreadStatusIndicators.tsx`, `chat/ThreadDetailsPrRow.tsx`) | Shell `linkedPullRequest`, `branchPullRequest`; `pullRequests.summary`, `pullRequests.checks` | Done (`mustr/src/thread_toolbar.rs`): opens mustr's review. Sidebar rows show no PR chip | — | P0 (with the row above) |
+| The thread's PR | PR chip with checks in the header and sidebar (`components/ThreadStatusIndicators.tsx`, `chat/ThreadDetailsPrRow.tsx`) | Shell `linkedPullRequest`, `branchPullRequest`; `pullRequests.summary`, `pullRequests.checks` | Done (`mustr/src/thread_toolbar.rs`): opens mustr's review; sidebar rows show a PR chip (`sidebar.rs`) | — | P0 (with the row above) |
 | Link or unlink a PR | `pullRequest/LinkPullRequestDialog.tsx` | `thread.pull-request.link`, `thread.pull-request.unlink` | Done (`thread_toolbar.rs`) | — | P0: user's must-have |
 | Watch a PR | The agent reacts to CI and comments | `thread.pull-request.watch` | Done (`thread_toolbar.rs`) | — | P0: user's must-have |
 | A PR's threads | `pullRequest/PullRequestThreadLinks.tsx` | `pullRequests.linkedThreads` | Done (`mustr/src/pull_request_review.rs`): Threads in the PR review header, opening each | — | P1 |
@@ -192,7 +198,7 @@ groups what's left into four packages.
 |---|---|---|---|---|---|
 | Open in editor | Cursor, VS Code, Zed and others for the thread's folder (`chat/OpenInPicker.tsx`) | `shell.openInEditor`; editors from `server.getConfig` | Done (`thread_git.rs`: Open in ▾ in the thread toolbar and the agent review header, `mod+o`) | — | P0: the way out for anything mustr lacks |
 | Terminal per thread | A drawer in the thread's worktree that stays open (`components/ThreadTerminalDrawer.tsx`, `components/PersistentThreadTerminals.tsx`) | `terminal.open/attach/write/resize/close`, `subscribeTerminalEvents` (`terminal:*` scopes) | Done (`mustr/src/terminal_panel.rs`, `remote_terminal.rs`): Zed terminals in the thread's worktree, kept per thread, `mod+j`; on a T3 on another machine, T3's terminals (`terminal.attach`, `write`, `resize`, `close`) in the same panel, found again while T3 runs them. No mouse reports to full-screen programs | — | P0: user's must-have |
-| Terminal excerpt to the composer | `chat/TerminalContextInlineChip.tsx` | `message.dispatch.context` (terminal) | Done (`terminal_panel.rs`): Add to chat on a selection (`mod+>`) dispatches T3's terminal record; the composer's chip is WP12's | — | P2 |
+| Terminal excerpt to the composer | `chat/TerminalContextInlineChip.tsx` | `message.dispatch.context` (terminal) | Done (`terminal_panel.rs`): Add to chat on a selection (`mod+>`) adds T3's terminal record to the thread's composer as a chip | — | P2 |
 
 ### 2.13 Preview browser and devices
 
@@ -217,16 +223,16 @@ groups what's left into four packages.
 |---|---|---|---|---|---|
 | Sections: pinned, active, snoozed, settled | One list in sections Pinned, Active, Working (beta), Snoozed and Settled, with status pills and unread dots (`components/Sidebar.tsx`, `sidebar/SidebarThreadRow.tsx`) | Shell `settledAt`, `settledOverride`, `pinnedAt`, `snoozedUntil`, `lastVisitedAt`; `orchestration.getOlderSettledThreads` *(0.1.3)* | Done (`thread_chat/src/sidebar.rs`): T3's sections, orders and status pills, without the beta Working section | — | P0 |
 | Project filter or grouping | "Filter by project"; grouping by project is an option (`components/LegacySidebar.tsx`, Settings → General → Sidebar) | Shell `projectId` | Done (`sidebar.rs`, `organize.rs`): Filter by project. No grouping | — | P1 |
-| Settle, un-settle | Settle from the menu or `mod+shift+s`, which then moves to the next unsettled thread (`settleAndAdvance.ts`); auto-settle per thread | `thread.settle`, `thread.unsettle`, `thread.auto-settle.set` | Done (`thread_chat/src/organize.rs`): menu, row button, palette, and `mod+shift+s` settle-and-advance. No per-thread auto-settle | — | P0 |
-| Archive | Thread menu; archived list in Settings (`settings/ArchivedThreadsPanel.tsx`) | `thread.archive`, `thread.unarchive`, `orchestration.subscribeArchivedShell` | Done (`organize.rs`): archive with Undo, offering to remove the worktree. No archived list | S (the list) | P0 (archive) / P2 (archived list) |
-| Pin and reorder | Pinned threads stay on top | `thread.pin`, `thread.unpin`, `thread.pin.reorder`, `thread.active.reorder` | Partial: pin and unpin (`organize.rs`); no reordering | S | P1 |
+| Settle, un-settle | Settle from the menu or `mod+shift+s`, which then moves to the next unsettled thread (`settleAndAdvance.ts`); auto-settle per thread | `thread.settle`, `thread.unsettle`, `thread.auto-settle.set` | Done (`thread_chat/src/organize.rs`): menu, row button, palette, and `mod+shift+s` settle-and-advance; per-thread Auto-Settle in the thread menu | — | P0 |
+| Archive | Thread menu; archived list in Settings (`settings/ArchivedThreadsPanel.tsx`) | `thread.archive`, `thread.unarchive`, `orchestration.subscribeArchivedShell` | Done (`organize.rs`): archive with Undo, offering to remove the worktree; the archived list, to unarchive, from the sidebar's header and the palette | — | P0 (archive) / P2 (archived list) |
+| Pin and reorder | Pinned threads stay on top | `thread.pin`, `thread.unpin`, `thread.pin.reorder`, `thread.active.reorder` | Done (`organize.rs`, `sidebar.rs`): pin and unpin, and dragging rows to reorder Pinned and Active with T3's order keys | — | P1 |
 | Unread | Dots for new activity; mark unread | `thread.visit`, `thread.mark-unread`; shell `lastVisitedAt` | Done (`sidebar.rs`, `organize.rs`): unread titles are bold; Mark Unread | — | P1 |
-| Search threads | `mod+K` by title, branch, PR or project, then message matches (`components/CommandPaletteThreadItems.tsx`) | Local filter, then `orchestration.searchThreads` | Partial: the sidebar's search (`mod+alt+k`) by title, branch, project or PR (`sidebar.rs`); no message matches | S | P1 |
-| Snooze, wake | `components/CustomSnoozeDialog.tsx` | `thread.snooze`, `thread.unsnooze` | Missing: snoozed threads are listed, but can't be snoozed or woken | S | P2 |
-| Delete; bulk select; drag to settle | `components/Sidebar.drag.ts`, `threadSelectionStore.ts` | `thread.delete` and the commands above | Missing | M | P2 |
-| Undo | `mod+z` undoes settle, unpin, snooze and archive for 5 seconds (`hooks/threadUndo.ts`) | The inverse commands | Partial: archive only (`organize.rs`) | S | P2 |
+| Search threads | `mod+K` by title, branch, PR or project, then message matches (`components/CommandPaletteThreadItems.tsx`) | Local filter, then `orchestration.searchThreads` | Done (`sidebar.rs`): the sidebar's search (`mod+alt+k`) by title, branch, project or PR, then message matches (`orchestration.searchThreads`, one search at a time) with the snippet, a subagent's on its parent's row; title matches alone on servers without the call | — | P1 |
+| Snooze, wake | `components/CustomSnoozeDialog.tsx` | `thread.snooze`, `thread.unsnooze` | Done (`organize.rs`, `thread_chat/src/snooze.rs`): T3's presets, the custom dialog (a date and time, or a duration), and Wake | — | P2 |
+| Delete; bulk select; drag to settle | `components/Sidebar.drag.ts`, `threadSelectionStore.ts` | `thread.delete` and the commands above | Partial: a row dragged onto a section pins, unpins, settles, un-settles or wakes it (`sidebar.rs`). No delete or bulk select | M | P2 |
+| Undo | `mod+z` undoes settle, unpin, snooze and archive for 5 seconds (`hooks/threadUndo.ts`) | The inverse commands | Done (`organize.rs`): a toast and `mod+z` for 5 seconds, with T3's undo plans | — | P2 |
 | Hover card, details panel | `components/ThreadHoverCard.tsx`, `chat/ThreadDetailsPanel.tsx` | — | Missing | S | P2 |
-| Copy branch, path, thread ID, PR link | Thread menu and palette (`components/threadActionMenu.logic.ts`) | — | Done (`organize.rs`): path, branch and thread ID. No PR link | — | P2 |
+| Copy branch, path, thread ID, PR link | Thread menu and palette (`components/threadActionMenu.logic.ts`) | — | Done (`organize.rs`): path, branch, thread ID and PR link | — | P2 |
 
 ### 2.16 Notifications
 
@@ -240,7 +246,7 @@ groups what's left into four packages.
 
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
-| Thread and composer keys | Model `mod+shift+m`, effort `mod+shift+e`, access `mod+shift+a`, workspace `mod+shift+x`, branch `mod+shift+g`; previous and next thread `mod+shift+[` and `]`; diff `mod+d`; open in editor `mod+o` (`packages/shared/src/keybindings.ts`) | Local; `server.upsertKeybinding` for T3's own store | Done: send, queue, steer, model, effort, access, settle, search (`mod+alt+k`), terminal (`mod+j`) (`thread_chat/src/thread_chat.rs` `key_bindings`, `mustr/src/terminal_panel.rs`); diff (`mod+d`), open in editor (`mod+o`) and branch (`mod+shift+g`) (`mustr/src/thread_toolbar.rs`); workspace (`mod+shift+x`), previous and next thread (`mod+shift+[` and `]`) and the previous worktree (`mod+shift+l`) (`thread_chat/src/sidebar.rs`) | — | P1: mustr uses Zed's `keymap.json`, so no sync with T3 |
+| Thread and composer keys | Model `mod+shift+m`, effort `mod+shift+e`, access `mod+shift+a`, workspace `mod+shift+x`, branch `mod+shift+g`; previous and next thread `mod+shift+[` and `]`; diff `mod+d`; open in editor `mod+o` (`packages/shared/src/keybindings.ts`) | Local; `server.upsertKeybinding` for T3's own store | Done: send, queue, steer, model, effort, access, settle, search (`mod+alt+k`), terminal (`mod+j`) (`thread_chat/src/thread_chat.rs` `key_bindings`, `mustr/src/terminal_panel.rs`); diff (`mod+d`), open in editor (`mod+o`) and branch (`mod+shift+g`) (`mustr/src/thread_toolbar.rs`); workspace (`mod+shift+x`), previous and next thread (`mod+shift+[` and `]`) and the previous worktree (`mod+shift+l`) (`thread_chat/src/sidebar.rs`); find (`mod+f`, `find_bar.rs`) and undo (`mod+z`, `organize.rs`) | — | P1: mustr uses Zed's `keymap.json`, so no sync with T3 |
 | Command palette | Thread actions, new thread in…, settle, usage | — | Partial: thread actions (settle, archive, pin, rename, compact, restart, usage), terminals, worktrees and schedules are in Zed's palette. Review changes, Open in, the branch picker, Commit push and PR, and Link PR are too, on the open thread (`thread_toolbar.rs`) | — | P1 |
 | T3 settings | Thread defaults, auto-settle rules, follow-up behavior, branch naming (`settings/SettingsPanels.tsx`) | `server.getSettings` (or `server.getConfig`), `server.updateSettings` (`settings:write`) | Done (`mustr/src/t3_settings.rs`): new threads' model, permissions, workspace and remote start; auto-settle; branch naming. Follow-up behavior is a setting of T3's app, so mustr keeps its own (`thread_settings.rs`) | — | P1 |
 | Install and sign in to agents | Install CLIs, log in (`settings/ProviderSetupSection.tsx`, `settings/ProviderAuthTerminal.tsx`, `onboarding/`) | `provider.install.*`, `provider.auth.*` (`providers:manage`) | Done (`mustr/src/agent_setup.rs`): install, update and remove T3's own Codex and Antigravity, sign in and out (browser, device code, terminal, credentials), T3's install and sign-in commands for agents on their own CLI, "Let T3 Code install Codex", Turn on, Check again. The sign-in terminal shows plain text with a line to type in | — | P1: CLI logins live on disk and are shared |
@@ -274,21 +280,20 @@ mustr uses 0.1.1's data on servers without it:
   opts in later. A 0.1.1 server answers "Unknown request tag", and the bar uses the shell alone.
 - **Other 0.1.3-only calls:** for shared worktrees, mustr matches `worktreePath` across the shell's
   threads instead of calling `getWorktreeThreadIds`. `getOlderSettledThreads` isn't needed, since
-  a shell without `omitOlderSettled` has every thread. Two rows waited for the pin and can be built
-  now: Decline with feedback (P1: `runtime-request.respond` `{feedback}`, when the request's
-  `responseCapability` says `supportsFeedback`) and Send now (P2: `queued-run.start`). Both need a
-  fallback on 0.1.1: hide Decline with feedback when `supportsFeedback` is absent, and Send now when
-  the server rejects the command.
-- **Already there for wave 3:** `terminal.*`, `subscribeWorktreeSetup`,
+  a shell without `omitOlderSettled` has every thread. Two rows waited for the pin, and wave 3
+  built both with their fallbacks: Decline with feedback (`runtime-request.respond` `{feedback}`)
+  shows only when the request says `supportsFeedback`, which 0.1.1 never sends, and Send now
+  (`queued-run.start`) only on servers of 0.1.3 or later (`server.getConfig`'s version).
+- **Wave 3's calls in 0.1.1:** `terminal.*`, `subscribeWorktreeSetup`,
   `pullRequests.linkedThreads`, `orchestration.searchThread` and `searchThreads`,
   `provider.install.*`, `provider.auth.*`, `server.updateSettings`, and the `thread.snooze`,
   `thread.pin.reorder`, `thread.active.reorder`, `thread.auto-settle.set`, `queued-run.reorder` and
   `prepared-run.retry` commands are all in 0.1.1 (`t3_api/src/generated/methods.rs`, `tagged.rs`).
 
 **Counts** (125 rows):
-- **P0:** 41. 40 are done and 1 is partial (terminals for threads on another machine).
-- **P1:** 33. 20 are done, 6 partial and 7 missing.
-- **P2:** 38. 2 are done, 8 partial and 28 missing.
+- **P0:** 41, all done.
+- **P1:** 33. 32 are done and 1 is partial (the command palette).
+- **P2:** 38. 8 are done, 9 partial and 21 missing.
 - **Skip:** 11.
 - **No priority:** 2 done rows.
 
@@ -300,10 +305,10 @@ mustr uses 0.1.1's data on servers without it:
 
 ## 3. Build order
 
-### Landed: WP0–WP10
+### Landed: WP0–WP14
 
-Each package owned its files, and a short WP0 added the seams that kept them apart. All are merged
-into `m3/next`.
+Each package owned its files, and a short seams change before each wave kept them apart. All are
+merged into `m3/next`.
 
 - **WP0, seams:** split `ThreadView` into `thread_view.rs`, `timeline.rs`, `composer.rs` and
   `header.rs`; `ThreadBackend::call_raw` and `upload`; empty settings and family bars; the thread
@@ -333,91 +338,51 @@ into `m3/next`.
 - **WP10, history, agent status and usage** (`history.rs`, `usage.rs`): Edit from here, Fork,
   Compact context, Restart agent session, the provider banner, usage limits and limit recovery.
 
-### Wave 3: what's left
+### Landed: wave 3
 
-Four packages, ordered by their value to the user, each about two weeks for one agent. They hold
-every open P0 and P1 row, the known polish items, and the P2 rows that fit their files. The rules
-from wave 1 still hold:
-- Write through the installed backend or connection, so `MUSTR_DRY_RUN_WRITES` still refuses
-  writes.
-- Assert exact payloads with the recording backends.
-- Each package owns its files. A short seams change lands first, so no two packages edit the same
-  file.
+- **Wave 3 seams:** the `terminal:*`, `settings:write` and `providers:manage` scopes with their
+  `Access` levels, `AddComposerContext`, and the empty `worktree_setup.rs` and `find_bar.rs`.
+- **WP11, terminals, worktrees and the PR flow** (`terminal_panel.rs`, `remote_terminal.rs`,
+  `worktree_setup.rs`, `thread_toolbar.rs`, `pull_request_review.rs`): T3's terminals for threads
+  on another machine, the worktree setup card with Cancel and Retry, a PR's threads, the toolbar's
+  keys and palette entries, a terminal's selection to the composer, and project scripts.
+- **WP12, composer and timeline** (`composer.rs`, `attachments.rs`, `timeline.rs`, `find_bar.rs`,
+  `agent_review.rs`): file attachments and big pastes, terminal and review-comment chips, review
+  comments as T3's records, find in thread, the visit line, decline with feedback, asking before
+  restarting a working agent, reordering the queue, Send now, and the goal line.
+- **WP13, thread list and navigation** (`sidebar.rs`, `organize.rs`, `snooze.rs`): dragging to
+  reorder, pin, settle and wake, message matches in the search, the list's keys, snooze and wake,
+  per-thread auto-settle, Undo, the archived list, the PR chip on rows, and Copy PR Link.
+- **WP14, agent setup and T3's settings** (`agent_setup.rs`, `t3_settings.rs`, `home.rs`,
+  `projects.rs`): the agents page (install, update, sign in and out), the T3 Code settings page,
+  "already a project", and custom models.
+- **Fit at 2x on a MacBook** (`mustr_ui/src/overflow.rs` and the views): at the default size (26)
+  in 1512x982, 1470x956 and half-screen 756x982 windows, toolbars and headers put what doesn't fit
+  into a "…" menu or onto another line, the sidebar takes a third of the window and stays out of a
+  half-screen one, the terminal panel opens at most 40% high, and the title bar, status bar, pages
+  and dialogs narrow with the window. The zoom scales a terminal's own font size too.
 
-**Seams** (S, one agent, lands first)
-- Add `terminal:read`, `terminal:operate`, `settings:write` and `providers:manage` to `SCOPES`
-  (`mustr/src/t3_connection.rs`), with matching `Access` levels in `thread_chat/src/backend.rs` and
-  `mustr/src/thread_backend.rs`. Dry runs refuse the writes, and dry-run pairings still ask only for
-  `orchestration:read`.
-- Add `thread_chat::AddComposerContext { thread_id, context }` to `thread_chat/src/actions.rs`: a
-  terminal excerpt or review comment, as T3's `composerContext` record. WP12's composer handles it;
-  WP11's terminal panel and WP12's agent review dispatch it.
-- Add empty `thread_chat/src/worktree_setup.rs` (`WorktreeSetupCard`, rendered above the timeline,
-  WP11) and `thread_chat/src/find_bar.rs` (returned by `ThreadView::as_searchable`, WP12), so
-  `thread_view.rs` isn't edited again.
-- Add WP11–WP14 label lines in `thread_chat/src/thread_chat.rs` (`mod`, `init`, `key_bindings`)
-  and `mustr/src/main.rs`.
+### What's left
 
-**WP11: Terminals, worktrees and the PR flow** (about 2.5 weeks; the user's must-haves)
-- **Rows:** Terminal per thread, for threads on another machine (P0); Worktree setup progress and
-  retry (P1); A PR's threads (P1); the toolbar's keys and palette entries (P1, part of the keys and
-  palette rows: `mod+d` Review changes, `mod+o` Open in, `mod+shift+g` the branch picker, and
-  palette actions on the active thread for those and for Commit, push and PR and Link PR);
-  Terminal excerpt to the composer (P2: a terminal's selection dispatches `AddComposerContext`);
-  and Project scripts (P2: `t3.json`'s scripts in the thread's terminal).
-- **Owns:** `mustr/src/terminal_panel.rs`, a new `mustr/src/remote_terminal.rs` (T3's terminal
-  stream into Zed's display-only `Terminal`, with keystrokes sent back), `mustr/src/worktrees.rs`,
-  `mustr/src/thread_toolbar.rs`, `mustr/src/thread_git.rs`, `mustr/src/pull_request_review.rs`, and
-  `thread_chat/src/worktree_setup.rs`.
-- **RPCs:** `terminal.open`, `attach`, `write`, `resize`, `close` and `subscribeTerminalEvents`
-  (`terminal:*`); `subscribeWorktreeSetup`, `prepared-run.retry` and `worktreeSetup.cancel`;
-  `pullRequests.linkedThreads`.
+No P0 is open, and one P1 is partial. What the wave-3 packages left in their rows:
+- **Find in thread** (P1): it doesn't scroll inside a long message to its match, and a
+  message-search match in the sidebar doesn't open the thread's find (`find_bar.rs`, `sidebar.rs`).
+- **Command palette** (P1): T3's "new thread in…" isn't in Zed's palette.
+- **Composer context:** image and file context records; the composer sends terminal and
+  review-comment records, and images and files as attachments.
+- **Remote terminals:** mouse clicks and reports to full-screen programs, and input-method text
+  (`remote_terminal.rs`).
+- **Worktree setup card:** Open terminal and Work locally (`worktree_setup.rs`).
+- **Project scripts** (P2): editing and importing scripts, `runOnSettle`, and previews.
+- **Models** (P2): model visibility in the pickers, and per-model options for custom models.
+- **Project settings** (P2): a panel for a project's defaults, scripts and icon.
+- **Zoom:** Zed's own command palette is 34 rems wide, so at 26 it's wider than a half-screen
+  window and clipped at both sides (Zed's file, so not changed). Setting `ui_font_size` alone in the
+  settings file leaves code and terminals at `buffer_font_size` (26); the zoom keys change both.
 
-**WP12: Composer and timeline** (about 2 weeks)
-- **Rows:** File attachments and big pastes (P1); the terminal and review-comment chips of the
-  @-mentions row (P1), including the agent review's Send to agent sending its comments as
-  `review-comment` context instead of text; Find in thread (P1); "New since last visit" (P1);
-  Decline with feedback (P1, unblocked by the 0.1.3 pin); asking before Restart agent session while the
-  agent runs (polish on a done P1 row); Reorder the queue (P2); and the goal line (P2).
-- **Owns:** `thread_chat/src/composer.rs`, `attachments.rs`, `mentions.rs`, `timeline.rs`,
-  `model.rs`, `commands.rs`, `history.rs` and `find_bar.rs`; `mustr/src/agent_review.rs` and
-  `review/src/agent.rs`.
-- **RPCs:** `attachments.createUploadUrl` with `type: "file"`; `message.dispatch.context`
-  (`terminal`, `review-comment`); `orchestration.searchThread`; `queued-run.reorder`;
-  `runtime-request.respond` `{feedback}` *(0.1.3)*.
-
-**WP13: Thread list and navigation** (about 2 weeks)
-- **Rows:** Pin and reorder by dragging (P1); message matches in Search threads (P1); the list's
-  keys (P1, part of the keys row: previous and next thread `mod+shift+[` and `]`, the workspace
-  picker `mod+shift+x`, and `mod+shift+l` for the previous worktree); Snooze and wake (P2);
-  per-thread auto-settle (polish on the done P0 settle row); Undo for settle, unpin and snooze
-  (P2); the archived list (P2); and Copy PR link and a PR chip on sidebar rows (P2).
-- **Owns:** `thread_chat/src/sidebar.rs`, `organize.rs`, `new_thread.rs`, and a new
-  `thread_chat/src/snooze.rs` (the custom snooze dialog).
-- **RPCs:** `thread.pin.reorder`, `thread.active.reorder`, `orchestration.searchThreads`,
-  `thread.snooze`, `thread.unsnooze`, `thread.auto-settle.set`, and
-  `orchestration.getArchivedShellSnapshot` with `thread.unarchive`.
-
-**WP14: Agent setup and T3's settings** (about 2 weeks)
-- **Rows:** Install and sign in to agents (P1), with Set up buttons on Home's "no agent can run"
-  notice and the provider banner; T3 settings (P1: thread defaults, auto-settle rules, follow-up
-  behavior, branch naming); a plain message when the folder is already a project (polish on the
-  done P0 row: T3 returns `ProjectMutationError` caused by `ProjectConflictError`); Custom models
-  and model visibility (P2); and Project settings (P2).
-- **Owns:** a new `mustr/src/agent_setup.rs` and a new `mustr/src/t3_settings.rs` (pages with rail
-  entries through the registry), `mustr/src/home.rs`, `thread_chat/src/projects.rs`,
-  `thread_chat/src/usage.rs`, and `thread_chat/src/thread_settings.rs`.
-- **RPCs:** `provider.install.start`, `subscribe`, `cancel` and `remove`; `provider.auth.start`,
-  `subscribe`, `respond`, `complete`, `cancel` and `logout` (`providers:manage`);
-  `server.refreshProviders`; `server.getSettings` and `server.updateSettings` (`settings:write`);
-  `projects.mutate` `{project.update}`.
-
-**The pin.** `t3_client/T3_VERSION` moved to 0.1.3 on 2026-10-28 (`script/mustr-sync-t3`), with
-the family bar on `getThreadFamily`. It unlocks Decline with feedback and Send now.
-
-**Later (P2, not in wave 3):** several environments and remote access; start in background and
+**Later (P2):** several environments and remote access; start in background and
 one prompt for several models; cloning repos; prompt stash, quoting a response and rich Markdown;
-Send now; attachments in answers and MCP elicitation; Markdown file links, inline charts and the
+attachments in answers and MCP elicitation; Markdown file links, inline charts and the
 minimap; merge back and provider handoff; the uncommitted-only diff and worktree handoff; review
 guides, reviewers and labels, and source control accounts; the preview browser and local dev
 servers; outside agents; delete and bulk select; hover cards; the usage dashboard and provider
