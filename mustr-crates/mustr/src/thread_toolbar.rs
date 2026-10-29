@@ -7,7 +7,8 @@
 //!   `pullRequests.checks`). Clicking it opens mustr's review of it; its menu links, unlinks,
 //!   and watches pull requests (`thread.pull-request.link`, `unlink`, `watch`).
 //! - The thread's local dev servers (`local_servers.rs`), each opening in the system browser.
-//! - **Merge back**, on a fork (`thread_handoff.rs`).
+//! - **Merge back**, on a fork, and **Hand off ▾** to another agent, with the handoff the next
+//!   message makes (`thread_handoff.rs`).
 //! - **Review changes** (handles `thread_chat::ReviewThreadChanges`), **Terminal** (dispatches
 //!   `thread_chat::OpenThreadTerminal`, which the terminal panel handles), **Open in ▾** (handles
 //!   `thread_chat::OpenInEditor`), and **Commit ▾**, with a row of a running action's steps.
@@ -30,7 +31,7 @@ use crate::{
         BranchPickerDelegate, ControlsParts, ControlsPlacement, Editors, GitProgressRow, MenuSlot,
         ThreadGit, ThreadGitControls, editor_label, menu_position,
     },
-    thread_handoff::MergeBack,
+    thread_handoff::{self, MergeBack, PendingHandoff},
 };
 use anyhow::{Context as _, Result, anyhow};
 use editor::Editor;
@@ -935,6 +936,8 @@ pub struct ThreadToolbar {
     merging: bool,
     /// T3's local dev servers, once the toolbar shows a thread.
     servers: Option<(Entity<LocalServers>, Subscription)>,
+    /// T3's agents, for Hand off ▾.
+    configs: Option<(Entity<thread_chat::ServerConfigs>, Subscription)>,
     _view: Option<Subscription>,
     _activation: Subscription,
 }
@@ -961,6 +964,7 @@ impl ThreadToolbar {
             hidden: Vec::new(),
             merging: false,
             servers: None,
+            configs: None,
             _view: None,
             _activation: activation,
         }
@@ -1065,8 +1069,85 @@ impl ThreadToolbar {
             let subscription = cx.observe(&servers, |_, _, cx| cx.notify());
             self.servers = Some((servers, subscription));
         }
+        if self.configs.is_none() {
+            let configs = thread_chat::ServerConfigs::global(cx);
+            let subscription = cx.observe(&configs, |_, _, cx| cx.notify());
+            self.configs = Some((configs, subscription));
+        }
         self.location = ToolbarItemLocation::PrimaryLeft;
         self.location
+    }
+
+    /// What Hand off ▾ offers: the agents the thread can go to (none when its agent can't hand
+    /// off, or while it runs), and the handoff its next message makes, if any.
+    fn handoff(
+        &self,
+        cx: &App,
+    ) -> Option<(Vec<thread_chat::AgentChoice>, Option<PendingHandoff>, bool)> {
+        let view = self.view.as_ref()?.upgrade()?;
+        let state = view.read(cx).thread_state()?;
+        let providers = self.configs.as_ref()?.0.read(cx).providers()?;
+        let targets = thread_handoff::handoff_targets(state, providers);
+        let pending = thread_handoff::pending_handoff(state, providers);
+        if targets.is_empty() && pending.is_none() {
+            return None;
+        }
+        let allowed = thread_handoff::supports_handoff(state) && state.active_run().is_none();
+        Some((targets, pending, allowed))
+    }
+
+    fn deploy_handoff_menu(
+        &mut self,
+        event: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(thread), Some((targets, _, allowed))) = (&self.thread, self.handoff(cx)) else {
+            return;
+        };
+        let thread_id = thread.thread_id.clone();
+        let workspace = self.workspace.clone();
+        let menu = ContextMenu::build(window, cx, move |menu, _, _| {
+            handoff_entries(menu, &thread_id, &targets, allowed, &workspace)
+        });
+        self.menu
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
+                &mut this.menu
+            });
+    }
+
+    fn render_handoff(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some((_, pending, allowed)) = self.handoff(cx) else {
+            return div().into_any_element();
+        };
+        match pending {
+            Some(pending) => Chip::new(
+                "thread-handoff",
+                format!("Handoff to {} pending", pending.to),
+            )
+            .accent(true)
+            .menu_indicator(true)
+            .tooltip(format!(
+                "The next message hands the conversation from {} to {}, with a summary of it \
+                     (T3's context handoff)",
+                pending.from, pending.to
+            ))
+            .on_click(
+                cx.listener(|this, event, window, cx| this.deploy_handoff_menu(event, window, cx)),
+            )
+            .into_any_element(),
+            None => TextButton::new("thread-handoff", "Hand off ▾")
+                .disabled(!allowed)
+                .tooltip(if allowed {
+                    "Hand the conversation to another agent: its next message goes there"
+                } else {
+                    "This agent can't hand its conversation to another now"
+                })
+                .on_click(cx.listener(|this, event, window, cx| {
+                    this.deploy_handoff_menu(event, window, cx)
+                }))
+                .into_any_element(),
+        }
     }
 
     /// The thread's local dev servers.
@@ -1320,6 +1401,8 @@ impl ThreadToolbar {
             .flatten();
         let servers = self.local_servers(thread, cx);
         let here = crate::worktrees::worktrees_are_local(cx);
+        let handoff = self.handoff(cx);
+        let workspace = self.workspace.clone();
         let editors = Editors::global(cx).read(cx);
         let available = editors.available().to_vec();
         let preferred = editors.preferred();
@@ -1343,6 +1426,17 @@ impl ThreadToolbar {
                                 )
                             },
                         );
+                    }
+                    OverflowEntry::Handoff => {
+                        if let Some((targets, _, allowed)) = &handoff {
+                            menu = handoff_entries(
+                                menu.separator(),
+                                &thread_id,
+                                targets,
+                                *allowed,
+                                &workspace,
+                            );
+                        }
                     }
                     OverflowEntry::Servers => {
                         for server in &servers {
@@ -1442,6 +1536,7 @@ impl ThreadToolbar {
                 ToolbarItem::ReviewChanges => actions.push(OverflowEntry::ReviewChanges),
                 ToolbarItem::Terminal => actions.push(OverflowEntry::Terminal),
                 ToolbarItem::Servers => actions.push(OverflowEntry::Servers),
+                ToolbarItem::Handoff => actions.push(OverflowEntry::Handoff),
                 ToolbarItem::MergeBack => actions.push(OverflowEntry::MergeBack(
                     !self.merging && merge.is_some_and(|merge| merge.run_id.is_some()),
                 )),
@@ -1637,6 +1732,9 @@ impl ThreadToolbar {
         if !self.local_servers(thread, cx).is_empty() {
             items.push(ToolbarItem::Servers);
         }
+        if self.handoff(cx).is_some() {
+            items.push(ToolbarItem::Handoff);
+        }
         items.push(ToolbarItem::Terminal);
         if git.checkout().is_some() {
             items.push(ToolbarItem::OpenIn);
@@ -1676,6 +1774,7 @@ enum ToolbarItem {
     ReviewChanges,
     MergeBack,
     Servers,
+    Handoff,
     Terminal,
     OpenIn,
     GitAction,
@@ -1692,6 +1791,7 @@ impl ToolbarItem {
             Self::ReviewChanges => "thread-toolbar-review-changes",
             Self::MergeBack => "thread-toolbar-merge-back",
             Self::Servers => "thread-toolbar-servers",
+            Self::Handoff => "thread-toolbar-handoff",
             Self::Terminal => "thread-toolbar-terminal",
             Self::OpenIn => "thread-toolbar-open-in",
             Self::GitAction => "thread-toolbar-git-action",
@@ -1712,6 +1812,7 @@ impl ToolbarItem {
             Self::ReviewChanges => 90,
             Self::MergeBack => 70,
             Self::Servers => 35,
+            Self::Handoff => 15,
             Self::PullRequest => 60,
             Self::Checks => 50,
             Self::GitSummary => 40,
@@ -1732,12 +1833,45 @@ enum OverflowEntry {
     MergeBack(bool),
     /// The thread's local servers.
     Servers,
+    /// Hand off to each agent.
+    Handoff,
     Terminal,
     /// Open in each of T3's editors.
     OpenIn,
     LinkPullRequest,
     /// The pull request menu's entries.
     PullRequest,
+}
+
+/// Hand off ▾'s entries: one per agent the thread can go to.
+fn handoff_entries(
+    mut menu: ContextMenu,
+    thread_id: &str,
+    targets: &[thread_chat::AgentChoice],
+    allowed: bool,
+    workspace: &WeakEntity<Workspace>,
+) -> ContextMenu {
+    if targets.is_empty() {
+        return menu.label("No other agent is set up on T3");
+    }
+    for agent in targets {
+        let thread_id = thread_id.to_string();
+        let agent = agent.clone();
+        let workspace = workspace.clone();
+        menu = menu.item(
+            ContextMenuEntry::new(format!("Hand off to {}", agent.name))
+                .disabled(!allowed)
+                .handler(move |_, cx| {
+                    thread_handoff::hand_off(
+                        thread_id.clone(),
+                        agent.clone(),
+                        workspace.clone(),
+                        cx,
+                    )
+                }),
+        );
+    }
+    menu
 }
 
 /// The checkout's git status, such as "2 changed" or "Up to date", once T3 has sent it.
@@ -1886,6 +2020,7 @@ impl Render for ThreadToolbar {
                         .into_any_element()
                 }
                 ToolbarItem::Servers => self.render_servers(thread, cx),
+                ToolbarItem::Handoff => self.render_handoff(cx),
                 ToolbarItem::MergeBack => match &merge {
                     Some(merge) => self.render_merge_back(merge, cx),
                     None => div().into_any_element(),

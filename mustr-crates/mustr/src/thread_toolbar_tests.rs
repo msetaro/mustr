@@ -583,6 +583,7 @@ fn toolbar_at(
         ToolbarItem::ReviewChanges,
         ToolbarItem::MergeBack,
         ToolbarItem::Servers,
+        ToolbarItem::Handoff,
         ToolbarItem::Terminal,
         ToolbarItem::OpenIn,
         ToolbarItem::GitAction,
