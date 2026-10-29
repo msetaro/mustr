@@ -774,6 +774,14 @@ async fn open_thread<'a>(
     (workspace, view, cx)
 }
 
+/// Opens the subagents drawer from the header's button.
+fn open_drawer(cx: &mut VisualTestContext) {
+    if cx.debug_bounds("subagents-drawer").is_none() {
+        click("thread-subagents-button", cx);
+    }
+    assert!(cx.debug_bounds("subagents-drawer").is_some());
+}
+
 fn click(selector: &'static str, cx: &mut VisualTestContext) {
     let bounds = cx
         .debug_bounds(selector)
@@ -810,6 +818,22 @@ async fn a_parent_opens_and_stops_its_children(cx: &mut TestAppContext) {
     let backend = FakeBackend::new();
     let (workspace, _view, cx) = open_thread(backend.clone(), PARENT, cx).await;
 
+    // The children aren't listed between the header and the timeline: the header's subagents
+    // button opens them in a drawer from the right, with T3's badge and its status dot.
+    assert!(cx.debug_bounds("family-child-child-delegated").is_none());
+    open_drawer(cx);
+    let drawer = cx.debug_bounds("subagents-drawer").unwrap();
+    let header = cx.debug_bounds("thread-subagents-button").unwrap();
+    assert!(drawer.top() >= header.bottom());
+    assert!(drawer.right() >= header.right() - gpui::px(20.));
+    assert!(
+        cx.debug_bounds("family-child-child-delegated-badge-running")
+            .is_some()
+    );
+    assert!(
+        cx.debug_bounds("family-child-child-done-badge-completed")
+            .is_some()
+    );
     // The running children are listed, the first one opens.
     click("family-child-child-delegated", cx);
     assert_eq!(open_thread_ids(&workspace, cx), [PARENT, "child-delegated"]);
@@ -818,6 +842,7 @@ async fn a_parent_opens_and_stops_its_children(cx: &mut TestAppContext) {
         ThreadView::open(PARENT.into(), "Plan".into(), workspace, window, cx);
     });
     cx.run_until_parked();
+    open_drawer(cx);
     click("family-stop-child-native", cx);
     click("family-stop-child-delegated", cx);
     click("family-stop-task-sub-task", cx);
@@ -857,6 +882,7 @@ async fn workflows_show_their_script_and_stop(cx: &mut TestAppContext) {
         "truncated": false
     }));
     let (_workspace, _view, cx) = open_thread(backend.clone(), PARENT, cx).await;
+    open_drawer(cx);
 
     click("family-workflow-script-sub-workflow", cx);
     click("family-workflow-stop-sub-workflow", cx);
@@ -878,11 +904,24 @@ async fn workflows_show_their_script_and_stop(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("family-workflow-script-loaded").is_some());
     assert!(cx.debug_bounds("family-error").is_none());
 
-    // Its agents are listed on demand, and those with a thread open.
-    assert!(cx.debug_bounds("family-workflow-member-security").is_none());
-    click("family-workflow-toggle-sub-workflow", cx);
+    // Its agents are listed with their badges, and those with a thread open.
     assert!(cx.debug_bounds("family-workflow-member-style").is_some());
     click("family-workflow-member-security", cx);
+    assert!(backend.commands().is_empty());
+}
+
+#[gpui::test]
+async fn escape_and_the_button_close_the_drawer(cx: &mut TestAppContext) {
+    let backend = FakeBackend::new();
+    let (_workspace, _view, cx) = open_thread(backend.clone(), PARENT, cx).await;
+    open_drawer(cx);
+    cx.dispatch_action(menu::Cancel);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("subagents-drawer").is_none());
+    open_drawer(cx);
+    click("thread-subagents-button", cx);
+    assert!(cx.debug_bounds("subagents-drawer").is_none());
+    // A child has no subagents button, but a link to its parent.
     assert!(backend.commands().is_empty());
 }
 
@@ -890,6 +929,9 @@ async fn workflows_show_their_script_and_stop(cx: &mut TestAppContext) {
 async fn background_work_stops_the_thread(cx: &mut TestAppContext) {
     let backend = FakeBackend::new();
     let (_workspace, _view, cx) = open_thread(backend.clone(), PARENT, cx).await;
+    // The background work is above the composer, as T3 shows it at the end of its timeline.
+    let line = cx.debug_bounds("family-now-background").unwrap();
+    assert!(line.bottom() <= cx.debug_bounds("thread-composer").unwrap().top());
     click("family-background-stop", cx);
     let commands = backend.commands();
     assert_eq!(commands.len(), 1);
@@ -905,6 +947,7 @@ async fn read_only_backends_disable_stop(cx: &mut TestAppContext) {
         "writes are off for a dry run",
     ));
     let (workspace, _view, cx) = open_thread(read_only, PARENT, cx).await;
+    open_drawer(cx);
     click("family-stop-child-native", cx);
     click("family-workflow-stop-sub-workflow", cx);
     click("family-background-stop", cx);
@@ -979,6 +1022,7 @@ async fn on_0_1_3_idle_children_come_from_the_family_read(cx: &mut TestAppContex
         }]
     );
     // `child-done` finished, so only the family read has it.
+    open_drawer(cx);
     click("family-child-child-done", cx);
     assert_eq!(open_thread_ids(&workspace, cx), [PARENT, "child-done"]);
     assert!(cx.debug_bounds("family-error").is_none());
@@ -991,6 +1035,7 @@ async fn on_0_1_1_the_family_comes_from_the_shell(cx: &mut TestAppContext) {
 
     // It asked once, heard the server doesn't have the call, and used the shell.
     assert_eq!(backend.family_calls.lock().len(), 1);
+    open_drawer(cx);
     click("family-child-child-done", cx);
     assert_eq!(open_thread_ids(&workspace, cx), [PARENT, "child-done"]);
     assert!(cx.debug_bounds("family-error").is_none());

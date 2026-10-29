@@ -371,7 +371,7 @@ fn pull_request_badges_count_as_t3s() {
 }
 
 #[gpui::test]
-async fn rows_read_like_t3s(cx: &mut TestAppContext) {
+async fn rows_read_like_t3s_and_agree_with_the_header(cx: &mut TestAppContext) {
     let backend = Recorder::new(vec![
         thread(
             "working",
@@ -440,6 +440,12 @@ async fn rows_read_like_t3s(cx: &mut TestAppContext) {
     assert!(rows[0].left() > gpui::px(0.));
     assert!(rows[0].right() < gpui::px(420.));
 
+    // The thread's header reads it the same way.
+    let view = open(&workspace, "waiting", cx);
+    assert_eq!(
+        view.read_with(cx, |view, cx| view.thread_status(cx)),
+        Some(ShellStatus::Waiting)
+    );
 }
 
 #[test]

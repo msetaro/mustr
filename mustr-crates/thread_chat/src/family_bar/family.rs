@@ -408,6 +408,7 @@ impl Family {
         }
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.parent.is_none()
             && self.children.is_empty()

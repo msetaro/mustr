@@ -46,7 +46,7 @@ mod thread_list_tests;
 pub mod history;
 pub mod usage;
 pub use history::{CompactContext, RestartAgentSession};
-pub use usage::{ServerConfigs, ShowUsageLimits};
+pub use usage::ServerConfigs;
 #[cfg(test)]
 mod history_tests;
 // WP9, composer mentions and slash commands:
@@ -148,7 +148,6 @@ pub fn init(cx: &mut App) {
     // WP5, subagents and workflows:
     // WP10, history, agent status and usage:
     history::init(cx);
-    usage::init(cx);
     // WP11, terminals, worktrees and the PR flow:
     // WP12, composer and timeline:
     mentions::init(cx);

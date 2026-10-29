@@ -1,12 +1,14 @@
 //! The thread's agent: its status, its usage limits, and recovering from a limit
 //! (`mustr-docs/PARITY.md` §2.3, §2.5 and §2.17).
-//! - **Provider status:** a banner when the thread's agent is signed out, outdated, or erroring,
-//!   as T3's `chat/ProviderStatusBanner.tsx` shows it.
+//! - **Provider status:** a banner under the thread's header when its agent is signed out,
+//!   outdated, or erroring, pinned above the timeline as T3's `chat/ProviderStatusBanner.tsx` is.
 //! - **Usage limits:** the agent's windows, such as its 5-hour and weekly ones, with how much is
-//!   left and when each resets (`chat/ComposerUsageLimits.tsx`, `usage/UsageLimits.tsx`).
-//! - **Usage-limit recovery:** on a thread a limit stopped, when the limit resets, and "Resume at
-//!   reset" or "Snooze until reset" (`chat/UsageLimitRecoveryBanner.tsx`), through
-//!   `thread.metadata.update` `{limitRecovery}`. Resuming now is the composer's Resume.
+//!   left and when each resets (`usage/UsageLimits.tsx`), for the Usage page
+//!   (`mustr/src/usage_page.rs`). The thread view doesn't show them.
+//! - **Usage-limit recovery:** on a thread a limit stopped, a banner above the composer, as T3
+//!   stacks it there: when the limit resets, and "Resume at reset" or "Snooze until reset"
+//!   (`chat/UsageLimitRecoveryBanner.tsx`), through `thread.metadata.update` `{limitRecovery}`.
+//!   Resuming now is the composer's Resume.
 //!
 //! The agents' status comes from T3's server config: [`ServerConfigs`] follows
 //! `subscribeServerConfig` for the whole app, with T3's settings and where it runs. The banner's
@@ -16,17 +18,15 @@ use crate::{
     backend::{Access, ThreadBackend, ThreadBackendExt as _},
     commands,
     model::ThreadState,
-    organize::active_thread_view,
     thread_view::ThreadView,
 };
 use anyhow::Result;
 use futures::StreamExt as _;
 use gpui::{
     Action, AnyElement, App, AppContext as _, AsyncApp, Context, Entity, FontWeight, Global, Hsla,
-    IntoElement, ParentElement as _, Rems, Styled as _, Task, WeakEntity, actions, div, px,
-    relative,
+    IntoElement, ParentElement as _, Styled as _, Task, WeakEntity, div, px,
 };
-use mustr_ui::{ButtonStyle, Card, TextButton, palette, tokens, tokens::scaled};
+use mustr_ui::{ButtonStyle, Card, TextButton, palette, tokens::scaled};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -47,16 +47,6 @@ use ui::{
     Color, Icon, IconButton, IconName, IconSize, Label, LabelCommon as _, LabelSize, Tooltip,
     prelude::*,
 };
-use workspace::Workspace;
-
-actions!(
-    thread_chat,
-    [
-        /// Shows or hides the open agent thread's usage limits: its agent's 5-hour, weekly, and
-        /// other windows.
-        ShowUsageLimits,
-    ]
-);
 
 /// Opens the agents page, where agents are installed and signed in to, with `instance_id`'s
 /// agent first when given. Handled by `mustr/src/agent_setup.rs` (WP14); the provider banner's
@@ -440,7 +430,7 @@ pub struct LimitWindow {
     pub resets_in: Option<String>,
 }
 
-/// An agent's usage limits, as the usage panel shows them.
+/// An agent's usage limits, as the Usage page shows them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UsageLimits {
     /// The agent and its account: "Claude Code · Max".
@@ -685,8 +675,6 @@ fn local_time(timestamp: &str, now: OffsetDateTime) -> Option<String> {
 pub(crate) struct UsageState {
     /// The provider banner the user dismissed, by its key.
     dismissed_banner: Option<String>,
-    /// Whether the usage limits panel is open.
-    panel_open: bool,
     /// While a change to the thread's recovery is being sent.
     recovery_pending: bool,
     /// The usage-limit recovery banner's state, from the thread's record in T3's shell.
@@ -700,20 +688,6 @@ impl ThreadView {
         ServerConfigs::try_global(cx)?
             .read(cx)
             .provider(thread_instance_id(state))
-    }
-
-    /// The thread's agent's usage limits, if T3 reads them.
-    pub(crate) fn usage_limits(&self, cx: &App) -> Option<UsageLimits> {
-        usage_limits(self.provider(cx)?, OffsetDateTime::now_utc())
-    }
-
-    pub(crate) fn usage_panel_open(&self) -> bool {
-        self.history.usage.panel_open
-    }
-
-    pub(crate) fn toggle_usage_limits(&mut self, cx: &mut Context<Self>) {
-        self.history.usage.panel_open = !self.history.usage.panel_open;
-        cx.notify();
     }
 
     pub(crate) fn dismiss_provider_banner(&mut self, key: String, cx: &mut Context<Self>) {
@@ -795,22 +769,10 @@ impl ThreadView {
         }));
     }
 
-    /// The banners under the header: the agent's status, a usage limit that stopped the thread,
-    /// and the usage limits panel.
+    /// The banner under the header: the agent's status, pinned above the timeline as T3's
+    /// `ChatBannerLane` pins it.
     pub(crate) fn render_banners(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let mut banners: Vec<AnyElement> = Vec::new();
-        if let Some(banner) = self.provider_banner(cx) {
-            banners.push(self.render_provider_banner(banner, cx));
-        }
-        if let Some(recovery) = self.limit_recovery() {
-            banners.push(self.render_limit_recovery(recovery, cx));
-        }
-        if self.history.usage.panel_open {
-            banners.push(self.render_usage_panel(cx));
-        }
-        if banners.is_empty() {
-            return None;
-        }
+        let banner = self.provider_banner(cx)?;
         Some(
             h_flex()
                 .w_full()
@@ -821,11 +783,16 @@ impl ThreadView {
                     v_flex()
                         .w_full()
                         .max_w(scaled(px(crate::thread_view::CONTENT_MAX_WIDTH)))
-                        .gap_1p5()
-                        .children(banners),
+                        .child(self.render_provider_banner(banner, cx)),
                 )
                 .into_any_element(),
         )
+    }
+
+    /// The usage-limit recovery banner, above the composer while a limit stops the thread.
+    pub(crate) fn render_limit_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let recovery = self.limit_recovery()?;
+        Some(self.render_limit_recovery(recovery, cx))
     }
 
     fn render_provider_banner(&self, banner: ProviderBanner, cx: &mut Context<Self>) -> AnyElement {
@@ -1029,198 +996,6 @@ impl ThreadView {
             .into_any_element()
             .into_selected("thread-limit-recovery")
     }
-
-    fn render_usage_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let palette = palette(cx);
-        let limits = self.usage_limits(cx);
-        let header = h_flex()
-            .gap_2()
-            .child(
-                Icon::new(IconName::SignalMedium)
-                    .size(IconSize::Small)
-                    .color(Color::Muted),
-            )
-            .child(
-                Label::new("Usage limits")
-                    .size(LabelSize::Small)
-                    .weight(FontWeight::SEMIBOLD),
-            )
-            .when_some(limits.as_ref(), |this, limits| {
-                this.child(
-                    Label::new(limits.account.clone())
-                        .size(LabelSize::Small)
-                        .color(Color::Muted)
-                        .truncate(),
-                )
-            })
-            .child(div().flex_1())
-            .when_some(
-                limits.as_ref().and_then(|limits| limits.manage.clone()),
-                |this, (label, url)| {
-                    this.child(
-                        TextButton::new("thread-usage-manage", label)
-                            .tooltip(url.clone())
-                            .on_click(move |_, _, cx| cx.open_url(&url)),
-                    )
-                },
-            )
-            .child(
-                IconButton::new("thread-usage-close", IconName::Close)
-                    .icon_size(IconSize::XSmall)
-                    .icon_color(Color::Muted)
-                    .tooltip(Tooltip::text("Hide usage limits"))
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_usage_limits(cx))),
-            );
-        let body: AnyElement = match limits {
-            None => Label::new("T3 doesn't report usage limits for this agent.")
-                .size(LabelSize::Small)
-                .color(Color::Muted)
-                .into_any_element(),
-            Some(UsageLimits {
-                notice: Some(notice),
-                ..
-            }) => Label::new(notice)
-                .size(LabelSize::Small)
-                .color(Color::Muted)
-                .into_any_element(),
-            Some(limits) => v_flex()
-                .gap_1()
-                .children(limits.windows.into_iter().map(|window| {
-                    let low = window.remaining_percent < 15;
-                    h_flex()
-                        .gap_3()
-                        .child(
-                            div()
-                                .w(scaled(px(120.)))
-                                .flex_none()
-                                .child(Label::new(window.label).size(LabelSize::Small).truncate()),
-                        )
-                        .child(meter_bar(
-                            window.remaining_percent as f32 / 100.,
-                            if low {
-                                palette.warning.hsla()
-                            } else {
-                                palette.accent.hsla()
-                            },
-                            scaled(px(160.)),
-                            cx,
-                        ))
-                        .child(
-                            Label::new(format!("{}% left", window.remaining_percent))
-                                .size(LabelSize::Small)
-                                .color(if low { Color::Warning } else { Color::Default }),
-                        )
-                        .child(div().flex_1())
-                        .child(
-                            Label::new(window.resets_in.unwrap_or_default())
-                                .size(LabelSize::Small)
-                                .color(Color::Muted),
-                        )
-                }))
-                .into_any_element(),
-        };
-        Card::new()
-            .gap_1p5()
-            .child(header)
-            .child(body)
-            .into_any_element()
-            .into_selected("thread-usage-panel")
-    }
-
-    /// The header's usage limits: each window's share left, which opens the usage panel.
-    pub(crate) fn render_usage_summary(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let limits = self.usage_limits(cx)?;
-        let palette = palette(cx);
-        let open = self.history.usage.panel_open;
-        let windows = limits.windows.iter().take(2).cloned().collect::<Vec<_>>();
-        let summary: AnyElement = if windows.is_empty() {
-            Label::new("Limits")
-                .size(LabelSize::XSmall)
-                .color(Color::Muted)
-                .into_any_element()
-        } else {
-            h_flex()
-                .gap_2()
-                .children(windows.into_iter().map(|window| {
-                    let low = window.remaining_percent < 15;
-                    v_flex()
-                        .items_end()
-                        .gap_0p5()
-                        .child(
-                            Label::new(format!(
-                                "{} {}% left",
-                                short_window_label(&window.label),
-                                window.remaining_percent
-                            ))
-                            .size(LabelSize::XSmall)
-                            .color(if low {
-                                Color::Warning
-                            } else {
-                                Color::Muted
-                            }),
-                        )
-                        .child(meter_bar(
-                            window.remaining_percent as f32 / 100.,
-                            if low {
-                                palette.warning.hsla()
-                            } else {
-                                palette.text_muted.hsla()
-                            },
-                            scaled(px(48.)),
-                            cx,
-                        ))
-                }))
-                .into_any_element()
-        };
-        Some(
-            h_flex()
-                .id("thread-usage-summary")
-                .debug_selector(|| "thread-usage-summary".into())
-                .flex_none()
-                .px_1p5()
-                .py_0p5()
-                .rounded(scaled(tokens::CONTROL_RADIUS))
-                .cursor_pointer()
-                .when(open, |this| this.bg(palette.surface_2.hsla()))
-                .hover(|this| this.bg(palette.surface_2.hsla()))
-                .tooltip(Tooltip::text(if open {
-                    "Hide usage limits"
-                } else {
-                    "Usage limits: how much of each window is left"
-                }))
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_usage_limits(cx)))
-                .child(summary)
-                .into_any_element(),
-        )
-    }
-}
-
-/// A shorter name for a window in the header: "5h" for a 5-hour window.
-fn short_window_label(label: &str) -> String {
-    let lower = label.to_lowercase();
-    if lower.contains("5-hour") || lower.contains("5 hour") {
-        "5h".to_string()
-    } else {
-        label.to_string()
-    }
-}
-
-/// A thin bar filled to `fraction`, like the context meter's.
-pub(crate) fn meter_bar(fraction: f32, color: Hsla, width: Rems, cx: &App) -> impl IntoElement {
-    let palette = palette(cx);
-    div()
-        .w(width)
-        .h(scaled(px(3.)))
-        .flex_none()
-        .rounded_full()
-        .bg(palette.surface_2.hsla())
-        .child(
-            div()
-                .h_full()
-                .w(relative(fraction.clamp(0., 1.)))
-                .rounded_full()
-                .bg(color),
-        )
 }
 
 /// An element with a selector for tests.
@@ -1242,21 +1017,6 @@ fn banner_card(color: Hsla) -> Card {
     Card::new()
         .py(scaled(px(6.)))
         .border_color(color.opacity(0.55))
-}
-
-// The palette's action, on the thread the workspace shows.
-
-pub(crate) fn init(cx: &mut App) {
-    cx.observe_new(|workspace: &mut Workspace, _, _| register(workspace))
-        .detach();
-}
-
-fn register(workspace: &mut Workspace) {
-    workspace.register_action(|workspace, _: &ShowUsageLimits, _, cx| {
-        if let Some(view) = active_thread_view(workspace, cx) {
-            view.update(cx, |view, cx| view.toggle_usage_limits(cx));
-        }
-    });
 }
 
 #[cfg(test)]
