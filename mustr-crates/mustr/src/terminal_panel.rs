@@ -7,9 +7,10 @@
 //! - Whether the panel shows is kept per thread too, as T3 keeps its drawer open per thread: it
 //!   opens for a thread whose terminals were showing and closes for one whose weren't. Other
 //!   items, such as home or a review, leave it as it is.
-//! - The terminals are Zed's (`terminal_view`), on this machine. A thread on a T3 that runs on
-//!   another machine would need T3's `terminal.*` RPCs and the `terminal:*` scopes, which mustr
-//!   doesn't use yet, so the panel says that instead.
+//! - When T3 runs on this machine, the terminals are Zed's (`terminal_view`), started in the
+//!   thread's folder. When it runs on another machine (or `MUSTR_IGNORE_LOCAL_WORKTREES` is set),
+//!   they're T3's, on that machine (`remote_terminal.rs`), in the same tabs with the same keys.
+//!   A thread's terminals that T3 still runs show again when the panel first shows the thread.
 //! - The panel is created synchronously with the workspace (`window.rs`), so dock restoration
 //!   finds it. Zed's own terminal panel loads asynchronously, which is why mustr doesn't use it.
 //!   Terminals start later, when a thread first wants one.
@@ -18,11 +19,14 @@
 //! [`ToggleThreadTerminal`] (`secondary-j`, as in T3, and Zed's `ctrl-\``) shows or hides the
 //! active thread's, and [`NewThreadTerminal`] adds one.
 
-use crate::worktrees::{display_path, worktrees_are_local};
+use crate::{
+    remote_terminal::{self, Launch, RemoteTerminal, RemoteTerminalEvent},
+    worktrees::{display_path, worktrees_are_local},
+};
 use gpui::{
-    Action, AnyElement, App, AppContext as _, Context, Entity, EntityId, EventEmitter, FocusHandle,
-    Focusable, FontWeight, KeyBinding, Pixels, SharedString, Subscription, Task, WeakEntity,
-    Window, actions,
+    Action, AnyElement, AnyView, App, AppContext as _, Context, Entity, EntityId, EventEmitter,
+    FocusHandle, Focusable, FontWeight, KeyBinding, Pixels, SharedString, Subscription, Task,
+    WeakEntity, Window, actions,
 };
 use mustr_ui::{TextButton, WindowTab, kbds_for_action, palette, tokens, tokens::scaled};
 use project::Project;
@@ -30,7 +34,9 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
-use t3_client::t3_api::types::OrchestrationV2ThreadShell;
+use t3_client::t3_api::types::{
+    OrchestrationV2ThreadShell, TerminalSessionStatus, TerminalSummary,
+};
 use terminal_view::TerminalView;
 use thread_chat::{OpenThreadTerminal, ThreadShells, ThreadView};
 use ui::{Tooltip, prelude::*};
@@ -164,13 +170,22 @@ pub(crate) enum TerminalLocation {
     Loading,
     /// T3's shell doesn't have the thread, so its worktree isn't known: it's archived or gone.
     UnknownThread,
-    /// T3 runs on another machine, where the folder is.
-    Remote,
+    /// T3 runs on another machine, where the folder is: its terminals run there.
+    Remote(RemoteFolder),
     /// T3 runs here, but the folder is gone. `checkout` is the project's, if it's still here.
     Missing {
         path: String,
         checkout: Option<PathBuf>,
     },
+}
+
+/// A thread's folder on T3's machine, where its terminals start: its worktree, or its project's
+/// checkout (`projectScriptCwd` in T3's `packages/shared/src/projectScripts.ts`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RemoteFolder {
+    pub cwd: String,
+    pub worktree_path: Option<String>,
+    pub project_root: String,
 }
 
 pub(crate) fn terminal_location(
@@ -179,10 +194,27 @@ pub(crate) fn terminal_location(
     on_this_machine: bool,
     is_dir: impl Fn(&Path) -> bool,
 ) -> TerminalLocation {
-    if !on_this_machine {
-        return TerminalLocation::Remote;
-    }
     let root = project_root.map(str::trim).filter(|root| !root.is_empty());
+    if !on_this_machine {
+        let worktree_path =
+            crate::worktrees::normalize_worktree_path(thread.worktree_path.as_deref())
+                .map(str::to_string);
+        let project_root = root.unwrap_or_default().to_string();
+        let cwd = worktree_path
+            .clone()
+            .unwrap_or_else(|| project_root.clone());
+        if cwd.is_empty() {
+            return TerminalLocation::Missing {
+                path: String::new(),
+                checkout: None,
+            };
+        }
+        return TerminalLocation::Remote(RemoteFolder {
+            cwd,
+            worktree_path,
+            project_root,
+        });
+    }
     let checkout = root.map(PathBuf::from).filter(|root| is_dir(root));
     match crate::worktrees::normalize_worktree_path(thread.worktree_path.as_deref()) {
         Some(path) if is_dir(Path::new(path)) => TerminalLocation::Local(PathBuf::from(path)),
@@ -200,12 +232,35 @@ pub(crate) fn terminal_location(
     }
 }
 
-/// A terminal the panel hosts.
+/// A terminal the panel hosts: Zed's on this machine, or one on T3's machine.
 struct HostedTerminal {
     view: Entity<TerminalView>,
-    cwd: PathBuf,
+    remote: Option<Entity<RemoteTerminal>>,
+    /// Where it started, as the tab's tooltip shows it.
+    cwd: SharedString,
     title: SharedString,
-    _subscription: Subscription,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl HostedTerminal {
+    fn content(&self) -> AnyView {
+        match &self.remote {
+            Some(remote) => remote.clone().into(),
+            None => self.view.clone().into(),
+        }
+    }
+
+    fn title(&self, cx: &App) -> SharedString {
+        match &self.remote {
+            Some(remote) => remote.read(cx).title(cx),
+            None => terminal_title(&self.view, cx),
+        }
+    }
+
+    fn remote_id<'a>(&self, cx: &'a App) -> Option<&'a str> {
+        let remote = self.remote.as_ref()?;
+        Some(remote.read(cx).launch().terminal_id.as_str())
+    }
 }
 
 /// One thread's terminals.
@@ -223,6 +278,8 @@ struct ThreadTerminals {
     cwd_override: Option<PathBuf>,
     /// A terminal waits for T3's threads to load, to know where to start.
     waiting_for_shell: bool,
+    /// Whether the panel has looked for the terminals T3 runs for this thread on its machine.
+    found_remote: bool,
 }
 
 impl ThreadTerminals {
@@ -442,6 +499,9 @@ impl ThreadTerminalPanel {
         }
         let cwd = match (terminals.cwd_override.clone(), location) {
             (Some(cwd), _) | (None, TerminalLocation::Local(cwd)) => cwd,
+            (None, TerminalLocation::Remote(folder)) => {
+                return self.start_remote_terminals(thread_id, folder, window, cx);
+            }
             (None, TerminalLocation::Loading) => {
                 terminals.waiting_for_shell = true;
                 self.follow_shell(window, cx);
@@ -471,7 +531,10 @@ impl ThreadTerminalPanel {
                 };
                 terminals.starting = None;
                 match view {
-                    Ok(view) => this.add_terminal(&thread_id, view, cwd, window, cx),
+                    Ok(view) => {
+                        let cwd = display_path(&cwd).into();
+                        this.add_terminal(&thread_id, view, None, cwd, window, cx)
+                    }
                     Err(error) => {
                         log::error!("couldn't start a terminal in {}: {error:#}", cwd.display());
                         terminals.error = Some(
@@ -490,15 +553,129 @@ impl ThreadTerminalPanel {
         cx.notify();
     }
 
+    /// Starts a terminal on T3's machine. The first time the panel shows the thread, it shows
+    /// the terminals T3 still runs for it instead, if there are any, as T3's drawer does.
+    fn start_remote_terminals(
+        &mut self,
+        thread_id: String,
+        folder: RemoteFolder,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(backend) = thread_chat::backend(cx) else {
+            return;
+        };
+        let size = self.grid_size(cx);
+        let Some(terminals) = self.threads.get_mut(&thread_id) else {
+            return;
+        };
+        terminals.error = None;
+        let reattach = !std::mem::replace(&mut terminals.found_remote, true);
+        let shown_ids = terminals
+            .terminals
+            .iter()
+            .filter_map(|hosted| hosted.remote_id(cx).map(str::to_string))
+            .collect::<Vec<_>>();
+        let listed = remote_terminal::thread_terminals(backend, thread_id.clone(), cx);
+        terminals.starting = Some(cx.spawn_in(window, async move |this, cx| {
+            let launches = match listed.await {
+                Ok(listed) => remote_launches(&thread_id, &folder, &listed, &shown_ids, reattach),
+                Err(error) => {
+                    // Without T3's list, a suffix keeps the id from reaching a terminal mustr
+                    // can't see, as T3's app does.
+                    log::warn!("couldn't list T3's terminals: {error:#}");
+                    let suffix = uuid::Uuid::new_v4().to_string();
+                    let ids = shown_ids.iter().map(String::as_str);
+                    let terminal_id = remote_terminal::next_terminal_id(ids, Some(&suffix));
+                    vec![folder.launch(&thread_id, terminal_id)]
+                }
+            };
+            let mut error = None;
+            for launch in launches {
+                let Ok(open) = this.update_in(cx, |this, window, cx| {
+                    RemoteTerminal::open(
+                        launch,
+                        size,
+                        this.workspace.clone(),
+                        &this.project,
+                        window,
+                        cx,
+                    )
+                }) else {
+                    return;
+                };
+                match open.await {
+                    Ok(remote) => this
+                        .update_in(cx, |this, window, cx| {
+                            this.add_remote_terminal(&thread_id, remote, window, cx)
+                        })
+                        .ok(),
+                    Err(open_error) => {
+                        log::error!("couldn't start a terminal on T3's machine: {open_error:#}");
+                        error = Some(open_error);
+                        None
+                    }
+                };
+            }
+            this.update(cx, |this, cx| {
+                let Some(terminals) = this.threads.get_mut(&thread_id) else {
+                    return;
+                };
+                terminals.starting = None;
+                if let Some(error) = error
+                    && terminals.terminals.is_empty()
+                {
+                    terminals.error = Some(
+                        format!("Couldn't start a terminal on T3's machine: {error:#}").into(),
+                    );
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    /// The grid size of a terminal the panel shows, for a new one to start at.
+    fn grid_size(&self, cx: &App) -> Option<(i64, i64)> {
+        let hosted = self.shown().and_then(ThreadTerminals::active).or_else(|| {
+            self.threads
+                .values()
+                .find_map(|terminals| terminals.active())
+        })?;
+        let bounds = hosted
+            .view
+            .read(cx)
+            .terminal()
+            .read(cx)
+            .last_content()
+            .terminal_bounds;
+        let size = (bounds.num_columns() as i64, bounds.num_lines() as i64);
+        (size.0 > 1 && size.1 > 1).then_some(size)
+    }
+
+    fn add_remote_terminal(
+        &mut self,
+        thread_id: &str,
+        remote: Entity<RemoteTerminal>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let view = remote.read(cx).view().clone();
+        let cwd = remote.read(cx).launch().cwd.clone().into();
+        self.add_terminal(thread_id, view, Some(remote), cwd, window, cx);
+    }
+
     fn add_terminal(
         &mut self,
         thread_id: &str,
         view: Entity<TerminalView>,
-        cwd: PathBuf,
+        remote: Option<Entity<RemoteTerminal>>,
+        cwd: SharedString,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let subscription = cx.subscribe_in(
+        let mut subscriptions = vec![cx.subscribe_in(
             &view,
             window,
             |this, view, event: &ItemEvent, window, cx| match event {
@@ -507,17 +684,32 @@ impl ThreadTerminalPanel {
                 ItemEvent::UpdateTab => this.update_title(view, cx),
                 _ => {}
             },
-        );
-        let title = terminal_title(&view, cx);
+        )];
+        if let Some(remote) = &remote {
+            let view = view.clone();
+            subscriptions.push(cx.subscribe_in(
+                remote,
+                window,
+                move |this, _, event: &RemoteTerminalEvent, window, cx| match event {
+                    RemoteTerminalEvent::TitleChanged => this.update_title(&view, cx),
+                    RemoteTerminalEvent::Ended => {
+                        this.remove_terminal(view.entity_id(), window, cx)
+                    }
+                },
+            ));
+        }
+        let mut hosted = HostedTerminal {
+            view: view.clone(),
+            remote,
+            cwd,
+            title: SharedString::default(),
+            _subscriptions: subscriptions,
+        };
+        hosted.title = hosted.title(cx);
         let Some(terminals) = self.threads.get_mut(thread_id) else {
             return;
         };
-        terminals.terminals.push(HostedTerminal {
-            view: view.clone(),
-            cwd,
-            title,
-            _subscription: subscription,
-        });
+        terminals.terminals.push(hosted);
         terminals.active = terminals.terminals.len() - 1;
         if self.focus_on_start && self.thread_id.as_deref() == Some(thread_id) {
             self.focus_on_start = false;
@@ -527,17 +719,17 @@ impl ThreadTerminalPanel {
     }
 
     fn update_title(&mut self, view: &Entity<TerminalView>, cx: &mut Context<Self>) {
-        let title = terminal_title(view, cx);
         let hosted = self
             .threads
             .values_mut()
             .flat_map(|terminals| terminals.terminals.iter_mut())
             .find(|hosted| hosted.view == *view);
-        if let Some(hosted) = hosted
-            && hosted.title != title
-        {
-            hosted.title = title;
-            cx.notify();
+        if let Some(hosted) = hosted {
+            let title = hosted.title(cx);
+            if hosted.title != title {
+                hosted.title = title;
+                cx.notify();
+            }
         }
     }
 
@@ -561,8 +753,23 @@ impl ThreadTerminalPanel {
             .and_then(ThreadTerminals::active)
             .map(|hosted| hosted.view.entity_id())
         {
-            self.remove_terminal(id, window, cx);
+            self.close_terminal(id, window, cx);
         }
+    }
+
+    /// Closes a terminal the user closed. One on T3's machine is ended there too; a local one
+    /// ends when it's dropped.
+    fn close_terminal(&mut self, id: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+        let remote = self
+            .threads
+            .values()
+            .flat_map(|terminals| terminals.terminals.iter())
+            .find(|hosted| hosted.view.entity_id() == id)
+            .and_then(|hosted| hosted.remote.clone());
+        if let Some(remote) = remote {
+            remote.update(cx, |remote, cx| remote.close(cx));
+        }
+        self.remove_terminal(id, window, cx);
     }
 
     /// Drops a terminal, which ends its shell. Closing the shown thread's last one hides the
@@ -639,7 +846,7 @@ impl ThreadTerminalPanel {
             .and_then(|thread_id| self.thread_title(thread_id, cx));
         let cwd = terminals
             .and_then(ThreadTerminals::active)
-            .map(|hosted| display_path(&hosted.cwd));
+            .map(|hosted| hosted.cwd.to_string());
         let details = [title.map(|title| title.to_string()), cwd]
             .into_iter()
             .flatten()
@@ -658,14 +865,14 @@ impl ThreadTerminalPanel {
                             hosted.title.clone(),
                         )
                         .active(index == terminals.active)
-                        .tooltip(display_path(&hosted.cwd))
+                        .tooltip(hosted.cwd.clone())
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.activate_terminal(index, window, cx)
                         }))
                         .on_close({
                             let this = cx.entity().downgrade();
                             move |window, cx| {
-                                this.update(cx, |this, cx| this.remove_terminal(id, window, cx))
+                                this.update(cx, |this, cx| this.close_terminal(id, window, cx))
                                     .ok();
                             }
                         })
@@ -758,7 +965,7 @@ impl ThreadTerminalPanel {
                 .flex_1()
                 .min_h_0()
                 .w_full()
-                .child(hosted.view.clone())
+                .child(hosted.content())
                 .into_any_element();
         }
         if let Some(error) = terminals.and_then(|terminals| terminals.error.clone()) {
@@ -804,11 +1011,9 @@ impl ThreadTerminalPanel {
                 "T3 doesn't list this thread as active, so mustr doesn't know its worktree.".into(),
                 None,
             ),
-            TerminalLocation::Remote => (
-                "This thread's worktree is on the machine T3 runs on. Terminals on a remote \
-                     T3 aren't supported yet."
-                    .into(),
-                None,
+            TerminalLocation::Remote(folder) => (
+                format!("No terminals open in {} on T3's machine.", folder.cwd).into(),
+                start,
             ),
             TerminalLocation::Missing { path, checkout } => {
                 let text: SharedString =
@@ -869,6 +1074,57 @@ impl ThreadTerminalPanel {
     }
 }
 
+impl RemoteFolder {
+    fn launch(&self, thread_id: &str, terminal_id: String) -> Launch {
+        Launch {
+            thread_id: thread_id.to_string(),
+            terminal_id,
+            cwd: self.cwd.clone(),
+            worktree_path: self.worktree_path.clone(),
+            project_root: self.project_root.clone(),
+        }
+    }
+}
+
+/// The terminals to show for a thread on T3's machine: the ones T3 runs for it, when the panel
+/// first shows the thread (`reattach`), or else a new one, numbered after every terminal T3 has
+/// for it and every one the panel shows.
+fn remote_launches(
+    thread_id: &str,
+    folder: &RemoteFolder,
+    listed: &[TerminalSummary],
+    shown_ids: &[String],
+    reattach: bool,
+) -> Vec<Launch> {
+    let mut running = listed
+        .iter()
+        .filter(|terminal| {
+            matches!(
+                terminal.status,
+                TerminalSessionStatus::Running | TerminalSessionStatus::Starting
+            ) && !shown_ids.contains(&terminal.terminal_id)
+        })
+        .collect::<Vec<_>>();
+    if reattach && !running.is_empty() {
+        running.sort_by(|a, b| a.terminal_id.cmp(&b.terminal_id));
+        return running
+            .into_iter()
+            .map(|terminal| Launch {
+                thread_id: thread_id.to_string(),
+                terminal_id: terminal.terminal_id.clone(),
+                cwd: terminal.cwd.clone(),
+                worktree_path: terminal.worktree_path.clone(),
+                project_root: folder.project_root.clone(),
+            })
+            .collect();
+    }
+    let ids = listed
+        .iter()
+        .map(|terminal| terminal.terminal_id.as_str())
+        .chain(shown_ids.iter().map(String::as_str));
+    vec![folder.launch(thread_id, remote_terminal::next_terminal_id(ids, None))]
+}
+
 type MessageAction =
     Box<dyn Fn(&mut ThreadTerminalPanel, &mut Window, &mut Context<ThreadTerminalPanel>)>;
 
@@ -879,6 +1135,27 @@ fn terminal_title(view: &Entity<TerminalView>, cx: &App) -> SharedString {
         .filter(|title| !title.trim().is_empty())
         .unwrap_or_else(|| view.terminal().read(cx).title(true))
         .into()
+}
+
+#[cfg(test)]
+impl ThreadTerminalPanel {
+    /// The terminals on T3's machine the panel shows for its thread.
+    pub(crate) fn remote_terminals(&self) -> Vec<Entity<RemoteTerminal>> {
+        self.shown()
+            .map(|terminals| {
+                terminals
+                    .terminals
+                    .iter()
+                    .filter_map(|hosted| hosted.remote.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Why the shown thread's last terminal didn't start.
+    pub(crate) fn shown_error(&self) -> Option<SharedString> {
+        self.shown()?.error.clone()
+    }
 }
 
 impl EventEmitter<PanelEvent> for ThreadTerminalPanel {}
@@ -1019,7 +1296,20 @@ mod tests {
                 false,
                 exists
             ),
-            TerminalLocation::Remote
+            TerminalLocation::Remote(RemoteFolder {
+                cwd: "/here/wt/a".into(),
+                worktree_path: Some("/here/wt/a".into()),
+                project_root: "/here/api".into(),
+            })
+        );
+        // On T3's machine, mustr can't check the folder; without a worktree, the checkout.
+        assert_eq!(
+            terminal_location(&shell_thread(None), Some("/there/api"), false, exists),
+            TerminalLocation::Remote(RemoteFolder {
+                cwd: "/there/api".into(),
+                worktree_path: None,
+                project_root: "/there/api".into(),
+            })
         );
     }
 
@@ -1044,7 +1334,8 @@ mod tests {
 
     #[gpui::test]
     async fn each_thread_keeps_its_own_terminals_open_or_closed(cx: &mut TestAppContext) {
-        // Remote, so no shell starts in the test; where terminals would start is checked above.
+        // Remote, so no shell starts in the test (and the fake can't open T3's); where
+        // terminals would start is checked above.
         let backend = FakeBackend::new(
             vec![thread("a", Some("/wt/a")), thread("b", Some("/wt/b"))],
             Vec::new(),
@@ -1074,7 +1365,14 @@ mod tests {
         cx.run_until_parked();
         assert!(showing(&workspace, &panel, cx));
         panel.read_with(cx, |panel, cx| {
-            assert_eq!(panel.location("a", cx), TerminalLocation::Remote)
+            assert_eq!(
+                panel.location("a", cx),
+                TerminalLocation::Remote(RemoteFolder {
+                    cwd: "/wt/a".into(),
+                    worktree_path: Some("/wt/a".into()),
+                    project_root: "/src/api".into(),
+                })
+            )
         });
 
         // Thread b's terminals weren't showing, so switching hides the panel...

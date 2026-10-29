@@ -11142,6 +11142,7 @@ dependencies = [
  "t3_client",
  "t3_runtime",
  "tempfile",
+ "terminal",
  "terminal_view",
  "theme",
  "theme_selector",
