@@ -109,8 +109,9 @@ pub use actions::{
     OpenThreadTerminal, RemoveThreadWorktree, ReviewThreadChanges,
 };
 pub use backend::{
-    Access, AttachmentUpload, GlobalThreadBackend, ReadOnlyBackend, ThreadBackend,
-    ThreadBackendExt, UnsupportedRpc, backend, is_unsupported_rpc, set_backend,
+    Access, AttachmentUpload, GlobalThreadBackend, NotConnected, ReadOnlyBackend, ThreadBackend,
+    ThreadBackendExt, UnsupportedRpc, backend, is_still_connecting, is_unsupported_rpc,
+    retry_log_level, set_backend,
 };
 pub use composer::{SendMessage, SteerMessage, StopThread};
 pub use family_bar::ThreadFamilyBar;

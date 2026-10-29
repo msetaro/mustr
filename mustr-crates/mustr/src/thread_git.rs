@@ -934,7 +934,10 @@ impl Editors {
                             true
                         }
                         Err(error) => {
-                            log::warn!("couldn't load T3's editors: {error:#}");
+                            log::log!(
+                                thread_chat::retry_log_level(&error, log::Level::Warn),
+                                "couldn't load T3's editors: {error:#}"
+                            );
                             this.error = Some(format!("{error:#}").into());
                             false
                         }

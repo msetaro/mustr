@@ -156,7 +156,10 @@ impl ServerConfigs {
             loop {
                 match follow_config(&backend, &this, cx).await {
                     Ok(()) => attempt = 0,
-                    Err(error) => log::warn!("couldn't follow T3's server config: {error:#}"),
+                    Err(error) => log::log!(
+                        crate::retry_log_level(&error, log::Level::Warn),
+                        "couldn't follow T3's server config: {error:#}"
+                    ),
                 }
                 if this.upgrade().is_none() {
                     return;

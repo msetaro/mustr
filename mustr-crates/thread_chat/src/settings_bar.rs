@@ -139,7 +139,10 @@ impl ThreadSettingsBar {
                     this.catalog = match agents {
                         Ok(agents) => Catalog::Loaded(agents),
                         Err(error) => {
-                            log::warn!("couldn't read T3's agents: {error:#}");
+                            log::log!(
+                                crate::retry_log_level(&error, log::Level::Warn),
+                                "couldn't read T3's agents: {error:#}"
+                            );
                             Catalog::Failed
                         }
                     };

@@ -182,7 +182,10 @@ impl ThreadShells {
                 match follow_shell(&backend, &this, cx).await {
                     Ok(()) => attempt = 0,
                     Err(error) => {
-                        log::warn!("couldn't follow T3's shell: {error:#}");
+                        log::log!(
+                            crate::retry_log_level(&error, log::Level::Warn),
+                            "couldn't follow T3's shell: {error:#}"
+                        );
                         let updated = this.update(cx, |this, cx| {
                             this.error = Some(format!("{error:#}").into());
                             cx.notify();

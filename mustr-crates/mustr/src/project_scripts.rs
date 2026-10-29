@@ -331,7 +331,10 @@ impl ProjectScripts {
             this.update(cx, |this, cx| {
                 match settings {
                     Ok(settings) => this.settings = Some(settings),
-                    Err(error) => log::warn!("couldn't read T3's script settings: {error:#}"),
+                    Err(error) => log::log!(
+                        thread_chat::retry_log_level(&error, log::Level::Warn),
+                        "couldn't read T3's script settings: {error:#}"
+                    ),
                 }
                 this._load = None;
                 cx.notify();
