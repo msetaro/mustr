@@ -538,6 +538,7 @@ impl ThreadView {
                 .map(|item| item.id.clone())
         });
         if let Some(row) = item_id.and_then(|item_id| self.row_of_item(&item_id)) {
+            self.list_state.pause_following_tail();
             self.list_state.scroll_to_reveal_item(row);
             cx.notify();
         }

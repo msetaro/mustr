@@ -68,6 +68,7 @@ pub use snooze::SnoozeThread;
 // WP14, agent setup and T3's settings:
 // WP15, timeline and composer:
 mod file_links;
+pub use find_bar::open_thread_with_find;
 
 #[cfg(test)]
 mod tests;

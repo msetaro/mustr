@@ -2066,6 +2066,8 @@ impl ThreadsSidebar {
         if found {
             details = format!("{} · {details}", thread.section.label());
         }
+        // A message match opens the thread with find on the query (WP15).
+        let find_query = snippet.is_some().then(|| self.messages.query.clone());
         let details_line = match snippet {
             Some(snippet) => {
                 let snippet = focus_snippet(&snippet, &self.messages.query);
@@ -2127,91 +2129,100 @@ impl ThreadsSidebar {
         } else {
             self.drop_zone(row, index, cx)
         };
-        row.on_click(cx.listener(move |this, _, window, cx| this.open(&open_thread, window, cx)))
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    cx.stop_propagation();
-                    this.deploy_context_menu(event.position, menu_thread.clone(), window, cx)
-                }),
-            )
-            .child(
-                v_flex()
-                    .min_w_0()
-                    .child(
-                        h_flex()
-                            .gap_1p5()
-                            .child(Indicator::dot().color(Color::Custom(dot)))
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    Label::new(thread.title.clone())
-                                        .size(LabelSize::Small)
-                                        .when(thread.unread, |label| {
-                                            label.weight(FontWeight::SEMIBOLD)
-                                        })
-                                        .when(settled && !active, |label| label.color(Color::Muted))
-                                        .truncate(),
+        row.on_click(
+            cx.listener(move |this, _, window, cx| match find_query.clone() {
+                Some(query) => crate::open_thread_with_find(
+                    open_thread.id.clone(),
+                    query,
+                    this.workspace.clone(),
+                    window,
+                    cx,
+                ),
+                None => this.open(&open_thread, window, cx),
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                this.deploy_context_menu(event.position, menu_thread.clone(), window, cx)
+            }),
+        )
+        .child(
+            v_flex()
+                .min_w_0()
+                .child(
+                    h_flex()
+                        .gap_1p5()
+                        .child(Indicator::dot().color(Color::Custom(dot)))
+                        .child(
+                            div().flex_1().min_w_0().child(
+                                Label::new(thread.title.clone())
+                                    .size(LabelSize::Small)
+                                    .when(thread.unread, |label| label.weight(FontWeight::SEMIBOLD))
+                                    .when(settled && !active, |label| label.color(Color::Muted))
+                                    .truncate(),
+                            ),
+                        )
+                        .when(can_write, |this| {
+                            this.child(
+                                div().visible_on_hover(group.clone()).child(
+                                    IconButton::new(
+                                        ("settle", index),
+                                        if settled {
+                                            IconName::Undo
+                                        } else {
+                                            IconName::Check
+                                        },
+                                    )
+                                    .icon_size(IconSize::XSmall)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(move |_, cx| {
+                                        if settled {
+                                            Tooltip::simple("Un-settle", cx)
+                                        } else {
+                                            Tooltip::for_action("Settle", &SettleThread, cx)
+                                        }
+                                    })
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            this.settle_or_unsettle(&action_thread, window, cx)
+                                        },
+                                    )),
                                 ),
                             )
-                            .when(can_write, |this| {
-                                this.child(
-                                    div().visible_on_hover(group.clone()).child(
-                                        IconButton::new(
-                                            ("settle", index),
-                                            if settled {
-                                                IconName::Undo
-                                            } else {
-                                                IconName::Check
-                                            },
-                                        )
-                                        .icon_size(IconSize::XSmall)
-                                        .icon_color(Color::Muted)
-                                        .tooltip(move |_, cx| {
-                                            if settled {
-                                                Tooltip::simple("Un-settle", cx)
-                                            } else {
-                                                Tooltip::for_action("Settle", &SettleThread, cx)
-                                            }
-                                        })
-                                        .on_click(
-                                            cx.listener(move |this, _, window, cx| {
-                                                this.settle_or_unsettle(&action_thread, window, cx)
-                                            }),
-                                        ),
+                        }),
+                )
+                .child(
+                    h_flex()
+                        .gap_1p5()
+                        .pl(scaled(px(12.)))
+                        .child(div().flex_1().min_w_0().child(details_line))
+                        .when_some(pull_request, |this, pull_request| {
+                            this.child(pull_request_chip(index, &pull_request, cx))
+                        })
+                        .when_some(snoozed, |this, until| {
+                            this.child(
+                                h_flex()
+                                    .gap_0p5()
+                                    .child(
+                                        Icon::new(IconName::Clock)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Muted),
+                                    )
+                                    .child(
+                                        Label::new(until)
+                                            .size(LabelSize::XSmall)
+                                            .color(Color::Muted),
                                     ),
-                                )
-                            }),
-                    )
-                    .child(
-                        h_flex()
-                            .gap_1p5()
-                            .pl(scaled(px(12.)))
-                            .child(div().flex_1().min_w_0().child(details_line))
-                            .when_some(pull_request, |this, pull_request| {
-                                this.child(pull_request_chip(index, &pull_request, cx))
-                            })
-                            .when_some(snoozed, |this, until| {
-                                this.child(
-                                    h_flex()
-                                        .gap_0p5()
-                                        .child(
-                                            Icon::new(IconName::Clock)
-                                                .size(IconSize::XSmall)
-                                                .color(Color::Muted),
-                                        )
-                                        .child(
-                                            Label::new(until)
-                                                .size(LabelSize::XSmall)
-                                                .color(Color::Muted),
-                                        ),
-                                )
-                            })
-                            .when_some(thread.status, |this, status| {
-                                this.child(Pill::tinted(status.label(), status.color(cx)))
-                            }),
-                    ),
-            )
-            .into_any_element()
+                            )
+                        })
+                        .when_some(thread.status, |this, status| {
+                            this.child(Pill::tinted(status.label(), status.color(cx)))
+                        }),
+                ),
+        )
+        .into_any_element()
     }
 
     fn render_project_filter(&self, cx: &mut Context<Self>) -> impl IntoElement {

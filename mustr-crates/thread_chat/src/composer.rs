@@ -2081,6 +2081,7 @@ impl ThreadView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        self.deploy_pending_find(window, cx);
         self.sync_placeholder(window, cx);
         let declines = self.feedback_target().is_some();
         let palette = palette(cx);
