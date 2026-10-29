@@ -4,7 +4,8 @@
 //!
 //! Comments on an agent's diff are local: they never go to a forge. "Send to agent" batches
 //! them into one message to the thread (`mustr-docs/PLAN.md` §7), through the same submit form
-//! a pull request review uses; the app's [`crate::ReviewBackend`] sends it.
+//! a pull request review uses; the app's [`crate::ReviewBackend`] sends it, each comment as one
+//! of T3's `review-comment` records.
 
 use gpui::{
     Action, AnyElement, App, IntoElement, ParentElement as _, SharedString, Styled as _, WeakEntity,

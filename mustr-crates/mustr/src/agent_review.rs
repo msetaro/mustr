@@ -11,11 +11,14 @@
 //! The review's header has the thread's Open in ▾ and Commit ▾ (`thread_git.rs`), so the work
 //! can ship from where it's reviewed.
 //!
-//! Comments stay local ([`AgentReviewStore`]). "Send to agent" batches them, each with its file,
-//! line, and the code it's on, into one message to the thread: a `message.dispatch` command
-//! through `orchestration.dispatchCommand`, queued after any active run, as T3's composer queues
-//! follow-ups. It goes through [`PullRequestRpc`], so tests assert the exact typed payload and a
-//! dry run never sends it.
+//! Comments stay local ([`AgentReviewStore`]). "Send to agent" batches them into one message to
+//! the thread: a `message.dispatch` command through `orchestration.dispatchCommand`, queued
+//! after any active run, as T3's composer queues follow-ups. Each comment goes as T3's own diff
+//! comments do: a `review-comment` record in the message's `context`, with its file, lines,
+//! text and the code it's on, and a reference to it in the text, which T3 expands for the agent
+//! (`reviewCommentContextRecord` in T3's `apps/web/src/lib/composerContextRecords.ts`). It goes
+//! through [`PullRequestRpc`], so tests assert the exact typed payload and a dry run never sends
+//! it.
 
 use crate::{
     agent_diff::{parse_patch, review_files_from_patch},
@@ -45,7 +48,8 @@ use t3_client::{
         tagged::{OrchestrationV2Command, OrchestrationV2CommandDispatchMode},
         types::{
             OrchestrationGetFullThreadDiffInput, OrchestrationGetTurnDiffInput,
-            OrchestrationV2Actor, OrchestrationV2CommandDispatchModeQueueAfterActive,
+            OrchestrationMessageContext, OrchestrationV2Actor,
+            OrchestrationV2CommandDispatchModeQueueAfterActive,
             OrchestrationV2CommandDispatchModeQueueAfterActiveType,
             OrchestrationV2CommandMessageDispatch, OrchestrationV2CommandMessageDispatchType,
             OrchestrationV2CreationSource,
@@ -347,62 +351,121 @@ async fn turn_from_t3(
     })
 }
 
-/// The message "Send to agent" sends: the reviewer's note, then each comment with its file,
-/// line, and the code it's on.
-pub fn agent_message(scope: ReviewScope, submission: &ReviewSubmission) -> String {
+/// The longest comment and quoted code a record carries (`COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS`
+/// and `COMPOSER_CONTEXT_REVIEW_DIFF_MAX_CHARS` in T3's `contracts/src/composerContext.ts`).
+const REVIEW_TEXT_MAX_CHARS: usize = 16_000;
+const REVIEW_DIFF_MAX_CHARS: usize = 32_000;
+
+/// Text cut to `max` characters, saying so, as T3 cuts a record's text (`clampContextText`).
+fn clamp_context_text(text: &str, max: usize) -> String {
+    const MARKER: &str = "\n… truncated …";
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let keep = max.saturating_sub(MARKER.chars().count());
+    format!("{}{MARKER}", text.chars().take(keep).collect::<String>())
+}
+
+/// A comment's lines as a record names them: `L2`, `L1 to L3`, or `L4 (before)` for lines of
+/// the previous version (T3's labels for file and diff comments).
+fn range_label(draft: &review::DraftComment) -> String {
+    let last = draft.position.line();
+    let lines = match draft.start_line {
+        Some(first) if first < last => format!("L{first} to L{last}"),
+        _ => format!("L{last}"),
+    };
+    match draft.position.side() {
+        DiffSide::Right => lines,
+        DiffSide::Left => format!("{lines} (before)"),
+    }
+}
+
+/// One comment as T3's review-comment record (`ReviewCommentContextRecord`), in the review's
+/// scope.
+pub fn review_comment_context(
+    scope: ReviewScope,
+    draft: &review::DraftComment,
+    quote: Option<&review::QuotedCode>,
+) -> thread_chat::ComposerContext {
+    let last = draft.position.line();
+    let first = draft
+        .start_line
+        .filter(|first| *first < last)
+        .unwrap_or(last);
+    let range_label = range_label(draft);
+    let file_name = draft.path.rsplit('/').next().unwrap_or(&draft.path);
+    thread_chat::ComposerContext::ReviewComment(thread_chat::actions::ReviewCommentContext {
+        context_id: format!("review-comment_{}", draft.id),
+        label: format!("{file_name} {range_label}"),
+        section_id: scope.key(),
+        section_title: scope.label(),
+        file_path: draft.path.clone(),
+        start_index: first.saturating_sub(1),
+        end_index: last.saturating_sub(1),
+        range_label,
+        text: clamp_context_text(draft.body.trim(), REVIEW_TEXT_MAX_CHARS),
+        diff: quote.map_or_else(String::new, |quote| {
+            clamp_context_text(&quote.text, REVIEW_DIFF_MAX_CHARS)
+        }),
+        fence_language: quote.map(|quote| {
+            quote
+                .language
+                .clone()
+                .unwrap_or_else(|| fence_language_for(&draft.path))
+        }),
+        pull_request: None,
+    })
+}
+
+/// A code fence's language for a file without a known one: its extension, or `text`
+/// (`inferReviewCommentFenceLanguage` in T3's `reviewCommentContext.ts`).
+fn fence_language_for(path: &str) -> String {
+    let name = path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(path)
+        .to_lowercase();
+    match name.rfind('.') {
+        Some(dot) if dot > 0 && dot + 1 < name.len() => name[dot + 1..].to_string(),
+        _ if name.starts_with('.') && name.len() > 1 => name[1..].to_string(),
+        _ => "text".to_string(),
+    }
+}
+
+/// What "Send to agent" sends: the reviewer's note, then a reference to each comment, and the
+/// comments' records as the message's `context`.
+pub fn agent_message(
+    scope: ReviewScope,
+    submission: &ReviewSubmission,
+) -> (String, Option<OrchestrationMessageContext>) {
     let note = submission.body.trim();
     let comments = &submission.comments;
     if comments.is_empty() {
-        return note.to_string();
+        return (note.to_string(), None);
     }
     let mut message = String::new();
     if !note.is_empty() {
         message.push_str(note);
         message.push_str("\n\n");
     }
-    let count = match comments.len() {
-        1 => "1 comment".to_string(),
-        count => format!("{count} comments"),
-    };
     message.push_str(&match scope {
-        ReviewScope::Changes => format!("Review of your changes ({count}):"),
+        ReviewScope::Changes => "Review of your changes:".to_string(),
         ReviewScope::Turn(turn) => format!(
-            "Review of what you changed in turn {turn} ({count}; line numbers are as of the end \
-             of that turn):"
+            "Review of what you changed in turn {turn} (line numbers are as of the end of that \
+             turn):"
         ),
     });
-    for (index, draft) in comments.iter().enumerate() {
-        let last = draft.position.line();
-        let lines = match draft.start_line {
-            Some(first) if first < last => format!("lines {first}–{last}"),
-            _ => format!("line {last}"),
+    let mut records = Vec::new();
+    for draft in comments {
+        let context = review_comment_context(scope, draft, submission.quotes.get(&draft.id));
+        let Some((reference, record)) = thread_chat::context_reference_and_record(&context) else {
+            continue;
         };
-        let side = match draft.position.side() {
-            DiffSide::Right => "",
-            DiffSide::Left => " of the previous version",
-        };
-        message.push_str(&format!(
-            "\n\n{}. `{}`, {lines}{side}:\n",
-            index + 1,
-            draft.path
-        ));
-        if let Some(quote) = submission.quotes.get(&draft.id) {
-            let longest_run = quote
-                .text
-                .split(|character| character != '`')
-                .map(str::len)
-                .max()
-                .unwrap_or(0);
-            let fence = "`".repeat(longest_run.max(2) + 1);
-            message.push_str(&format!(
-                "{fence}{}\n{}\n{fence}\n",
-                quote.language.as_deref().unwrap_or(""),
-                quote.text
-            ));
-        }
-        message.push_str(draft.body.trim());
+        message.push_str("\n- ");
+        message.push_str(&reference);
+        records.push(record);
     }
-    message
+    (message, thread_chat::message_context_of(records))
 }
 
 /// The `message.dispatch` command that sends `text` to the thread. It's queued after any run in
@@ -411,13 +474,14 @@ pub fn agent_message(scope: ReviewScope, submission: &ReviewSubmission) -> Strin
 pub fn message_dispatch(
     thread_id: &str,
     text: String,
+    context: Option<OrchestrationMessageContext>,
     command_id: String,
     message_id: String,
 ) -> OrchestrationV2Command {
     OrchestrationV2Command::MessageDispatch(OrchestrationV2CommandMessageDispatch {
         attachments: Vec::new(),
         command_id,
-        context: None,
+        context,
         created_by: OrchestrationV2Actor::User,
         // T3 knows its own clients; mustr is a desktop client like T3's, which say `web`.
         creation_source: OrchestrationV2CreationSource::Web,
@@ -515,8 +579,14 @@ impl<R: PullRequestRpc> ReviewBackend for AgentReviewBackend<R> {
 
     /// "Send to agent": every added comment, in one message to the thread.
     fn submit_review(&self, submission: ReviewSubmission, cx: &mut App) -> Task<Result<()>> {
-        let text = agent_message(self.scope, &submission);
-        let command = message_dispatch(&self.thread_id, text, (self.new_id)(), (self.new_id)());
+        let (text, context) = agent_message(self.scope, &submission);
+        let command = message_dispatch(
+            &self.thread_id,
+            text,
+            context,
+            (self.new_id)(),
+            (self.new_id)(),
+        );
         let call = self.rpc.call::<rpc::OrchestrationDispatchCommand>(command);
         let sent_at = (self.now)()
             .format(&Rfc3339)
@@ -914,44 +984,99 @@ mod tests {
         }
     }
 
+    /// The records `submission`'s comments go as, in the `Changes` scope.
+    fn submission_records() -> Vec<serde_json::Value> {
+        vec![
+            json!({
+                "version": 1, "kind": "review-comment", "contextId": "review-comment_d1",
+                "label": "main.rs L2", "sectionId": "changes", "sectionTitle": "Changes",
+                "filePath": "src/main.rs", "startIndex": 1, "endIndex": 1, "rangeLabel": "L2",
+                "text": "Use the logger.", "diff": "    println!(\"hello, world\");",
+                "fenceLanguage": "rust"
+            }),
+            json!({
+                "version": 1, "kind": "review-comment", "contextId": "review-comment_d2",
+                "label": "main.rs L1 to L3", "sectionId": "changes", "sectionTitle": "Changes",
+                "filePath": "src/main.rs", "startIndex": 0, "endIndex": 2,
+                "rangeLabel": "L1 to L3", "text": "Rename `main`.",
+                "diff": "fn main() {\n    // ```\n}", "fenceLanguage": "rust"
+            }),
+            json!({
+                "version": 1, "kind": "review-comment", "contextId": "review-comment_d3",
+                "label": "README.md L4 (before)", "sectionId": "changes",
+                "sectionTitle": "Changes", "filePath": "docs/README.md", "startIndex": 3,
+                "endIndex": 3, "rangeLabel": "L4 (before)", "text": "Why remove this?",
+                "diff": ""
+            }),
+        ]
+    }
+
     #[test]
-    fn the_message_quotes_each_comments_code() {
+    fn the_message_sends_each_comment_as_a_review_comment_record() {
+        let (text, context) = agent_message(ReviewScope::Changes, &submission());
         assert_eq!(
-            agent_message(ReviewScope::Changes, &submission()),
+            text,
             "Close, a couple of things.
 
-Review of your changes (3 comments):
-
-1. `src/main.rs`, line 2:
-```rust
-    println!(\"hello, world\");
-```
-Use the logger.
-
-2. `src/main.rs`, lines 1–3:
-````rust
-fn main() {
-    // ```
-}
-````
-Rename `main`.
-
-3. `docs/README.md`, line 4 of the previous version:
-Why remove this?"
+Review of your changes:
+- [main.rs L2](t3-context://v1/review-comment/review-comment_d1)
+- [main.rs L1 to L3](t3-context://v1/review-comment/review-comment_d2)
+- [README.md L4 (before)](t3-context://v1/review-comment/review-comment_d3)"
         );
+        let context = serde_json::to_value(context.expect("the comments are context")).unwrap();
+        assert_eq!(
+            context,
+            json!({ "version": 1.0, "records": submission_records() })
+        );
+
+        // A turn's review says which turn the lines are from, and names its section after it.
         let mut one = submission();
         one.comments.truncate(1);
         one.body = String::new();
-        assert!(agent_message(ReviewScope::Turn(3), &one).starts_with(
-            "Review of what you changed in turn 3 (1 comment; line numbers are as of the end of \
-             that turn):\n\n1. `src/main.rs`, line 2:"
-        ));
+        let (text, context) = agent_message(ReviewScope::Turn(3), &one);
+        assert_eq!(
+            text,
+            "Review of what you changed in turn 3 (line numbers are as of the end of that turn):
+- [main.rs L2](t3-context://v1/review-comment/review-comment_d1)"
+        );
+        let record = &serde_json::to_value(context.unwrap()).unwrap()["records"][0];
+        assert_eq!(
+            (&record["sectionId"], &record["sectionTitle"]),
+            (&json!("turn-3"), &json!("Turn 3"))
+        );
+
+        // A note alone is plain text.
         let mut note_only = submission();
         note_only.comments.clear();
         assert_eq!(
             agent_message(ReviewScope::Changes, &note_only),
-            "Close, a couple of things."
+            ("Close, a couple of things.".to_string(), None)
         );
+
+        // Ids T3 wouldn't take are hashed as T3 hashes them, and long comments are cut to T3's
+        // bounds.
+        let mut odd = submission();
+        odd.comments.truncate(1);
+        odd.comments[0].id = "comment 1/a".to_string();
+        odd.comments[0].body = "x".repeat(20_000);
+        let (text, context) = agent_message(ReviewScope::Changes, &odd);
+        let record = &serde_json::to_value(context.unwrap()).unwrap()["records"][0];
+        let context_id = record["contextId"].as_str().unwrap();
+        assert!(
+            context_id.starts_with("review-comment_comment-1-a-"),
+            "{context_id}"
+        );
+        assert!(text.ends_with(&format!("(t3-context://v1/review-comment/{context_id})")));
+        let comment = record["text"].as_str().unwrap();
+        assert_eq!(comment.chars().count(), 16_000);
+        assert!(comment.ends_with("\n… truncated …"));
+    }
+
+    #[test]
+    fn code_fences_fall_back_to_the_files_extension() {
+        assert_eq!(fence_language_for("src/dispatcher.ts"), "ts");
+        assert_eq!(fence_language_for(".gitignore"), "gitignore");
+        assert_eq!(fence_language_for("Makefile"), "text");
     }
 
     fn backend(rpc: Arc<RecordingRpc>, dir: &Path) -> AgentReviewBackend<RecordingRpc> {
@@ -979,16 +1104,26 @@ Why remove this?"
             .expect("the message is sent");
 
         let command = rpc.only_call::<rpc::OrchestrationDispatchCommand>();
+        let (text, context) = agent_message(ReviewScope::Turn(2), &submission());
         assert_eq!(
             command,
             message_dispatch(
                 "thread-1",
-                agent_message(ReviewScope::Turn(2), &submission()),
+                text.clone(),
+                context.clone(),
                 "id-0".to_string(),
                 "id-1".to_string(),
             )
         );
-        // On the wire, exactly T3's `message.dispatch`.
+        // On the wire, exactly T3's `message.dispatch`, with the comments as its context.
+        let records = submission_records()
+            .into_iter()
+            .map(|mut record| {
+                record["sectionId"] = json!("turn-2");
+                record["sectionTitle"] = json!("Turn 2");
+                record
+            })
+            .collect::<Vec<_>>();
         let wire = rpc.calls.lock()[0].1.clone();
         assert_eq!(
             wire,
@@ -997,8 +1132,9 @@ Why remove this?"
                 "commandId": "id-0",
                 "messageId": "id-1",
                 "threadId": "thread-1",
-                "text": agent_message(ReviewScope::Turn(2), &submission()),
+                "text": text,
                 "attachments": [],
+                "context": { "version": 1.0, "records": records },
                 "createdBy": "user",
                 "creationSource": "web",
                 "dispatchMode": { "type": "queue_after_active" }
@@ -1126,28 +1262,35 @@ Why remove this?"
         cx.simulate_keystrokes("secondary-enter");
         cx.run_until_parked();
 
-        assert_eq!(
-            rpc.only_call::<rpc::OrchestrationDispatchCommand>(),
-            message_dispatch(
-                "thread-1",
-                "Nearly there.
-
-Review of what you changed in turn 2 (1 comment; line numbers are as of the end of that turn):
-
-1. `src/main.rs`, line 2:
-```rust
-    run();
-```
-Handle the error."
-                    .to_string(),
-                "id-0".to_string(),
-                "id-1".to_string(),
-            )
-        );
         let (_, sent) = AgentReviewStore::new(dir.path(), "thread-1", ReviewScope::Turn(2))
             .load()
             .expect("the review is saved");
         assert_eq!(sent.len(), 1);
+        let context_id = format!("review-comment_{}", sent[0].id);
+        assert_eq!(
+            serde_json::to_value(rpc.only_call::<rpc::OrchestrationDispatchCommand>()).unwrap(),
+            json!({
+                "type": "message.dispatch",
+                "commandId": "id-0",
+                "messageId": "id-1",
+                "threadId": "thread-1",
+                "text": format!(
+                    "Nearly there.\n\nReview of what you changed in turn 2 (line numbers are as of \
+                     the end of that turn):\n- [main.rs L2](t3-context://v1/review-comment/{context_id})"
+                ),
+                "attachments": [],
+                "context": { "version": 1.0, "records": [{
+                    "version": 1, "kind": "review-comment", "contextId": context_id,
+                    "label": "main.rs L2", "sectionId": "turn-2", "sectionTitle": "Turn 2",
+                    "filePath": "src/main.rs", "startIndex": 1, "endIndex": 1,
+                    "rangeLabel": "L2", "text": "Handle the error.", "diff": "    run();",
+                    "fenceLanguage": "rust"
+                }] },
+                "createdBy": "user",
+                "creationSource": "web",
+                "dispatchMode": { "type": "queue_after_active" }
+            })
+        );
         review.read_with(cx, |review, cx| {
             assert_eq!(review.added_draft_count(cx), 0, "the comment was sent");
             assert!(
