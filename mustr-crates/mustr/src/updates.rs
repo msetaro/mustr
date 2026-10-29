@@ -382,6 +382,16 @@ impl Updater {
             .map(|global| global.0.clone())
     }
 
+    /// Whether the status bar shows an update's progress or "Restart to update".
+    pub fn shows_status(cx: &App) -> bool {
+        Self::global(cx).is_some_and(|updater| {
+            matches!(
+                updater.read(cx).status(),
+                Status::Downloading(_) | Status::Installing(_) | Status::Ready(_)
+            )
+        })
+    }
+
     fn new(config: Result<Config, SharedString>, automatic: bool, cx: &mut Context<Self>) -> Self {
         let (status, config) = match config {
             Ok(config) => (Status::Idle, Some(config)),

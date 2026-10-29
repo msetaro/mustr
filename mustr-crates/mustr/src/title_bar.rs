@@ -32,11 +32,11 @@ use crate::{
 };
 use gpui::{
     AnyElement, App, AppContext as _, Context, Decorations, Entity, Hsla, InteractiveElement as _,
-    IntoElement, MouseButton, ParentElement as _, Pixels, Point, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, TaskExt as _, WeakEntity, Window,
-    WindowButtonLayout, WindowControlArea, div, point, px,
+    IntoElement, MouseButton, ParentElement as _, Pixels, Point, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, TaskExt as _,
+    WeakEntity, Window, WindowButtonLayout, WindowControlArea, div, point, px,
 };
-use mustr_ui::{Chip, WindowTab, kbds_for_action, tokens, tokens::scaled};
+use mustr_ui::{Chip, OverflowRow, WindowTab, kbds_for_action, tokens, tokens::scaled};
 use platform_title_bar::{
     PlatformTitleBar, render_left_window_controls, render_right_window_controls,
 };
@@ -44,13 +44,32 @@ use review::ReviewView;
 use settings::{RegisterSetting, Settings, SettingsContent};
 use theme::ActiveTheme as _;
 use theme_settings::ThemeSettings;
-use ui::{FluentBuilder as _, PlatformStyle, Tooltip, h_flex, utils::TRAFFIC_LIGHT_PADDING};
+use ui::{
+    ButtonCommon as _, Clickable as _, Color, FluentBuilder as _, IconButton, IconName, IconSize,
+    PlatformStyle, Tooltip, h_flex, utils::TRAFFIC_LIGHT_PADDING,
+};
 use workspace::{Pane, SaveIntent, Workspace, WorkspaceSettings};
 
 /// The title bar's height at mustr's design size, and its minimum: Zed's minimum
 /// (`platform_title_bar_height` in `crates/ui/src/utils/constants.rs`), which fits the traffic
 /// lights.
 const TITLE_BAR_HEIGHT: Pixels = px(34.);
+
+/// A tab's widest, and how narrow tabs get before their row scrolls, at mustr's design size.
+const TAB_MAX_WIDTH: Pixels = px(240.);
+const TAB_MIN_WIDTH: Pixels = px(64.);
+/// The most of the tabs' room the active tab takes, when there are several.
+const ACTIVE_TAB_SHARE: f32 = 0.4;
+
+/// The search box's share of the window's width, and its narrowest and widest, at mustr's design
+/// size.
+const SEARCH_BOX_SHARE: f32 = 0.2;
+const SEARCH_BOX_MIN_WIDTH: Pixels = px(160.);
+const SEARCH_BOX_MAX_WIDTH: Pixels = px(220.);
+
+/// A window narrower than this, at mustr's design size, shows the search box as a button and the
+/// connection as its dot, so the tabs keep room: a half-screen window at mustr's default size.
+const COMPACT_BELOW_WIDTH: Pixels = px(560.);
 
 /// Where Zed places the traffic lights in its 34px title bar (`build_window_options` in
 /// `crates/zed/src/zed.rs`): 9px from the left, and vertically centered.
@@ -124,6 +143,11 @@ pub struct MustrTitleBar {
     workspace: WeakEntity<Workspace>,
     /// The pane whose items are shown as tabs: the workspace's active pane.
     pane: Entity<Pane>,
+    /// Measures the tabs' row, which they share.
+    tabs_row: OverflowRow,
+    /// Scrolls the tabs' row to the active tab when it or the row's width changes.
+    tabs_scroll: ScrollHandle,
+    scrolled_to: Option<(usize, Option<Pixels>)>,
     _pane_subscriptions: [Subscription; 2],
     _subscriptions: Vec<Subscription>,
 }
@@ -168,6 +192,9 @@ impl MustrTitleBar {
             workspace: workspace.downgrade(),
             _pane_subscriptions: Self::watch_pane(&pane, cx),
             pane,
+            tabs_row: OverflowRow::new(),
+            tabs_scroll: ScrollHandle::new(),
+            scrolled_to: None,
             _subscriptions: subscriptions,
         }
     }
@@ -194,9 +221,30 @@ impl MustrTitleBar {
         ]
     }
 
-    fn render_tabs(&self, cx: &App) -> Vec<AnyElement> {
+    /// The tabs, sharing the row's width, down to a few letters each; then the row scrolls.
+    fn render_tabs(&self, window: &Window, cx: &App) -> Vec<AnyElement> {
         let pane = self.pane.read(cx);
         let active_index = pane.active_item_index();
+        let rem_size = window.rem_size();
+        let count = pane.items_len().max(1);
+        // The room left by the new tab button and the gaps.
+        let room = self
+            .tabs_row
+            .width()
+            .map(|width| width - scaled(px(36. + 4. * count as f32)).to_pixels(rem_size));
+        // The active tab gets up to two fifths of the room, and the others share the rest.
+        let (min, max) = (
+            scaled(TAB_MIN_WIDTH).to_pixels(rem_size),
+            scaled(TAB_MAX_WIDTH).to_pixels(rem_size),
+        );
+        let widths = room.map(|room| {
+            if count == 1 {
+                return (max, max);
+            }
+            let active = (room * ACTIVE_TAB_SHARE).min(max).max(min);
+            let others = ((room - active) / (count - 1) as f32).min(max).max(min);
+            (active, others)
+        });
         pane.items()
             .enumerate()
             .map(|(index, item)| {
@@ -212,6 +260,13 @@ impl MustrTitleBar {
                     .unwrap_or_else(|| item.tab_content_text(0, cx));
                 WindowTab::new(("title-bar-tab", item_id.as_u64()), label)
                     .active(index == active_index)
+                    .when_some(widths, |tab, (active, others)| {
+                        tab.max_width(if index == active_index {
+                            active
+                        } else {
+                            others
+                        })
+                    })
                     .when_some(item.tab_tooltip_text(cx), |tab, tooltip| {
                         tab.tooltip(tooltip)
                     })
@@ -274,14 +329,31 @@ impl MustrTitleBar {
             .child("+")
     }
 
-    /// A search box that opens the command palette.
-    fn render_search_box(&self, window: &Window, cx: &App) -> impl IntoElement {
+    /// A search box that opens the command palette: a fifth of the window, from 160 to 220 at
+    /// mustr's design size, or in a narrow window just a search button.
+    fn render_search_box(&self, compact: bool, window: &Window, cx: &App) -> AnyElement {
         let palette = mustr_ui::palette(cx);
         let action = zed_actions::command_palette::Toggle;
+        if compact {
+            return IconButton::new("title-bar-search", IconName::MagnifyingGlass)
+                .icon_size(IconSize::Small)
+                .icon_color(Color::Muted)
+                .tooltip(Tooltip::for_action_title("Search commands", &action))
+                .on_click(|_, window, cx| {
+                    cx.stop_propagation();
+                    window.dispatch_action(Box::new(zed_actions::command_palette::Toggle), cx);
+                })
+                .into_any_element();
+        }
+        let rem_size = window.rem_size();
+        let width = (window.viewport_size().width * SEARCH_BOX_SHARE).clamp(
+            scaled(SEARCH_BOX_MIN_WIDTH).to_pixels(rem_size),
+            scaled(SEARCH_BOX_MAX_WIDTH).to_pixels(rem_size),
+        );
         h_flex()
             .id("title-bar-search")
             .flex_none()
-            .w(scaled(px(220.)))
+            .w(width)
             .gap(scaled(px(8.)))
             .px(scaled(px(8.)))
             .py(scaled(px(2.)))
@@ -300,15 +372,23 @@ impl MustrTitleBar {
                     .into_iter()
                     .flatten(),
             )
-            .child("Search commands…")
+            .child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child("Search commands…"),
+            )
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
             .on_click(|_, window, cx| {
                 cx.stop_propagation();
                 window.dispatch_action(Box::new(zed_actions::command_palette::Toggle), cx);
             })
+            .into_any_element()
     }
 
-    fn render_connection_status(&self, cx: &App) -> impl IntoElement {
+    /// The connection's chip, or in a narrow window just its dot, with the label in the tooltip.
+    fn render_connection_status(&self, compact: bool, cx: &App) -> impl IntoElement {
         let palette = mustr_ui::palette(cx);
         let status_colors = cx.theme().status();
         let connection = self.connection.read(cx);
@@ -379,6 +459,11 @@ impl MustrTitleBar {
             ),
         };
         let workspace = self.workspace.clone();
+        let (label, tooltip): (SharedString, SharedString) = if compact {
+            ("".into(), format!("{label}: {tooltip}").into())
+        } else {
+            (label, tooltip)
+        };
         Chip::new("title-bar-connection", label)
             .dot(dot)
             .tooltip(tooltip)
@@ -397,15 +482,33 @@ impl Render for MustrTitleBar {
         // A press on a tab or a button mustn't start moving the window, or a click with a little
         // mouse movement would be lost to the move. Copied from Zed's `TitleBar`, which stops
         // the same way around its buttons.
+        let compact =
+            window.viewport_size().width < scaled(COMPACT_BELOW_WIDTH).to_pixels(window.rem_size());
+        let scroll_to = (
+            self.pane.read(cx).active_item_index(),
+            self.tabs_row.width(),
+        );
+        if self.scrolled_to != Some(scroll_to) {
+            self.scrolled_to = Some(scroll_to);
+            self.tabs_scroll.scroll_to_item(scroll_to.0);
+        }
+        // The tabs scroll inside a row that measures the room they share (a scrolling row
+        // doesn't report its children's bounds).
+        let tabs = h_flex()
+            .id("title-bar-tabs")
+            .w_full()
+            .min_w_0()
+            .gap(scaled(px(4.)))
+            .overflow_x_scroll()
+            .track_scroll(&self.tabs_scroll)
+            .children(self.render_tabs(window, cx))
+            .child(self.render_new_tab_button(cx))
+            .into_any_element();
         let children = [
-            h_flex()
-                .id("title-bar-tabs")
-                .min_w_0()
-                .gap(scaled(px(4.)))
-                .overflow_x_scroll()
+            self.tabs_row
+                .render([(None, tabs)], window)
+                .flex_1()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .children(self.render_tabs(cx))
-                .child(self.render_new_tab_button(cx))
                 .into_any_element(),
             h_flex()
                 .flex_none()
@@ -413,8 +516,8 @@ impl Render for MustrTitleBar {
                 .pr_1()
                 .gap(scaled(px(8.)))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(self.render_search_box(window, cx))
-                .child(self.render_connection_status(cx))
+                .child(self.render_search_box(compact, window, cx))
+                .child(self.render_connection_status(compact, cx))
                 .into_any_element(),
         ];
         let button_layout = ButtonLayoutSetting::get_global(cx).0;
