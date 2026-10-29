@@ -153,6 +153,7 @@ fn the_card_says_what_t3s_does() {
 /// and a record of every call.
 struct FakeBackend {
     runs: Vec<Value>,
+    items: Vec<Value>,
     calls: Mutex<Vec<(String, Value, Access)>>,
     commands: Mutex<Vec<Value>>,
     setups: Mutex<Vec<mpsc::UnboundedSender<Result<Value>>>>,
@@ -160,8 +161,13 @@ struct FakeBackend {
 
 impl FakeBackend {
     fn new(runs: Vec<Value>) -> Arc<Self> {
+        Self::with_items(runs, Vec::new())
+    }
+
+    fn with_items(runs: Vec<Value>, items: Vec<Value>) -> Arc<Self> {
         Arc::new(Self {
             runs,
+            items,
             calls: Mutex::default(),
             commands: Mutex::default(),
             setups: Mutex::default(),
@@ -230,12 +236,23 @@ impl ThreadBackend for FakeBackend {
             "worktreePath": null,
             "lineage": { "rootThreadId": THREAD, "parentThreadId": null, "relationshipToParent": null }
         });
+        let visible = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(position, item)| {
+                json!({
+                    "position": position, "visibility": "local", "sourceThreadId": THREAD,
+                    "sourceItemId": item["id"], "item": item
+                })
+            })
+            .collect::<Vec<_>>();
         let projection = json!({
             "thread": thread, "attempts": [], "checkpointScopes": [], "checkpoints": [],
             "contextHandoffs": [], "contextTransfers": [], "messages": [], "nodes": [],
             "plans": [], "providerSessions": [], "providerThreads": [], "providerTurns": [],
-            "runs": self.runs, "runtimeRequests": [], "subagents": [], "turnItems": [],
-            "visibleTurnItems": [], "updatedAt": NOW
+            "runs": self.runs, "runtimeRequests": [], "subagents": [],
+            "turnItems": self.items, "visibleTurnItems": visible, "updatedAt": NOW
         });
         ready(
             serde_json::from_value(json!({ "snapshotSequence": 10, "projection": projection }))
@@ -419,4 +436,110 @@ async fn other_failed_runs_show_no_card(cx: &mut TestAppContext) {
     let (card, cx) = open_card(backend.clone(), cx);
     assert!(!shows(&card, cx));
     assert!(backend.calls.lock().is_empty());
+}
+
+fn first_message(run_id: &str) -> Value {
+    json!({
+        "type": "user_message", "id": "i1", "threadId": THREAD, "runId": run_id, "nodeId": null,
+        "providerThreadId": null, "providerTurnId": null, "parentItemId": null,
+        "nativeItemRef": null, "ordinal": 1, "status": "completed", "title": null,
+        "startedAt": null, "completedAt": null, "updatedAt": NOW,
+        "messageId": "message-1", "text": "Add retries with backoff", "attachments": [],
+        "createdBy": "user", "creationSource": "web", "inputIntent": "turn_start"
+    })
+}
+
+#[test]
+fn the_setup_terminal_opens_once_the_script_starts() {
+    let with_script = |status: &str| {
+        snapshot(setup(
+            "running",
+            1,
+            vec![stage("setup-script", status, None, None, &[])],
+            None,
+        ))
+    };
+    assert!(!setup_terminal_started(&with_script("pending")));
+    assert!(setup_terminal_started(&with_script("running")));
+    assert!(setup_terminal_started(&with_script("failed")));
+    let mut no_script = with_script("running");
+    no_script.setup_script = None;
+    assert!(!setup_terminal_started(&no_script));
+}
+
+#[gpui::test]
+async fn work_locally_cancels_the_setup_then_sends_again_in_the_checkout(cx: &mut TestAppContext) {
+    let backend = FakeBackend::with_items(
+        vec![run("run-1", "preparing", true)],
+        vec![first_message("run-1")],
+    );
+    let (card, cx) = open_card(backend.clone(), cx);
+    backend.send(setup(
+        "running",
+        3,
+        vec![stage("checkout", "running", None, Some(42), &[])],
+        None,
+    ));
+    cx.run_until_parked();
+    card.read_with(cx, |card, _| {
+        assert_eq!(
+            card.first_message,
+            Some(Resend {
+                run_id: "run-1".to_string(),
+                text: "Add retries with backoff".to_string()
+            })
+        )
+    });
+
+    card.update(cx, |card, cx| card.work_locally(cx));
+    cx.run_until_parked();
+    assert_eq!(
+        backend.calls("worktreeSetup.cancel"),
+        [(json!({ "threadId": THREAD }), Access::Operate)]
+    );
+    // Nothing goes again until T3 has moved the thread back to its checkout.
+    assert!(backend.commands.lock().is_empty());
+    let resend = card.read_with(cx, |card, _| card.resend.clone()).unwrap();
+
+    let state = |status: &str| {
+        let projection = json!({
+            "thread": {
+                "id": THREAD, "projectId": "project-1", "title": "Add retries",
+                "createdAt": NOW, "updatedAt": NOW, "createdBy": "user", "creationSource": "web",
+                "interactionMode": "default", "runtimeMode": "full-access",
+                "modelSelection": { "instanceId": "claudeAgent", "model": "claude-opus-4-5" },
+                "providerInstanceId": "claudeAgent", "activeProviderThreadId": null,
+                "archivedAt": null, "deletedAt": null, "forkedFrom": null, "branch": null,
+                "worktreePath": null,
+                "lineage": { "rootThreadId": THREAD, "parentThreadId": null, "relationshipToParent": null }
+            },
+            "attempts": [], "checkpointScopes": [], "checkpoints": [], "contextHandoffs": [],
+            "contextTransfers": [], "messages": [], "nodes": [], "plans": [], "providerSessions": [],
+            "providerThreads": [], "providerTurns": [], "runs": [run("run-1", status, true)],
+            "runtimeRequests": [], "subagents": [], "turnItems": [], "visibleTurnItems": [],
+            "updatedAt": NOW
+        });
+        ThreadState::new(serde_json::from_value(projection).unwrap(), 1)
+    };
+    let preparing = state("preparing");
+    let failed = state("failed");
+    assert!(!back_in_checkout(&resend, Some(&preparing), Some(None)));
+    assert!(!back_in_checkout(
+        &resend,
+        Some(&failed),
+        Some(Some("/tmp/worktrees/retry"))
+    ));
+    assert!(!back_in_checkout(&resend, Some(&failed), None));
+    assert!(back_in_checkout(&resend, Some(&failed), Some(None)));
+
+    card.update(cx, |card, cx| {
+        card.send_again(backend.clone(), THREAD.to_string(), cx)
+    });
+    cx.run_until_parked();
+    let commands = backend.commands.lock().clone();
+    assert_eq!(commands.len(), 1, "{commands:#?}");
+    assert_eq!(commands[0]["type"], json!("message.dispatch"));
+    assert_eq!(commands[0]["threadId"], json!(THREAD));
+    assert_eq!(commands[0]["text"], json!("Add retries with backoff"));
+    card.read_with(cx, |card, _| assert_eq!(card.resend, None));
 }

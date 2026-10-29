@@ -116,7 +116,7 @@ and dialogs narrow with the window.
 | Reorder the queue | Drag handle | `queued-run.reorder` | Done (`composer.rs`): drag and arrows, when the agent's session takes queued messages | — | P2 |
 | Send a queued message now | "Send now" on a queued message | `queued-run.start` *(0.1.3)* | Done (`composer.rs`): while nothing runs, on 0.1.3 or later (hidden on older servers) | — | P2 |
 | Usage-limit recovery | Resume at reset, or snooze until reset (`chat/UsageLimitRecoveryBanner.tsx`) | `thread.metadata.update` `{limitRecovery}`, `thread.snooze`; shell `usageLimitResetAt` | Done (`thread_chat/src/usage.rs`): Resume at reset, Snooze until reset, and Resume now | — | P1 |
-| Worktree setup progress, retry | Setup card with retry and cancel (`chat/WorktreeSetupCard.tsx`) | `subscribeWorktreeSetup`, `prepared-run.retry`, `worktreeSetup.cancel` | Done (`thread_chat/src/worktree_setup.rs`): the card above the timeline with stages, the script's last lines, Details, Cancel, and Retry for a failed preparation. No Open terminal or Work locally | — | P1 |
+| Worktree setup progress, retry | Setup card with retry and cancel (`chat/WorktreeSetupCard.tsx`) | `subscribeWorktreeSetup`, `prepared-run.retry`, `worktreeSetup.cancel` | Done (`thread_chat/src/worktree_setup.rs`): the card above the timeline with stages, the script's last lines, Details, Cancel, and Retry for a failed preparation; Open terminal shows T3's setup terminal in the panel, and Work locally cancels the setup and sends the thread's first message again in the project's checkout | — | P1 |
 
 ### 2.6 Approvals, questions and secrets
 
@@ -152,8 +152,8 @@ and dialogs narrow with the window.
 |---|---|---|---|---|---|
 | Edit from here, revert | Rewinds to before a message, keeping or restoring files (`chat/useTimelineRewind.ts`) | `checkpoint.rollback` `{checkpointId, restoreFiles}` | Done (`thread_chat/src/history.rs`) | — | P1 |
 | Fork a thread | "Fork from this response" on an assistant message (`chat/TimelineAssistantRows.tsx`) | `thread.fork` | Done (`history.rs`): forks and opens the fork | — | P1 |
-| Merge back | Brings a fork's result back to its parent | `thread.merge_back` | Missing | S | P2 |
-| Hand off to another provider | Moves context to a new provider (`docs/user/portable-handoffs.md`) | `provider.switch`, `thread.fork` with `portable_context` | Missing | M | P2 |
+| Merge back | Brings a fork's result back to its parent | `thread.merge_back` | Done (`mustr/src/thread_handoff.rs`): Merge back in a fork's toolbar, from its latest finished run into the thread it came from, which then opens; T3 hands the work over with the parent's next message | — | P2 |
+| Hand off to another provider | Moves context to a new provider (`docs/user/portable-handoffs.md`) | `provider.switch`, `thread.fork` with `portable_context` | Done (`thread_handoff.rs`): the toolbar's Hand off ▾ switches the thread to another agent (`thread.model-selection.set`, as T3's model picker does) when its agent can hand off, and says the next message's handoff is pending until it's sent | — | P2 |
 
 ### 2.9 Diffs and reviewing agent work
 
@@ -164,18 +164,18 @@ and dialogs narrow with the window.
 | Diff comments to the agent | Review comments become composer chips (`reviewCommentContext.ts`) | `message.dispatch` (`context`: review-comment) | Done (`agent_review.rs`): Send to agent sends T3's review-comment records, one per comment | — | P0 |
 | Diff from the thread | The chat header toggles the diff panel (`chat/ChatHeader.tsx`) | — | Done (`mustr/src/thread_toolbar.rs`: Review changes) | — | P0 |
 | Open the worktree in mustr's editor | T3 has a file tree, file picker, content search and editable file viewer (`components/files/`) | `projects.listEntries`, `searchEntries`, `searchContents`, `readFile`, `writeFile` | Done (`mustr/src/worktrees.rs`): Open adds the worktree to the window's project and shows the file finder | — | P1 |
-| Uncommitted-only diff | Diff panel source `working-tree`, besides branch and turn (`diffPanelStore.ts`) | `review.getDiffPreview` | Partial: folded into Changes | S | P2 |
+| Uncommitted-only diff | Diff panel source `working-tree`, besides branch and turn (`diffPanelStore.ts`) | `review.getDiffPreview` | Done (`agent_review.rs`): Uncommitted beside Changes and the turns, read with git (the project's checkout for a thread without a worktree), or T3's `working-tree` diff when the folder is on T3's machine | — | P2 |
 
 ### 2.10 Worktrees and branches
 
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
 | A worktree per thread | Created when the thread launches | `launchThread` | Done | — | P0 |
-| Remove worktrees | Offers removal of an unshared worktree on archive or delete; automatic cleanup rules (`worktreeCleanup.ts`, `settings/StorageSettings.tsx`) | `vcs.removeWorktree`; whether a worktree is shared: `orchestration.getWorktreeThreadIds` *(0.1.3)*, or on 0.1.1 the shell threads with the same `worktreePath`; `server.runStorageCleanup` | Done (`mustr/src/worktrees.rs`): the worktrees page, and on archive. No automatic cleanup rules | — | P0: user's must-have; about 150 T3 worktrees on this machine |
+| Remove worktrees | Offers removal of an unshared worktree on archive or delete; automatic cleanup rules (`worktreeCleanup.ts`, `settings/StorageSettings.tsx`) | `vcs.removeWorktree`; whether a worktree is shared: `orchestration.getWorktreeThreadIds` *(0.1.3)*, or on 0.1.1 the shell threads with the same `worktreePath`; `server.runStorageCleanup` | Done (`mustr/src/worktrees.rs`): the worktrees page, and on archive; T3's automatic cleanup rules and Delete now above the list (`worktree_cleanup.rs`, `server.updateSettings`, `server.runStorageCleanup`, `server.getStorageCleanupReport`) | — | P0: user's must-have; about 150 T3 worktrees on this machine |
 | Switch or create a branch | `mod+shift+g` (`components/BranchPicker.tsx`) | `vcs.listRefs`, `vcs.switchRef`, `vcs.createRef` | Done (`mustr/src/thread_git.rs`: the toolbar's branch picker, `mod+shift+g`) | — | P0: user's must-have |
 | Git status | Ahead, behind and dirty for the git actions | `subscribeVcsStatus`, `vcs.refreshStatus` | Done (`thread_git.rs`) | — | P0: user's must-have (feeds §2.11) |
-| Worktree handoff | Moves a thread between the checkout and a worktree | `thread.metadata.update` `{worktreePath, branch}` | Missing | M | P2 |
-| Project scripts | Run `dev` or `test` from `t3.json`; `runOnSettle` (`components/ProjectScriptsControl.tsx`) | `terminal.open`; `projects.mutate` scripts | Partial (`mustr/src/terminal_panel.rs`): the terminal panel's Run ▾ runs the project's scripts and `t3.json`'s (`projects.readFile`) in a new terminal. No editing, importing, `runOnSettle` or previews | S | P2 |
+| Worktree handoff | Moves a thread between the checkout and a worktree | `thread.metadata.update` `{worktreePath, branch}` | Done (`thread_git.rs`): the branch picker moves a thread into the worktree a branch is checked out in, or back to the project's checkout, as T3's does; a thread in the checkout moves to a new worktree on a new branch (`vcs.createWorktree`, as T3's `t3_worktree_handoff`). Not while the agent runs | — | P2 |
+| Project scripts | Run `dev` or `test` from `t3.json`; `runOnSettle` (`components/ProjectScriptsControl.tsx`) | `terminal.open`; `projects.mutate` scripts | Done (`mustr/src/terminal_panel.rs`, `project_scripts.rs`): Run ▾ runs the scripts T3's settings resolve and `t3.json`'s in a new terminal; Add action…, the pencil and the plus add, edit, remove and import them (`server.updateSettings` with the project's override, as T3's app saves them), with the worktree and `runOnSettle` roles. No keybindings or previews (mustr has no preview browser) | — | P2 |
 
 ### 2.11 Git and pull requests
 
@@ -188,8 +188,8 @@ and dialogs narrow with the window.
 | A PR's threads | `pullRequest/PullRequestThreadLinks.tsx` | `pullRequests.linkedThreads` | Done (`mustr/src/pull_request_review.rs`): Threads in the PR review header, opening each | — | P1 |
 | Merge, ready, close | `pullRequest/PullRequestDetailActions.tsx` | `pullRequests.runAction` | Done (`mustr/src/pull_request_review.rs`): in the PR header, confirming merges and closes | — | P0: user's must-have |
 | PR inbox, review, comments, submit | `pullRequest/PullRequestsPage.tsx` | `pullRequests.*` | Done: mustr's core (`review/`, `mustr/src/home.rs`) | — | — |
-| Review guides | `pullRequest/PullRequestGuideTab.tsx`; agents' `write_pull_request_guides` | `pullRequests.reviewGuide`, `generateReviewGuide` | Missing | M | P2 |
-| Reviewers, labels, title; stacks | `pullRequest/PullRequestReviewerPicker.tsx`, `PullRequestStack*.tsx` | `requestReviewers`, `setLabels`, `update`, `stack` | Missing | M | P2 |
+| Review guides | `pullRequest/PullRequestGuideTab.tsx`; agents' `write_pull_request_guides` | `pullRequests.reviewGuide`, `generateReviewGuide` | Done (`mustr/src/pull_request_guide.rs`): Guide in the PR review's header opens the stops, `j` and `k` step, files scroll the review; Write guide and Rewrite ask T3's agent (operate), followed every five seconds | — | P2 |
+| Reviewers, labels, title; stacks | `pullRequest/PullRequestReviewerPicker.tsx`, `PullRequestStack*.tsx` | `requestReviewers`, `setLabels`, `update`, `stack` | Done (`mustr/src/pull_request_details.rs`): the PR header's reviewers and labels with pickers that apply each pick (`reviewerCandidates`, `labelCandidates`), Edit title, and the stack's layers, each opening its review. Not the stack's Merge stack and Rebase stack, nor reviewers' verdicts | — | P2 |
 | Source control accounts | Hosts, tokens, writing style (`settings/SourceControlSettings.tsx`) | `server.discoverSourceControl`, `server.updateSettings` | Done (`mustr/src/source_control.rs`, `t3_settings.rs`): each forge's CLI and account on T3's machine (and `gh`'s logins), T3's sign-in instructions with the command to copy (mustr never runs `gh auth`), git and jj, and the writing style. No saved tokens or per-host account choice | — | P2: set once; T3 reads `gh` and `glab` auth |
 
 ### 2.12 Terminals and editors
@@ -197,7 +197,7 @@ and dialogs narrow with the window.
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
 | Open in editor | Cursor, VS Code, Zed and others for the thread's folder (`chat/OpenInPicker.tsx`) | `shell.openInEditor`; editors from `server.getConfig` | Done (`thread_git.rs`: Open in ▾ in the thread toolbar and the agent review header, `mod+o`) | — | P0: the way out for anything mustr lacks |
-| Terminal per thread | A drawer in the thread's worktree that stays open (`components/ThreadTerminalDrawer.tsx`, `components/PersistentThreadTerminals.tsx`) | `terminal.open/attach/write/resize/close`, `subscribeTerminalEvents` (`terminal:*` scopes) | Done (`mustr/src/terminal_panel.rs`, `remote_terminal.rs`): Zed terminals in the thread's worktree, kept per thread, `mod+j`; on a T3 on another machine, T3's terminals (`terminal.attach`, `write`, `resize`, `close`) in the same panel, found again while T3 runs them. No mouse reports to full-screen programs | — | P0: user's must-have |
+| Terminal per thread | A drawer in the thread's worktree that stays open (`components/ThreadTerminalDrawer.tsx`, `components/PersistentThreadTerminals.tsx`) | `terminal.open/attach/write/resize/close`, `subscribeTerminalEvents` (`terminal:*` scopes) | Done (`mustr/src/terminal_panel.rs`, `remote_terminal.rs`): Zed terminals in the thread's worktree, kept per thread, `mod+j`; on a T3 on another machine, T3's terminals (`terminal.attach`, `write`, `resize`, `close`) in the same panel, found again while T3 runs them, with mouse reports to full-screen programs and an IME's text | — | P0: user's must-have |
 | Terminal excerpt to the composer | `chat/TerminalContextInlineChip.tsx` | `message.dispatch.context` (terminal) | Done (`terminal_panel.rs`): Add to chat on a selection (`mod+>`) adds T3's terminal record to the thread's composer as a chip | — | P2 |
 
 ### 2.13 Preview browser and devices
@@ -205,7 +205,7 @@ and dialogs narrow with the window.
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
 | Preview browser | An Electron webview on desktop, or the server's headless Chrome streamed into a panel; the agent drives it too (`preview/PreviewPanel.tsx`, `browser/ServerBrowserSurface.tsx`) | `preview.*`, `subscribePreviewEvents`, `/api/preview-stream/*` (`preview:operate`) | Partial: a preview tool's page (`preview_open`, `preview_navigate`) has Open in browser on its tool call (`html_renders.rs`); no preview panel | L | P2: agents' `preview_*` tools run headless without a client; open URLs in the system browser |
-| Local dev servers | Finds listening ports (`preview/useDiscoveredLocalServers.ts`) | `subscribeDiscoveredLocalServers` | Missing | S | P2 |
+| Local dev servers | Finds listening ports (`preview/useDiscoveredLocalServers.ts`) | `subscribeDiscoveredLocalServers` | Done (`mustr/src/local_servers.rs`): the thread toolbar shows the servers its terminals run, each opening in the system browser when T3 runs here | — | P2 |
 | Device emulation | iOS and Android simulators (`components/device/`) | `device.*`, `subscribeDeviceState` | Missing | L | Skip: only for mobile app work; agents' `device_*` tools still work |
 
 ### 2.14 Delegation, workflows and scheduled tasks
@@ -367,10 +367,8 @@ merged into `m3/next`.
 
 No P0 is open, and one P1 is partial. What the wave-3 packages left in their rows:
 - **Command palette** (P1): T3's "new thread in…" isn't in Zed's palette.
-- **Remote terminals:** mouse clicks and reports to full-screen programs, and input-method text
-  (`remote_terminal.rs`).
-- **Worktree setup card:** Open terminal and Work locally (`worktree_setup.rs`).
-- **Project scripts** (P2): editing and importing scripts, `runOnSettle`, and previews.
+- **Project scripts** (P2): script keybindings and previews.
+- **PR stacks** (P2): Merge stack and Rebase stack; reviewers' verdicts beside requested reviewers.
 - **Models** (P2): model visibility in the pickers, and per-model options for custom models.
 - **Project settings** (P2): a panel for a project's defaults, scripts and icon.
 - **Zoom:** Zed's own command palette is 34 rems wide, so at 26 it's wider than a half-screen
@@ -378,8 +376,6 @@ No P0 is open, and one P1 is partial. What the wave-3 packages left in their row
   settings file leaves code and terminals at `buffer_font_size` (26); the zoom keys change both.
 
 **Later (P2):** several environments and remote access; start in background and
-one prompt for several models; cloning repos; math in Markdown and the minimap; merge back and
-provider handoff; the uncommitted-only diff and worktree handoff; review guides, reviewers and
-labels, and source control accounts; the preview panel and local dev servers; outside agents;
-delete and bulk select; hover cards; the usage dashboard and provider instances; and automatic
-worktree cleanup.
+one prompt for several models; cloning repos; math in Markdown and the minimap; source control
+accounts; the preview panel; outside agents; delete and bulk select; hover cards; and the usage
+dashboard and provider instances.

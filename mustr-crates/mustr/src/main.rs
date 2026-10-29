@@ -44,7 +44,13 @@ mod macos;
 // WP8, notifications:
 mod notifications;
 // WP11, terminals, worktrees and the PR flow:
+mod local_servers;
+mod project_scripts;
+mod pull_request_details;
+mod pull_request_guide;
 mod remote_terminal;
+mod thread_handoff;
+mod worktree_cleanup;
 // WP12, composer and timeline:
 // WP13, thread list and navigation:
 // WP14, agent setup and T3's settings:
@@ -121,7 +127,7 @@ struct Args {
     #[arg(long, hide = true, value_name = "THREAD_ID")]
     review_thread: Option<String>,
 
-    /// The scope `--review-thread` opens: `changes` (the default) or `turn:N`.
+    /// The scope `--review-thread` opens: `changes` (the default), `uncommitted` or `turn:N`.
     #[arg(long, hide = true, value_name = "SCOPE", value_parser = parse_review_scope)]
     thread_scope: Option<review::ReviewScope>,
 
@@ -298,11 +304,12 @@ fn main() {
 fn parse_review_scope(scope: &str) -> Result<review::ReviewScope, String> {
     match scope {
         "changes" => Ok(review::ReviewScope::Changes),
+        "uncommitted" => Ok(review::ReviewScope::Uncommitted),
         _ => scope
             .strip_prefix("turn:")
             .and_then(|turn| turn.parse().ok())
             .map(review::ReviewScope::Turn)
-            .ok_or_else(|| format!("{scope:?} isn't `changes` or `turn:N`")),
+            .ok_or_else(|| format!("{scope:?} isn't `changes`, `uncommitted` or `turn:N`")),
     }
 }
 

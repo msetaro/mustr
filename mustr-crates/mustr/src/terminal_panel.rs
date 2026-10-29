@@ -15,6 +15,9 @@
 //!   finds it. Zed's own terminal panel loads asynchronously, which is why mustr doesn't use it.
 //!   Terminals start later, when a thread first wants one.
 //!
+//! [`OpenSetupTerminal`] (the worktree setup card's Open terminal) shows the terminal T3 runs a
+//! thread's setup script in: T3's own terminal, on whichever machine T3 runs.
+//!
 //! [`OpenThreadTerminal`] (the thread toolbar's Terminal button) opens a thread's terminals,
 //! [`ToggleThreadTerminal`] (`secondary-j`, as in T3, and Zed's `ctrl-\``) shows or hides the
 //! active thread's, and [`NewThreadTerminal`] adds one. [`AddTerminalSelectionToChat`] (the
@@ -22,10 +25,13 @@
 //! terminal chip (`thread_chat::AddComposerContext`), as T3's terminal does.
 //!
 //! The header's Run ▾ runs the project's scripts (T3's `ProjectScriptsControl.tsx`): the
-//! project's own (`scripts` in T3's shell) and those in the thread folder's `t3.json`
-//! (`projects.readFile`), each in a new terminal, typed with a space first as T3 does.
+//! project's own (as T3's settings resolve them, `project_scripts.rs`) and those in the thread
+//! folder's `t3.json` (`projects.readFile`), each in a new terminal, typed with a space first as
+//! T3 does. It adds, edits (the pencil) and removes the project's scripts, and adds `t3.json`'s
+//! to them (the plus), as T3's menu does.
 
 use crate::{
+    project_scripts::{ProjectScripts, ScriptEditor, ScriptIcon, ScriptInput, saved_scripts},
     remote_terminal::{self, Launch, RemoteTerminal, RemoteTerminalEvent},
     thread_git::{MenuSlot, menu_position},
     worktrees::{display_path, worktrees_are_local},
@@ -44,14 +50,14 @@ use std::{
 use t3_client::t3_api::{
     rpc,
     types::{
-        OrchestrationV2ThreadShell, ProjectReadFileInput, ProjectScript, TerminalSessionStatus,
-        TerminalSummary,
+        OrchestrationProjectShell, OrchestrationV2ThreadShell, ProjectReadFileInput, ProjectScript,
+        TerminalSessionStatus, TerminalSummary,
     },
 };
 use terminal_view::TerminalView;
 use thread_chat::{
-    Access, AddComposerContext, ComposerContext, OpenThreadTerminal, ThreadBackendExt as _,
-    ThreadShells, ThreadView, actions::TerminalContext,
+    Access, AddComposerContext, ComposerContext, OpenSetupTerminal, OpenThreadTerminal,
+    ThreadBackendExt as _, ThreadShells, ThreadView, actions::TerminalContext,
 };
 use ui::{ContextMenu, Tooltip, prelude::*};
 use workspace::{
@@ -100,6 +106,9 @@ pub fn init(cx: &mut App) {
         });
         workspace.register_action(|workspace, _: &ToggleThreadTerminal, window, cx| {
             toggle_terminals(workspace, window, cx);
+        });
+        workspace.register_action(|workspace, action: &OpenSetupTerminal, window, cx| {
+            open_setup_terminal(workspace, action, window, cx);
         });
         workspace.register_action(|workspace, _: &NewThreadTerminal, window, cx| {
             open_terminals(workspace, None, window, cx);
@@ -163,6 +172,23 @@ fn open_terminals(
         panel.focus_on_start = !panel.has_terminals();
     });
     // Opening the dock calls `set_active`, which records that this thread's terminals show.
+    workspace.focus_panel::<ThreadTerminalPanel>(window, cx);
+}
+
+/// Shows the terminal T3 runs a thread's setup script in, attaching to it the first time.
+fn open_setup_terminal(
+    workspace: &mut Workspace,
+    action: &OpenSetupTerminal,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some(panel) = workspace.panel::<ThreadTerminalPanel>(cx) else {
+        return;
+    };
+    panel.update(cx, |panel, cx| {
+        panel.show_thread(action.thread_id.clone(), window, cx);
+        panel.show_t3_terminal(action, window, cx);
+    });
     workspace.focus_panel::<ThreadTerminalPanel>(window, cx);
 }
 
@@ -341,6 +367,8 @@ pub struct ThreadTerminalPanel {
     _active_thread: Option<Subscription>,
     /// The Run ▾ menu.
     menu: MenuSlot,
+    /// T3's settings, for which scripts apply, once a thread is shown.
+    scripts: Option<(Entity<ProjectScripts>, Subscription)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -372,6 +400,7 @@ impl ThreadTerminalPanel {
             shells: None,
             _active_thread: None,
             menu: MenuSlot::default(),
+            scripts: None,
             _subscriptions: vec![subscription],
         }
     }
@@ -435,6 +464,16 @@ impl ThreadTerminalPanel {
 
     fn show_thread(&mut self, thread_id: String, window: &mut Window, cx: &mut Context<Self>) {
         self.follow_shell(window, cx);
+        let scripts = self
+            .scripts
+            .get_or_insert_with(|| {
+                let store = ProjectScripts::global(cx);
+                let subscription = cx.observe(&store, |_, _, cx| cx.notify());
+                (store, subscription)
+            })
+            .0
+            .clone();
+        scripts.update(cx, |scripts, cx| scripts.ensure_loaded(cx));
         self.threads.entry(thread_id.clone()).or_default();
         self.thread_id = Some(thread_id.clone());
         self.read_file_scripts(thread_id, cx);
@@ -455,20 +494,75 @@ impl ThreadTerminalPanel {
             })
     }
 
-    /// The project's own scripts, from T3's shell.
+    /// The thread's project, from T3's shell.
+    fn thread_project(&self, thread_id: &str, cx: &App) -> Option<OrchestrationProjectShell> {
+        let (shells, _) = self.shells.as_ref()?;
+        let shell = shells.read(cx).shell()?;
+        let thread = shell.threads.get(thread_id)?;
+        shell.projects.get(&thread.project_id).cloned()
+    }
+
+    /// The project's own scripts, as T3's settings resolve them (the shell's until they load).
     fn project_scripts(&self, thread_id: &str, cx: &App) -> Vec<Script> {
-        let Some((shells, _)) = &self.shells else {
+        let Some(project) = self.thread_project(thread_id, cx) else {
             return Vec::new();
         };
-        let Some(shell) = shells.read(cx).shell() else {
-            return Vec::new();
+        let scripts = match &self.scripts {
+            Some((store, _)) => store.read(cx).scripts(&project),
+            None => project.scripts,
         };
-        shell
-            .threads
-            .get(thread_id)
-            .and_then(|thread| shell.projects.get(&thread.project_id))
-            .map(|project| project.scripts.iter().map(Script::from_project).collect())
-            .unwrap_or_default()
+        scripts.iter().map(Script::from_project).collect()
+    }
+
+    /// Opens the editor of one of the project's scripts, or of a new one.
+    fn edit_script(
+        &mut self,
+        script: Option<ProjectScript>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self
+            .thread_id
+            .as_deref()
+            .and_then(|thread_id| self.thread_project(thread_id, cx))
+        else {
+            return;
+        };
+        self.workspace
+            .update(cx, |workspace, cx| {
+                workspace.toggle_modal(window, cx, |window, cx| {
+                    ScriptEditor::new(project, script.as_ref(), window, cx)
+                })
+            })
+            .ok();
+    }
+
+    /// Adds one of `t3.json`'s scripts to the project's.
+    fn import_script(&mut self, script: &Script, cx: &mut Context<Self>) {
+        let (Some(project), Some(store)) = (
+            self.thread_id
+                .as_deref()
+                .and_then(|thread_id| self.thread_project(thread_id, cx)),
+            self.scripts.as_ref().map(|(store, _)| store.clone()),
+        ) else {
+            return;
+        };
+        let input = ScriptInput {
+            name: script.name.clone(),
+            command: script.command.clone(),
+            icon: ScriptIcon::Play,
+            run_on_worktree_create: script.setup,
+            wait_for_setup: false,
+            run_on_settle: script.on_settle,
+        };
+        let next = saved_scripts(&store.read(cx).scripts(&project), None, &input);
+        let save = store.update(cx, |store, cx| store.save(&project.id, next, cx));
+        cx.spawn(async move |_, _| {
+            if let Err(error) = save.await {
+                log::error!("couldn't add the action from t3.json: {error:#}");
+            }
+        })
+        .detach();
     }
 
     /// Reads the thread folder's `t3.json` once, when the panel first shows the thread.
@@ -573,15 +667,42 @@ impl ThreadTerminalPanel {
         cx: &mut Context<Self>,
     ) {
         let (project, file) = self.scripts(cx);
+        let editable = self
+            .scripts
+            .as_ref()
+            .is_some_and(|(store, _)| store.read(cx).blocked_reason(cx).is_none());
         let this = cx.weak_entity();
         let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            // The pencil and the plus, which `secondary-enter` presses too, as in Zed's menus.
+            menu = menu.end_slot_action(Box::new(menu::SecondaryConfirm));
             for script in &project {
-                let this = this.clone();
+                let run = this.clone();
                 let command = script.command.clone();
-                menu = menu.entry(script.menu_label(), None, move |window, cx| {
-                    this.update(cx, |this, cx| this.run_script(command.clone(), window, cx))
+                let label = script.menu_label();
+                let run_it = move |window: &mut Window, cx: &mut App| {
+                    run.update(cx, |this, cx| this.run_script(command.clone(), window, cx))
                         .ok();
-                });
+                };
+                menu = match script.source.clone().filter(|_| editable) {
+                    Some(source) => {
+                        let edit = this.clone();
+                        menu.entry_with_end_slot(
+                            label,
+                            None,
+                            run_it,
+                            IconName::Pencil,
+                            "Edit action".into(),
+                            move |window, cx| {
+                                let source = source.clone();
+                                edit.update(cx, |this, cx| {
+                                    this.edit_script(Some(source), window, cx)
+                                })
+                                .ok();
+                            },
+                        )
+                    }
+                    None => menu.entry(label, None, run_it),
+                };
             }
             if !file.is_empty() {
                 if !project.is_empty() {
@@ -589,13 +710,41 @@ impl ThreadTerminalPanel {
                 }
                 menu = menu.header(format!("From {T3_PROJECT_FILE}"));
                 for script in &file {
-                    let this = this.clone();
+                    let run = this.clone();
                     let command = script.command.clone();
-                    menu = menu.entry(script.menu_label(), None, move |window, cx| {
-                        this.update(cx, |this, cx| this.run_script(command.clone(), window, cx))
+                    let run_it = move |window: &mut Window, cx: &mut App| {
+                        run.update(cx, |this, cx| this.run_script(command.clone(), window, cx))
                             .ok();
-                    });
+                    };
+                    menu = if editable {
+                        let import = this.clone();
+                        let script = script.clone();
+                        menu.entry_with_end_slot(
+                            script.menu_label(),
+                            None,
+                            run_it,
+                            IconName::Plus,
+                            "Add to the project's actions".into(),
+                            move |_, cx| {
+                                import
+                                    .update(cx, |this, cx| this.import_script(&script, cx))
+                                    .ok();
+                            },
+                        )
+                    } else {
+                        menu.entry(script.menu_label(), None, run_it)
+                    };
                 }
+            }
+            if editable {
+                let add = this.clone();
+                if !project.is_empty() || !file.is_empty() {
+                    menu = menu.separator();
+                }
+                menu = menu.entry("Add action…", None, move |window, cx| {
+                    add.update(cx, |this, cx| this.edit_script(None, window, cx))
+                        .ok();
+                });
             }
             menu
         });
@@ -875,6 +1024,90 @@ impl ThreadTerminalPanel {
                     terminals.error = Some(
                         format!("Couldn't start a terminal on T3's machine: {error:#}").into(),
                     );
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    /// Shows one of T3's terminals for the thread the panel shows, such as its setup script's:
+    /// the tab already showing it, or a new one attached to it.
+    fn show_t3_terminal(
+        &mut self,
+        action: &OpenSetupTerminal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let thread_id = action.thread_id.clone();
+        let shown = self.threads.get(&thread_id).and_then(|terminals| {
+            terminals
+                .terminals
+                .iter()
+                .position(|hosted| hosted.remote_id(cx) == Some(action.terminal_id.as_str()))
+        });
+        if let Some(index) = shown {
+            self.activate_terminal(index, window, cx);
+            return;
+        }
+        let project_root = match self.location(&thread_id, cx) {
+            TerminalLocation::Remote(folder) => folder.project_root,
+            TerminalLocation::Local(path) => path.to_string_lossy().to_string(),
+            _ => String::new(),
+        };
+        let project_root = self
+            .shells
+            .as_ref()
+            .and_then(|(shells, _)| {
+                let shell = shells.read(cx).shell()?;
+                let thread = shell.threads.get(&thread_id)?;
+                Some(
+                    shell
+                        .projects
+                        .get(&thread.project_id)?
+                        .workspace_root
+                        .clone(),
+                )
+            })
+            .unwrap_or(project_root);
+        let cwd = action.cwd.clone().unwrap_or_else(|| project_root.clone());
+        let launch = Launch {
+            thread_id: thread_id.clone(),
+            terminal_id: action.terminal_id.clone(),
+            worktree_path: action.cwd.clone(),
+            cwd,
+            project_root,
+        };
+        let size = self.grid_size(cx);
+        let open = RemoteTerminal::open(
+            launch,
+            size,
+            self.workspace.clone(),
+            &self.project,
+            window,
+            cx,
+        );
+        self.focus_on_start = true;
+        let terminals = self.threads.entry(thread_id.clone()).or_default();
+        terminals.error = None;
+        terminals.starting = Some(cx.spawn_in(window, async move |this, cx| {
+            let result = open.await;
+            this.update_in(cx, |this, window, cx| {
+                match result {
+                    Ok(remote) => this.add_remote_terminal(&thread_id, remote, window, cx),
+                    Err(error) => {
+                        log::error!("couldn't show T3's setup terminal: {error:#}");
+                        if let Some(terminals) = this.threads.get_mut(&thread_id) {
+                            terminals.error = Some(
+                                format!("Couldn't show the setup script's terminal: {error:#}")
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+                if let Some(terminals) = this.threads.get_mut(&thread_id) {
+                    terminals.starting = None;
                 }
                 cx.notify();
             })
@@ -1179,9 +1412,15 @@ impl ThreadTerminalPanel {
         let can_add = self.thread_id.is_some()
             && terminals.is_some_and(|terminals| !terminals.terminals.is_empty());
         let has_selection = self.selection_context(cx).is_some();
+        // Run ▾ shows for any thread with a project, which can add an action.
         let has_scripts = {
             let (project, file) = self.scripts(cx);
-            !project.is_empty() || !file.is_empty()
+            !project.is_empty()
+                || !file.is_empty()
+                || self
+                    .thread_id
+                    .as_deref()
+                    .is_some_and(|thread_id| self.thread_project(thread_id, cx).is_some())
         };
         let focus_handle = self.focus_handle.clone();
         h_flex()
@@ -1493,12 +1732,14 @@ pub(crate) fn terminal_context(
 const T3_PROJECT_FILE: &str = "t3.json";
 
 /// A script Run ▾ offers.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Script {
     pub name: String,
     pub command: String,
     pub setup: bool,
     pub on_settle: bool,
+    /// The project's script it is, which its editor changes; `None` for `t3.json`'s.
+    pub source: Option<ProjectScript>,
 }
 
 impl Script {
@@ -1508,6 +1749,7 @@ impl Script {
             command: script.command.clone(),
             setup: script.run_on_worktree_create,
             on_settle: script.run_on_settle == Some(true),
+            source: Some(script.clone()),
         }
     }
 
@@ -1551,6 +1793,7 @@ pub(crate) fn file_scripts(contents: &str) -> Vec<Script> {
                 command: text(script, "command")?,
                 setup: flag(script, "runOnWorktreeCreate"),
                 on_settle: flag(script, "runOnSettle"),
+                source: None,
             })
         })
         .collect()

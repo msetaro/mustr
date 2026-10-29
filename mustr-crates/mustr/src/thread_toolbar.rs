@@ -6,6 +6,9 @@
 //! - The thread's pull request, with its state and checks (`pullRequests.summary`,
 //!   `pullRequests.checks`). Clicking it opens mustr's review of it; its menu links, unlinks,
 //!   and watches pull requests (`thread.pull-request.link`, `unlink`, `watch`).
+//! - The thread's local dev servers (`local_servers.rs`), each opening in the system browser.
+//! - **Merge back**, on a fork, and **Hand off ▾** to another agent, with the handoff the next
+//!   message makes (`thread_handoff.rs`).
 //! - **Review changes** (handles `thread_chat::ReviewThreadChanges`), **Terminal** (dispatches
 //!   `thread_chat::OpenThreadTerminal`, which the terminal panel handles), **Open in ▾** (handles
 //!   `thread_chat::OpenInEditor`), and **Commit ▾**, with a row of a running action's steps.
@@ -22,11 +25,13 @@
 use crate::{
     agent_review,
     agent_threads::{AgentThread, agent_threads},
+    local_servers::{self, LocalServers},
     pull_request_review::{self, checks_summary},
     thread_git::{
         BranchPickerDelegate, ControlsParts, ControlsPlacement, Editors, GitProgressRow, MenuSlot,
         ThreadGit, ThreadGitControls, editor_label, menu_position,
     },
+    thread_handoff::{self, MergeBack, PendingHandoff},
 };
 use anyhow::{Context as _, Result, anyhow};
 use editor::Editor;
@@ -64,8 +69,8 @@ use thread_chat::{
     ThreadShells, ThreadView,
 };
 use ui::{
-    Color, ContextMenu, Icon, IconButton, IconName, IconSize, Label, LabelCommon as _, LabelSize,
-    Tooltip, prelude::*,
+    Color, ContextMenu, ContextMenuEntry, Icon, IconButton, IconName, IconSize, Label,
+    LabelCommon as _, LabelSize, Tooltip, prelude::*,
 };
 use workspace::{
     ItemHandle, ModalView, Toast, ToolbarItemEvent, ToolbarItemLocation, ToolbarItemView,
@@ -927,6 +932,12 @@ pub struct ThreadToolbar {
     overflow: OverflowRow,
     /// The items that didn't fit when it was last drawn, which its "…" menu offers.
     hidden: Vec<ToolbarItem>,
+    /// While a merge back is being sent.
+    merging: bool,
+    /// T3's local dev servers, once the toolbar shows a thread.
+    servers: Option<(Entity<LocalServers>, Subscription)>,
+    /// T3's agents, for Hand off ▾.
+    configs: Option<(Entity<thread_chat::ServerConfigs>, Subscription)>,
     _view: Option<Subscription>,
     _activation: Subscription,
 }
@@ -951,6 +962,9 @@ impl ThreadToolbar {
             location: ToolbarItemLocation::Hidden,
             overflow: OverflowRow::new(),
             hidden: Vec::new(),
+            merging: false,
+            servers: None,
+            configs: None,
             _view: None,
             _activation: activation,
         }
@@ -1050,8 +1064,206 @@ impl ThreadToolbar {
                 pull_request,
             });
         }
+        if self.servers.is_none() {
+            let servers = LocalServers::global(cx);
+            let subscription = cx.observe(&servers, |_, _, cx| cx.notify());
+            self.servers = Some((servers, subscription));
+        }
+        if self.configs.is_none() {
+            let configs = thread_chat::ServerConfigs::global(cx);
+            let subscription = cx.observe(&configs, |_, _, cx| cx.notify());
+            self.configs = Some((configs, subscription));
+        }
         self.location = ToolbarItemLocation::PrimaryLeft;
         self.location
+    }
+
+    /// What Hand off ▾ offers: the agents the thread can go to (none when its agent can't hand
+    /// off, or while it runs), and the handoff its next message makes, if any.
+    fn handoff(
+        &self,
+        cx: &App,
+    ) -> Option<(Vec<thread_chat::AgentChoice>, Option<PendingHandoff>, bool)> {
+        let view = self.view.as_ref()?.upgrade()?;
+        let state = view.read(cx).thread_state()?;
+        let providers = self.configs.as_ref()?.0.read(cx).providers()?;
+        let targets = thread_handoff::handoff_targets(state, providers);
+        let pending = thread_handoff::pending_handoff(state, providers);
+        if targets.is_empty() && pending.is_none() {
+            return None;
+        }
+        let allowed = thread_handoff::supports_handoff(state) && state.active_run().is_none();
+        Some((targets, pending, allowed))
+    }
+
+    fn deploy_handoff_menu(
+        &mut self,
+        event: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(thread), Some((targets, _, allowed))) = (&self.thread, self.handoff(cx)) else {
+            return;
+        };
+        let thread_id = thread.thread_id.clone();
+        let workspace = self.workspace.clone();
+        let menu = ContextMenu::build(window, cx, move |menu, _, _| {
+            handoff_entries(menu, &thread_id, &targets, allowed, &workspace)
+        });
+        self.menu
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
+                &mut this.menu
+            });
+    }
+
+    fn render_handoff(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some((_, pending, allowed)) = self.handoff(cx) else {
+            return div().into_any_element();
+        };
+        match pending {
+            Some(pending) => Chip::new(
+                "thread-handoff",
+                format!("Handoff to {} pending", pending.to),
+            )
+            .accent(true)
+            .menu_indicator(true)
+            .tooltip(format!(
+                "The next message hands the conversation from {} to {}, with a summary of it \
+                     (T3's context handoff)",
+                pending.from, pending.to
+            ))
+            .on_click(
+                cx.listener(|this, event, window, cx| this.deploy_handoff_menu(event, window, cx)),
+            )
+            .into_any_element(),
+            None => TextButton::new("thread-handoff", "Hand off ▾")
+                .disabled(!allowed)
+                .tooltip(if allowed {
+                    "Hand the conversation to another agent: its next message goes there"
+                } else {
+                    "This agent can't hand its conversation to another now"
+                })
+                .on_click(cx.listener(|this, event, window, cx| {
+                    this.deploy_handoff_menu(event, window, cx)
+                }))
+                .into_any_element(),
+        }
+    }
+
+    /// The thread's local dev servers.
+    fn local_servers(
+        &self,
+        thread: &ToolbarThread,
+        cx: &App,
+    ) -> Vec<t3_client::t3_api::types::DiscoveredLocalServer> {
+        self.servers
+            .as_ref()
+            .map(|(servers, _)| servers.read(cx).of_thread(&thread.thread_id))
+            .unwrap_or_default()
+    }
+
+    fn deploy_servers_menu(
+        &mut self,
+        event: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(thread) = &self.thread else {
+            return;
+        };
+        let servers = self.local_servers(thread, cx);
+        let here = crate::worktrees::worktrees_are_local(cx);
+        let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            menu = menu.header(if here {
+                "The thread's local servers"
+            } else {
+                "The thread's servers, on T3's machine"
+            });
+            for server in &servers {
+                let url = server.url.clone();
+                let label = match &server.process_name {
+                    Some(process) => {
+                        format!("Open {} · {process}", local_servers::server_label(server))
+                    }
+                    None => format!("Open {}", local_servers::server_label(server)),
+                };
+                menu = menu.item(
+                    ContextMenuEntry::new(label)
+                        .disabled(!here)
+                        .handler(move |_, cx| cx.open_url(&url)),
+                );
+            }
+            menu
+        });
+        self.menu
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
+                &mut this.menu
+            });
+    }
+
+    fn render_servers(&self, thread: &ToolbarThread, cx: &mut Context<Self>) -> AnyElement {
+        let servers = self.local_servers(thread, cx);
+        let label = local_servers::chip_label(&servers).unwrap_or_default();
+        let palette = palette(cx);
+        let tooltip = if crate::worktrees::worktrees_are_local(cx) {
+            "The thread's terminals run these servers: open one in your browser"
+        } else {
+            "The thread's terminals run these servers on T3's machine"
+        };
+        Chip::new("thread-local-servers", label)
+            .dot(palette.ok.hsla())
+            .menu_indicator(true)
+            .tooltip(tooltip)
+            .on_click(
+                cx.listener(|this, event, window, cx| this.deploy_servers_menu(event, window, cx)),
+            )
+            .into_any_element()
+    }
+
+    /// What merging the thread back would do, when it's a fork (`thread_handoff.rs`).
+    fn merge_back(&self, thread: &ToolbarThread, cx: &mut App) -> Option<MergeBack> {
+        let shells = ThreadShells::global(cx);
+        let view = self.view.as_ref().and_then(WeakEntity::upgrade);
+        let state = view.as_ref().and_then(|view| view.read(cx).thread_state());
+        MergeBack::of_thread(&thread.thread_id, state, shells.read(cx))
+    }
+
+    fn run_merge_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(merge) = self
+            .thread
+            .as_ref()
+            .and_then(|thread| self.merge_back(thread, cx))
+        else {
+            return;
+        };
+        if self.merging || merge.run_id.is_none() {
+            return;
+        }
+        self.merging = true;
+        cx.notify();
+        let task = merge.run(self.workspace.clone(), window, cx);
+        cx.spawn(async move |this, cx| {
+            task.await;
+            this.update(cx, |this, cx| {
+                this.merging = false;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn render_merge_back(&self, merge: &MergeBack, cx: &mut Context<Self>) -> AnyElement {
+        let label = if self.merging {
+            "Merging back…".into()
+        } else {
+            merge.label()
+        };
+        TextButton::new("thread-merge-back", label)
+            .disabled(self.merging || merge.run_id.is_none())
+            .tooltip(merge.tooltip())
+            .on_click(cx.listener(|this, _, window, cx| this.run_merge_back(window, cx)))
+            .into_any_element()
     }
 
     fn open_branch_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1181,11 +1393,16 @@ impl ThreadToolbar {
         };
         let thread_id = thread.thread_id.clone();
         let git = thread.git.clone();
-        let entries = self.overflow_entries(cx);
+        let merge = self.merge_back(thread, cx);
+        let entries = self.overflow_entries(merge.as_ref(), cx);
         let pull_request_entries = entries
             .contains(&OverflowEntry::PullRequest)
             .then(|| self.pull_request_entries(cx))
             .flatten();
+        let servers = self.local_servers(thread, cx);
+        let here = crate::worktrees::worktrees_are_local(cx);
+        let handoff = self.handoff(cx);
+        let workspace = self.workspace.clone();
         let editors = Editors::global(cx).read(cx);
         let available = editors.available().to_vec();
         let preferred = editors.preferred();
@@ -1208,6 +1425,41 @@ impl ThreadToolbar {
                                     cx,
                                 )
                             },
+                        );
+                    }
+                    OverflowEntry::Handoff => {
+                        if let Some((targets, _, allowed)) = &handoff {
+                            menu = handoff_entries(
+                                menu.separator(),
+                                &thread_id,
+                                targets,
+                                *allowed,
+                                &workspace,
+                            );
+                        }
+                    }
+                    OverflowEntry::Servers => {
+                        for server in &servers {
+                            let url = server.url.clone();
+                            menu = menu.item(
+                                ContextMenuEntry::new(format!(
+                                    "Open {}",
+                                    local_servers::server_label(server)
+                                ))
+                                .disabled(!here)
+                                .handler(move |_, cx| cx.open_url(&url)),
+                            );
+                        }
+                    }
+                    OverflowEntry::MergeBack(enabled) => {
+                        let this = this.clone();
+                        menu = menu.item(
+                            ContextMenuEntry::new("Merge back")
+                                .disabled(!enabled)
+                                .handler(move |window, cx| {
+                                    this.update(cx, |this, cx| this.run_merge_back(window, cx))
+                                        .ok();
+                                }),
                         );
                     }
                     OverflowEntry::Terminal => {
@@ -1263,7 +1515,7 @@ impl ThreadToolbar {
     }
 
     /// What the "…" menu offers for the items that didn't fit when the toolbar was last drawn.
-    fn overflow_entries(&self, cx: &App) -> Vec<OverflowEntry> {
+    fn overflow_entries(&self, merge: Option<&MergeBack>, cx: &App) -> Vec<OverflowEntry> {
         let Some(thread) = &self.thread else {
             return Vec::new();
         };
@@ -1283,6 +1535,11 @@ impl ThreadToolbar {
                 ),
                 ToolbarItem::ReviewChanges => actions.push(OverflowEntry::ReviewChanges),
                 ToolbarItem::Terminal => actions.push(OverflowEntry::Terminal),
+                ToolbarItem::Servers => actions.push(OverflowEntry::Servers),
+                ToolbarItem::Handoff => actions.push(OverflowEntry::Handoff),
+                ToolbarItem::MergeBack => actions.push(OverflowEntry::MergeBack(
+                    !self.merging && merge.is_some_and(|merge| merge.run_id.is_some()),
+                )),
                 ToolbarItem::OpenIn => actions.push(OverflowEntry::OpenIn),
                 ToolbarItem::LinkPullRequest => actions.push(OverflowEntry::LinkPullRequest),
                 ToolbarItem::PullRequest => actions.push(OverflowEntry::PullRequest),
@@ -1319,7 +1576,12 @@ impl ThreadToolbar {
         };
         let mut tooltip = git
             .checkout()
-            .map(|checkout| format!("{branch}\n{} · switch or create a branch", checkout.cwd))
+            .map(|checkout| {
+                format!(
+                    "{branch}\n{} · switch or create a branch, or move the thread",
+                    checkout.cwd
+                )
+            })
             .unwrap_or_else(|| format!("{branch}\nSwitch or create a branch"));
         if let Some(summary) = git_summary(&thread.git, cx) {
             tooltip.push_str(&format!("\n{summary}"));
@@ -1441,7 +1703,12 @@ impl ThreadToolbar {
     /// priorities: Commit ▾ and the branch always show (the branch shrinks), then Review
     /// changes, the pull request, the checks, and the git status; Open in, Terminal, and Link PR
     /// go into the "…" menu first.
-    fn items(&self, thread: &ToolbarThread, cx: &App) -> Vec<(ToolbarItem, OverflowItem)> {
+    fn items(
+        &self,
+        thread: &ToolbarThread,
+        merge: Option<&MergeBack>,
+        cx: &App,
+    ) -> Vec<(ToolbarItem, OverflowItem)> {
         let status = thread.pull_request.read(cx);
         let listed = status.project_id.is_some();
         let has_pull_request = listed && status.pull_request().is_some();
@@ -1459,6 +1726,15 @@ impl ThreadToolbar {
             items.push(ToolbarItem::LinkPullRequest);
         }
         items.push(ToolbarItem::ReviewChanges);
+        if merge.is_some() {
+            items.push(ToolbarItem::MergeBack);
+        }
+        if !self.local_servers(thread, cx).is_empty() {
+            items.push(ToolbarItem::Servers);
+        }
+        if self.handoff(cx).is_some() {
+            items.push(ToolbarItem::Handoff);
+        }
         items.push(ToolbarItem::Terminal);
         if git.checkout().is_some() {
             items.push(ToolbarItem::OpenIn);
@@ -1496,6 +1772,9 @@ enum ToolbarItem {
     Checks,
     LinkPullRequest,
     ReviewChanges,
+    MergeBack,
+    Servers,
+    Handoff,
     Terminal,
     OpenIn,
     GitAction,
@@ -1510,6 +1789,9 @@ impl ToolbarItem {
             Self::Checks => "thread-toolbar-checks",
             Self::LinkPullRequest => "thread-toolbar-link-pull-request",
             Self::ReviewChanges => "thread-toolbar-review-changes",
+            Self::MergeBack => "thread-toolbar-merge-back",
+            Self::Servers => "thread-toolbar-servers",
+            Self::Handoff => "thread-toolbar-handoff",
             Self::Terminal => "thread-toolbar-terminal",
             Self::OpenIn => "thread-toolbar-open-in",
             Self::GitAction => "thread-toolbar-git-action",
@@ -1520,7 +1802,7 @@ impl ToolbarItem {
     fn is_action(self) -> bool {
         matches!(
             self,
-            Self::ReviewChanges | Self::Terminal | Self::OpenIn | Self::GitAction
+            Self::ReviewChanges | Self::MergeBack | Self::Terminal | Self::OpenIn | Self::GitAction
         )
     }
 
@@ -1528,6 +1810,9 @@ impl ToolbarItem {
         match self {
             Self::Branch | Self::GitAction => overflow::ALWAYS,
             Self::ReviewChanges => 90,
+            Self::MergeBack => 70,
+            Self::Servers => 35,
+            Self::Handoff => 15,
             Self::PullRequest => 60,
             Self::Checks => 50,
             Self::GitSummary => 40,
@@ -1544,12 +1829,49 @@ enum OverflowEntry {
     /// A state, such as the git status or the checks, as plain text.
     Text(SharedString),
     ReviewChanges,
+    /// Merge back, and whether it can run now.
+    MergeBack(bool),
+    /// The thread's local servers.
+    Servers,
+    /// Hand off to each agent.
+    Handoff,
     Terminal,
     /// Open in each of T3's editors.
     OpenIn,
     LinkPullRequest,
     /// The pull request menu's entries.
     PullRequest,
+}
+
+/// Hand off ▾'s entries: one per agent the thread can go to.
+fn handoff_entries(
+    mut menu: ContextMenu,
+    thread_id: &str,
+    targets: &[thread_chat::AgentChoice],
+    allowed: bool,
+    workspace: &WeakEntity<Workspace>,
+) -> ContextMenu {
+    if targets.is_empty() {
+        return menu.label("No other agent is set up on T3");
+    }
+    for agent in targets {
+        let thread_id = thread_id.to_string();
+        let agent = agent.clone();
+        let workspace = workspace.clone();
+        menu = menu.item(
+            ContextMenuEntry::new(format!("Hand off to {}", agent.name))
+                .disabled(!allowed)
+                .handler(move |_, cx| {
+                    thread_handoff::hand_off(
+                        thread_id.clone(),
+                        agent.clone(),
+                        workspace.clone(),
+                        cx,
+                    )
+                }),
+        );
+    }
+    menu
 }
 
 /// The checkout's git status, such as "2 changed" or "Up to date", once T3 has sent it.
@@ -1644,7 +1966,8 @@ impl Render for ThreadToolbar {
         else {
             return div().into_any_element();
         };
-        let items = self.items(thread, cx);
+        let merge = self.merge_back(thread, cx);
+        let items = self.items(thread, merge.as_ref(), cx);
         let rem_size = window.rem_size();
         let gap = scaled(ITEM_GAP);
         let visible = self.overflow.visible(
@@ -1696,6 +2019,12 @@ impl Render for ThreadToolbar {
                         })
                         .into_any_element()
                 }
+                ToolbarItem::Servers => self.render_servers(thread, cx),
+                ToolbarItem::Handoff => self.render_handoff(cx),
+                ToolbarItem::MergeBack => match &merge {
+                    Some(merge) => self.render_merge_back(merge, cx),
+                    None => div().into_any_element(),
+                },
                 ToolbarItem::Terminal => {
                     let thread_id = thread_id.clone();
                     TextButton::new("thread-terminal", "Terminal")

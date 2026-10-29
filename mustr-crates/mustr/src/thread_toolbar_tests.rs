@@ -581,6 +581,9 @@ fn toolbar_at(
         ToolbarItem::Checks,
         ToolbarItem::LinkPullRequest,
         ToolbarItem::ReviewChanges,
+        ToolbarItem::MergeBack,
+        ToolbarItem::Servers,
+        ToolbarItem::Handoff,
         ToolbarItem::Terminal,
         ToolbarItem::OpenIn,
         ToolbarItem::GitAction,
@@ -596,7 +599,13 @@ fn toolbar_at(
             shown.push(key);
         }
     }
-    let entries = toolbar.read_with(cx, |toolbar, cx| toolbar.overflow_entries(cx));
+    let entries = toolbar.update(cx, |toolbar, cx| {
+        let merge = toolbar
+            .thread
+            .as_ref()
+            .and_then(|thread| toolbar.merge_back(thread, cx));
+        toolbar.overflow_entries(merge.as_ref(), cx)
+    });
     (shown, entries)
 }
 

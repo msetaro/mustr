@@ -1677,6 +1677,11 @@ impl ThreadState {
             .max_by_key(|run| run.ordinal)
     }
 
+    /// Every run of the thread, as T3 last sent them (for merge back, `mustr/src/thread_handoff.rs`).
+    pub fn runs(&self) -> &[OrchestrationV2Run] {
+        &self.runs
+    }
+
     /// A run's current state, by id.
     pub fn run_by_id(&self, run_id: &str) -> Option<&OrchestrationV2Run> {
         self.run(run_id)
