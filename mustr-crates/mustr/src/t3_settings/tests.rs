@@ -332,6 +332,29 @@ async fn the_page_reads_and_changes_t3s_settings(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn enter_saves_the_prefix(cx: &mut TestAppContext) {
+    let backend = FakeBackend::new();
+    let (view, cx) = open_page(backend.clone(), cx);
+    // Unchanged, Enter sends nothing.
+    view.update_in(cx, |view, window, cx| {
+        window.focus(&view.prefix.focus_handle(cx), cx)
+    });
+    cx.dispatch_action(menu::Confirm);
+    cx.run_until_parked();
+    assert_eq!(backend.updates(), []);
+    view.update_in(cx, |view, window, cx| {
+        view.prefix
+            .update(cx, |editor, cx| editor.set_text("team/", window, cx))
+    });
+    cx.dispatch_action(menu::Confirm);
+    cx.run_until_parked();
+    assert_eq!(
+        backend.updates(),
+        [update(json!({ "branchNamePrefix": "team/" }))]
+    );
+}
+
+#[gpui::test]
 async fn without_get_settings_the_page_reads_the_config(cx: &mut TestAppContext) {
     // T3's 0.1.4 nightlies dropped `server.getSettings`; their config carries the settings.
     let backend = FakeBackend::new();

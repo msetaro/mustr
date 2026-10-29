@@ -155,6 +155,15 @@ enum Loadable<T> {
     Loaded(T),
 }
 
+impl<T> Loadable<T> {
+    fn loaded(&self) -> Option<&T> {
+        match self {
+            Self::Loaded(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 /// A patch the page can send, by what it changes.
 type Patch = (&'static str, Value);
 
@@ -1001,7 +1010,19 @@ impl T3SettingsView {
                     "t3 or t3/ names a branch t3/add-search. Leave it empty for no prefix.",
                     h_flex()
                         .gap_1()
-                        .child(field(&self.prefix))
+                        .child(
+                            field(&self.prefix)
+                                .key_context("MustrBranchPrefix")
+                                .on_action(cx.listener(|this, _: &menu::Confirm, _, cx| {
+                                    let changed = this.settings.loaded().is_some_and(|settings| {
+                                        this.prefix.read(cx).text(cx).trim()
+                                            != branch_prefix(settings).trim()
+                                    });
+                                    if changed && this.blocked().is_none() {
+                                        this.save_prefix(cx)
+                                    }
+                                })),
+                        )
                         .child(self.save_button(
                             "t3-settings-save-prefix",
                             changed,

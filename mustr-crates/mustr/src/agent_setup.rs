@@ -1301,6 +1301,29 @@ impl AgentSetupView {
         }));
     }
 
+    /// Adds the model typed in `input` to the agent's custom models.
+    fn add_custom_model(
+        &mut self,
+        provider: &ServerProvider,
+        input: &Entity<Editor>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let slug = input.read(cx).text(cx);
+        let settings = self.configs.read(cx).settings();
+        if let Some(payload) = change_custom_model(provider, settings, &slug, true) {
+            self.change_instance(
+                provider.instance_id.clone(),
+                "Adding the model",
+                payload,
+                cx,
+            );
+        }
+        input.update(cx, |input, cx| input.clear(window, cx));
+        self.adding_model = None;
+        cx.notify();
+    }
+
     fn flow_id(&self, instance_id: &str) -> Option<String> {
         self.agents.get(instance_id)?.auth.as_ref()?.flow_id.clone()
     }
@@ -2388,23 +2411,17 @@ impl AgentSetupView {
                     ButtonStyle::Primary,
                     blocked.clone(),
                     cx,
-                    move |this, window, cx| {
-                        let slug = input.read(cx).text(cx);
-                        let settings = this.configs.read(cx).settings();
-                        if let Some(payload) = change_custom_model(&provider, settings, &slug, true)
-                        {
-                            this.change_instance(
-                                provider.instance_id.clone(),
-                                "Adding the model",
-                                payload,
-                                cx,
-                            );
-                        }
-                        input.update(cx, |input, cx| input.clear(window, cx));
-                        this.adding_model = None;
-                        cx.notify();
-                    },
+                    move |this, window, cx| this.add_custom_model(&provider, &input, window, cx),
                 )
+            };
+            let confirm = {
+                let (provider, input) = (provider.clone(), input.clone());
+                let blocked = blocked.is_some();
+                cx.listener(move |this, _: &menu::Confirm, window, cx| {
+                    if !blocked {
+                        this.add_custom_model(&provider, &input, window, cx)
+                    }
+                })
             };
             let cancel = self.button(
                 format!("agent-cancel-model-{id}"),
@@ -2422,6 +2439,8 @@ impl AgentSetupView {
                 .gap_2()
                 .child(
                     div()
+                        .key_context("MustrCustomModel")
+                        .on_action(confirm)
                         .flex_1()
                         .min_w_0()
                         .px_2()
