@@ -98,7 +98,7 @@ pub(crate) fn previous_worktree<'a>(
 
 /// T3's title for its scratch project (`ensureScratchProject` in T3's
 /// `ManagedProjectFolders.ts`). The form offers it as "No project", ahead of the others.
-const SCRATCH_PROJECT_TITLE: &str = "No project";
+pub(crate) const SCRATCH_PROJECT_TITLE: &str = "No project";
 
 /// How many refs one `vcs.listRefs` page holds, as in T3's branch picker.
 const REF_PAGE_SIZE: i64 = 100;
@@ -399,7 +399,7 @@ impl NewThreadForm {
             .find(|project| project.id == id)
     }
 
-    fn selected_project_id(&self) -> Option<&str> {
+    pub(crate) fn selected_project_id(&self) -> Option<&str> {
         match self.project.as_ref()? {
             ProjectPick::Project(id) => Some(id),
             ProjectPick::Scratch => match &self.scratch {
@@ -624,6 +624,18 @@ impl NewThreadForm {
                 self.worktree = None;
                 self.branch = action.branch.clone();
             }
+        }
+        self.changed(cx);
+    }
+
+    /// Opens the draft in `project_id`, working where T3's settings say, as T3's palette's "New
+    /// thread in <project>" does.
+    pub(crate) fn start_in_project(&mut self, project_id: String, cx: &mut Context<Self>) {
+        if self.projects.loaded().is_some() {
+            self.select_project_id(project_id, cx);
+        } else {
+            self.pending_project = Some(project_id.clone());
+            self.project = Some(ProjectPick::Project(project_id));
         }
         self.changed(cx);
     }

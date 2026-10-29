@@ -11,7 +11,8 @@
 //! commands, and the keymap, whichever crate defines them.
 
 use command_palette_hooks::{
-    CommandInterceptResult, CommandPaletteFilter, GlobalCommandPaletteInterceptor,
+    CommandInterceptItem, CommandInterceptResult, CommandPaletteFilter,
+    GlobalCommandPaletteInterceptor,
 };
 use gpui::App;
 use settings::{Settings as _, SettingsStore};
@@ -116,8 +117,9 @@ pub fn is_hidden(action_name: &str) -> bool {
         || SERVICE_ACTIONS.contains(&action_name)
 }
 
-/// Hides the actions from the command palette, including vim's `:` commands. Call it after
-/// `command_palette::init`, which installs the filter, and after `vim::init`.
+/// Hides the actions from the command palette, including vim's `:` commands, and adds mustr's own
+/// results to it. Call it after `command_palette::init`, which installs the filter, and after
+/// `vim::init`.
 pub fn init(cx: &mut App) {
     // Every compiled-in action, including those that take arguments and so can't be built by
     // name.
@@ -131,19 +133,27 @@ pub fn init(cx: &mut App) {
         }
         filter.hide_action_types(&action_types);
     });
-    filter_vim_commands(cx);
+    install_interceptor(cx);
 }
 
-/// The command palette shows vim's `:` commands without consulting [`CommandPaletteFilter`], and
-/// vim maps some of them to hidden actions (`:AI` opens Zed's agent panel). While vim mode is on,
-/// mustr wraps vim's interceptor and drops those results.
-fn filter_vim_commands(cx: &mut App) {
-    let mut wrapped = false;
+/// The command palette's intercepted results, ahead of Zed's commands: mustr's own
+/// (`thread_chat::palette_results`, such as T3's "New thread in <project>"), and vim's `:`
+/// commands while vim mode is on. The palette shows vim's without consulting
+/// [`CommandPaletteFilter`], and vim maps some of them to hidden actions (`:AI` opens Zed's agent
+/// panel), so mustr drops those.
+fn install_interceptor(cx: &mut App) {
+    // Vim's, if it's on already.
+    let vim = cx.try_global::<GlobalCommandPaletteInterceptor>().cloned();
+    let mut wrapped = vim.is_some();
+    set_interceptor(vim, cx);
     // Vim installs its interceptor from its own settings observer, which `vim::init` registers
-    // first, so this one sees it.
+    // first, so this one sees it; and it clears it when vim mode turns off.
     cx.observe_global::<SettingsStore>(move |cx| {
         if !(VimModeSetting::get_global(cx).0 || HelixModeSetting::get_global(cx).0) {
             wrapped = false;
+            if !cx.has_global::<GlobalCommandPaletteInterceptor>() {
+                set_interceptor(None, cx);
+            }
             return;
         }
         if wrapped {
@@ -154,26 +164,41 @@ fn filter_vim_commands(cx: &mut App) {
             return;
         };
         wrapped = true;
-        GlobalCommandPaletteInterceptor::set(cx, move |query, workspace, cx| {
-            // `intercept` runs whichever interceptor is installed, so run vim's in place of this
-            // one for the call.
-            let filtered = cx.remove_global::<GlobalCommandPaletteInterceptor>();
-            cx.set_global(vim_interceptor.clone());
-            let results = GlobalCommandPaletteInterceptor::intercept(query, workspace, cx);
-            cx.set_global(filtered);
-            cx.spawn(async move |_| {
-                let mut results = match results {
-                    Some(results) => results.await,
-                    None => CommandInterceptResult::default(),
-                };
-                results
-                    .results
-                    .retain(|result| !is_hidden(result.action.name()));
-                results
-            })
-        });
+        set_interceptor(Some(vim_interceptor), cx);
     })
     .detach();
+}
+
+fn set_interceptor(vim: Option<GlobalCommandPaletteInterceptor>, cx: &mut App) {
+    GlobalCommandPaletteInterceptor::set(cx, move |query, workspace, cx| {
+        let ours = thread_chat::palette_results(query, &workspace, cx);
+        // `intercept` runs whichever interceptor is installed, so run vim's in place of this one
+        // for the call.
+        let vim_results = vim.clone().and_then(|vim_interceptor| {
+            let filtered = cx.remove_global::<GlobalCommandPaletteInterceptor>();
+            cx.set_global(vim_interceptor);
+            let results = GlobalCommandPaletteInterceptor::intercept(query, workspace, cx);
+            cx.set_global(filtered);
+            results
+        });
+        cx.spawn(async move |_| {
+            let mut results = match vim_results {
+                Some(results) => results.await,
+                None => CommandInterceptResult::default(),
+            };
+            results
+                .results
+                .retain(|result| !is_hidden(result.action.name()));
+            results
+                .results
+                .extend(ours.into_iter().map(|result| CommandInterceptItem {
+                    action: result.action,
+                    string: result.label,
+                    positions: result.positions,
+                }));
+            results
+        })
+    });
 }
 
 #[cfg(test)]
@@ -421,6 +446,24 @@ pub(crate) mod tests {
         assert_eq!(intercept(":AI", &workspace, cx).await, Vec::<String>::new());
         // Vim's other commands still work.
         assert_eq!(intercept(":w", &workspace, cx).await, ["vim::VimSave"]);
+    }
+
+    /// mustr's own results (`thread_chat::palette_results`) come through the interceptor, so
+    /// it's installed with vim mode off too, and stays as vim mode turns on and off.
+    #[gpui::test]
+    async fn the_palette_asks_mustr_for_results_with_or_without_vim(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let settings_store = SettingsStore::test(cx);
+            cx.set_global(settings_store);
+            command_palette_hooks::init(cx);
+            vim::init(cx);
+            init(cx);
+            assert!(cx.has_global::<GlobalCommandPaletteInterceptor>());
+            set_vim_mode(true, cx);
+            assert!(cx.has_global::<GlobalCommandPaletteInterceptor>());
+            set_vim_mode(false, cx);
+            assert!(cx.has_global::<GlobalCommandPaletteInterceptor>());
+        });
     }
 
     fn set_vim_mode(vim_mode: bool, cx: &mut App) {

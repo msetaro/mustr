@@ -1,0 +1,523 @@
+//! Tests of starting threads (WP17): the palette's new threads, against a recording backend
+//! that asserts the exact payloads T3 would get. Nothing here launches a real thread.
+
+use crate::{
+    NewThreadInProject, NewThreadWithoutProject, SendMessage, ThreadView,
+    backend::{Access, AttachmentUpload, ThreadBackend},
+    shell::ThreadShells,
+};
+use anyhow::{Result, anyhow};
+use collections::{HashMap, HashSet};
+use futures::{
+    FutureExt as _, StreamExt as _, channel::mpsc, future::BoxFuture, stream::BoxStream,
+};
+use gpui::{Entity, TestAppContext, VisualContext as _, VisualTestContext};
+use parking_lot::Mutex;
+use pretty_assertions::assert_eq;
+use serde_json::{Value, json};
+use settings::SettingsStore;
+use std::sync::Arc;
+use t3_api::{
+    tagged::{
+        OrchestrationV2Command, OrchestrationV2ShellStreamItem, OrchestrationV2ThreadStreamItem,
+    },
+    types::{
+        OrchestrationV2DispatchCommandResult, OrchestrationV2GetTurnItemInput,
+        OrchestrationV2GetTurnItemResult, OrchestrationV2ShellSnapshot,
+        OrchestrationV2SubscribeShellInput, OrchestrationV2SubscribeThreadInput,
+        OrchestrationV2ThreadDetailSnapshot, OrchestrationV2ThreadLaunchInput,
+        OrchestrationV2ThreadLaunchResult, ServerProvider,
+    },
+};
+use workspace::{MultiWorkspace, Workspace};
+
+const NOW: &str = "2026-10-27T12:00:00.000Z";
+
+// Fixtures: T3's wire JSON.
+
+pub(crate) fn providers_json() -> Value {
+    json!([
+        {
+            "instanceId": "claudeAgent", "driver": "claudeAgent", "displayName": "Claude Code",
+            "enabled": true, "installed": true, "status": "ready",
+            "auth": { "status": "authenticated" }, "checkedAt": NOW, "version": "2.1.0",
+            "supportedRuntimeModes": ["approval-required", "auto-accept-edits", "auto", "full-access"],
+            "showInteractionModeToggle": true,
+            "models": [
+                {
+                    "slug": "claude-opus-4-7", "name": "Claude Opus 4.7", "isCustom": false,
+                    "isDefault": true,
+                    "capabilities": { "optionDescriptors": [
+                        {
+                            "type": "select", "id": "effort", "label": "Effort",
+                            "options": [
+                                { "id": "low", "label": "Low" },
+                                { "id": "high", "label": "High", "isDefault": true }
+                            ]
+                        }
+                    ] }
+                },
+                { "slug": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "isCustom": false, "capabilities": null },
+                { "slug": "claude-haiku-4-5", "name": "Claude Haiku 4.5", "isCustom": false, "capabilities": null },
+                { "slug": "my-fine-tune", "name": "My fine-tune", "isCustom": true, "capabilities": null }
+            ]
+        },
+        {
+            "instanceId": "codex", "driver": "codex", "displayName": "Codex",
+            "enabled": true, "installed": true, "status": "ready",
+            "auth": { "status": "authenticated" }, "checkedAt": NOW, "version": "0.60.0",
+            "supportedRuntimeModes": ["approval-required", "full-access"],
+            "showInteractionModeToggle": false,
+            "models": [
+                { "slug": "gpt-5.5", "name": "GPT-5.5", "isCustom": false, "isDefault": true, "capabilities": null },
+                { "slug": "gpt-5.5-mini", "name": "GPT-5.5 mini", "isCustom": false, "capabilities": null }
+            ]
+        }
+    ])
+}
+
+fn project_json(id: &str, title: &str, root: &str) -> Value {
+    json!({
+        "id": id, "title": title, "workspaceRoot": root, "scripts": [],
+        "createdAt": NOW, "updatedAt": NOW, "defaultModelSelection": null
+    })
+}
+
+pub(crate) fn shell_thread(id: &str, project_id: &str, title: &str) -> Value {
+    json!({
+        "id": id, "projectId": project_id, "title": title, "status": "completed",
+        "createdAt": NOW, "updatedAt": NOW, "createdBy": "user", "creationSource": "web",
+        "interactionMode": "default", "runtimeMode": "full-access",
+        "modelSelection": { "instanceId": "claudeAgent", "model": "claude-opus-4-7" },
+        "providerInstanceId": "claudeAgent", "activeProviderThreadId": null, "activeRunId": null,
+        "archivedAt": null, "branch": "t3/retries", "deletedAt": null, "forkedFrom": null,
+        "hasActionableProposedPlan": false, "itemCount": 3, "latestRunId": null,
+        "latestUserMessageAt": null, "latestVisibleMessage": null,
+        "lineage": { "rootThreadId": id, "parentThreadId": null, "relationshipToParent": null },
+        "pendingRuntimeRequest": null, "settledAt": null, "settledOverride": null,
+        "visibleItemCount": 3, "worktreePath": null
+    })
+}
+
+fn shell_json() -> Value {
+    json!({
+        "schemaVersion": 1,
+        "snapshotSequence": 7,
+        "threads": [shell_thread("thread-web", "project-web", "Fix the header")],
+        "archivedThreads": [],
+        "projects": [
+            project_json("project-web", "web", "/src/web"),
+            project_json("project-api", "api", "/src/api"),
+            project_json("scratch-1", "No project", "/home/me/.t3/scratch"),
+        ]
+    })
+}
+
+fn refs_json() -> Value {
+    json!({
+        "isRepo": true, "hasPrimaryRemote": true, "nextCursor": null, "totalCount": 2,
+        "refs": [
+            { "name": "feature/retries", "current": true, "isDefault": false, "worktreePath": "/src/api" },
+            { "name": "main", "current": false, "isDefault": true, "worktreePath": null }
+        ]
+    })
+}
+
+fn settings_json() -> Value {
+    json!({
+        "defaultRuntimeMode": "auto-accept-edits",
+        "defaultThreadEnvMode": "local",
+        "newWorktreesStartFromOrigin": false,
+        "defaultModelSelection": { "instanceId": "claudeAgent", "model": "claude-opus-4-7" }
+    })
+}
+
+fn projection_json(thread_id: &str) -> Value {
+    let mut thread = shell_thread(thread_id, "project-api", "Add retries");
+    thread["worktreePath"] = json!("/src/api-worktrees/retries");
+    json!({
+        "thread": thread,
+        "attempts": [], "checkpointScopes": [], "checkpoints": [], "contextHandoffs": [],
+        "contextTransfers": [], "messages": [], "nodes": [], "plans": [], "providerSessions": [],
+        "providerThreads": [], "providerTurns": [], "runs": [], "runtimeRequests": [],
+        "subagents": [], "turnItems": [], "visibleTurnItems": [], "updatedAt": NOW
+    })
+}
+
+/// Records every call, and answers the ones the tests need.
+#[derive(Default)]
+pub(crate) struct Recorder {
+    shell: Mutex<Value>,
+    /// What `call_raw` answers, by tag; anything else fails.
+    responses: Mutex<HashMap<String, Value>>,
+    calls: Mutex<Vec<(String, Value, Access)>>,
+    commands: Mutex<Vec<OrchestrationV2Command>>,
+    launches: Mutex<Vec<OrchestrationV2ThreadLaunchInput>>,
+    /// Models whose launches T3 refuses.
+    failing_models: Mutex<HashSet<String>>,
+    read_only: bool,
+}
+
+impl Recorder {
+    pub(crate) fn new() -> Arc<Self> {
+        Self::with(false)
+    }
+
+    fn with(read_only: bool) -> Arc<Self> {
+        let recorder = Self {
+            shell: Mutex::new(shell_json()),
+            read_only,
+            ..Default::default()
+        };
+        recorder.respond("server.getSettings", settings_json());
+        recorder.respond("vcs.listRefs", refs_json());
+        recorder.respond(
+            "projects.ensureScratch",
+            json!({ "projectId": "scratch-1" }),
+        );
+        Arc::new(recorder)
+    }
+
+    pub(crate) fn respond(&self, tag: &str, response: Value) {
+        self.responses.lock().insert(tag.into(), response);
+    }
+
+    pub(crate) fn calls(&self, tag: &str) -> Vec<(Value, Access)> {
+        self.calls
+            .lock()
+            .iter()
+            .filter(|(called, _, _)| called == tag)
+            .map(|(_, payload, access)| (payload.clone(), *access))
+            .collect()
+    }
+
+    /// The launches, without their fresh ids.
+    fn launches(&self) -> Vec<Value> {
+        self.launches
+            .lock()
+            .iter()
+            .map(|launch| {
+                let mut launch = serde_json::to_value(launch).unwrap();
+                let object = launch.as_object_mut().unwrap();
+                for id in ["commandId", "threadId"] {
+                    let id = object.remove(id).unwrap();
+                    assert!(uuid::Uuid::parse_str(id.as_str().unwrap()).is_ok());
+                }
+                object["initialMessage"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("messageId");
+                launch
+            })
+            .collect()
+    }
+}
+
+fn ready<T: Send + 'static>(value: Result<T>) -> BoxFuture<'static, Result<T>> {
+    futures::future::ready(value).boxed()
+}
+
+impl ThreadBackend for Recorder {
+    fn shell_snapshot(&self) -> BoxFuture<'static, Result<OrchestrationV2ShellSnapshot>> {
+        ready(serde_json::from_value(self.shell.lock().clone()).map_err(Into::into))
+    }
+
+    fn subscribe_shell(
+        &self,
+        _: OrchestrationV2SubscribeShellInput,
+    ) -> Result<BoxStream<'static, Result<OrchestrationV2ShellStreamItem>>> {
+        Ok(futures::stream::pending().boxed())
+    }
+
+    fn thread_snapshot(
+        &self,
+        thread_id: String,
+    ) -> BoxFuture<'static, Result<OrchestrationV2ThreadDetailSnapshot>> {
+        ready(
+            serde_json::from_value(json!({
+                "snapshotSequence": 10, "projection": projection_json(&thread_id)
+            }))
+            .map_err(Into::into),
+        )
+    }
+
+    fn subscribe_thread(
+        &self,
+        _: OrchestrationV2SubscribeThreadInput,
+    ) -> Result<BoxStream<'static, Result<OrchestrationV2ThreadStreamItem>>> {
+        let (_sender, receiver) = mpsc::unbounded();
+        Ok(receiver.boxed())
+    }
+
+    fn turn_item(
+        &self,
+        _: OrchestrationV2GetTurnItemInput,
+    ) -> BoxFuture<'static, Result<OrchestrationV2GetTurnItemResult>> {
+        ready(Err(anyhow!("no turn items here")))
+    }
+
+    fn providers(&self) -> BoxFuture<'static, Result<Vec<ServerProvider>>> {
+        ready(serde_json::from_value(providers_json()).map_err(Into::into))
+    }
+
+    fn dispatch(
+        &self,
+        command: OrchestrationV2Command,
+    ) -> BoxFuture<'static, Result<OrchestrationV2DispatchCommandResult>> {
+        if self.read_only {
+            return ready(Err(anyhow!("Not sent: read only.")));
+        }
+        self.commands.lock().push(command);
+        ready(Ok(OrchestrationV2DispatchCommandResult { sequence: 100 }))
+    }
+
+    fn launch_thread(
+        &self,
+        input: OrchestrationV2ThreadLaunchInput,
+    ) -> BoxFuture<'static, Result<OrchestrationV2ThreadLaunchResult>> {
+        if self.read_only {
+            return ready(Err(anyhow!("Not sent: read only.")));
+        }
+        let model = input
+            .model_selection
+            .model
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let thread_id = input.thread_id.clone().unwrap_or_default();
+        self.launches.lock().push(input);
+        if self.failing_models.lock().contains(&model) {
+            return ready(Err(anyhow!("{model} is signed out")));
+        }
+        ready(
+            serde_json::from_value(json!({
+                "threadId": thread_id, "resumed": false, "projection": projection_json(&thread_id)
+            }))
+            .map_err(Into::into),
+        )
+    }
+
+    fn call_raw(
+        &self,
+        tag: &str,
+        payload: Value,
+        access: Access,
+    ) -> BoxFuture<'static, Result<Value>> {
+        self.calls.lock().push((tag.to_string(), payload, access));
+        if self.read_only && access.is_write() {
+            return ready(Err(anyhow!("Not sent: read only.")));
+        }
+        ready(
+            self.responses
+                .lock()
+                .get(tag)
+                .cloned()
+                .ok_or_else(|| anyhow!("{tag} isn't answered here")),
+        )
+    }
+
+    fn subscribe_raw(
+        &self,
+        tag: &str,
+        _: Value,
+        _: Access,
+    ) -> Result<BoxStream<'static, Result<Value>>> {
+        Err(anyhow!("{tag} isn't followed here"))
+    }
+
+    fn upload(&self, _: AttachmentUpload) -> BoxFuture<'static, Result<()>> {
+        ready(Err(anyhow!("no uploads here")))
+    }
+
+    fn write_blocked_reason(&self) -> Option<String> {
+        self.read_only.then(|| "read only".to_string())
+    }
+}
+
+pub(crate) async fn workspace(
+    backend: Arc<Recorder>,
+    cx: &mut TestAppContext,
+) -> (Entity<Workspace>, &mut VisualTestContext) {
+    cx.update(|cx| {
+        let settings_store = SettingsStore::test(cx);
+        cx.set_global(settings_store);
+        theme_settings::init(theme::LoadThemes::JustBase, cx);
+        editor::init(cx);
+        crate::init(cx);
+        cx.bind_keys(crate::key_bindings());
+        crate::set_backend(backend, cx);
+    });
+    let fs = project::FakeFs::new(cx.executor());
+    let project = project::Project::test(fs, [], cx).await;
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let workspace =
+        multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+    cx.update(|_, cx| ThreadShells::global(cx));
+    cx.run_until_parked();
+    (workspace, cx)
+}
+
+fn active_view(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) -> Entity<ThreadView> {
+    workspace.read_with(cx, |workspace, cx| {
+        workspace
+            .active_item(cx)
+            .and_then(|item| item.downcast::<ThreadView>())
+            .expect("a thread view is open")
+    })
+}
+
+fn new_draft(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) -> Entity<ThreadView> {
+    let view = workspace
+        .update_in(cx, |workspace, window, cx| {
+            ThreadView::open_new(workspace, window, cx)
+        })
+        .unwrap();
+    cx.run_until_parked();
+    view
+}
+
+/// Types `text` in the view's composer and focuses it.
+fn type_message(view: &Entity<ThreadView>, text: &str, cx: &mut VisualTestContext) {
+    let composer = view.read_with(cx, |view, _| view.composer().clone());
+    composer.update_in(cx, |editor, window, cx| editor.set_text(text, window, cx));
+    cx.focus(&composer);
+    cx.run_until_parked();
+}
+
+// The palette.
+
+fn palette(
+    query: &str,
+    workspace: &Entity<Workspace>,
+    cx: &mut VisualTestContext,
+) -> Vec<(String, Value, Vec<usize>)> {
+    let workspace = workspace.downgrade();
+    cx.update(|_, cx| {
+        crate::palette_results(query, &workspace, cx)
+            .into_iter()
+            .map(|result| {
+                assert_eq!(result.action.name(), "thread_chat::NewThreadInProject");
+                let action = result
+                    .action
+                    .as_any()
+                    .downcast_ref::<NewThreadInProject>()
+                    .unwrap();
+                (
+                    result.label,
+                    json!({ "project_id": action.project_id }),
+                    result.positions,
+                )
+            })
+            .collect()
+    })
+}
+
+fn labels(results: &[(String, Value, Vec<usize>)]) -> Vec<&str> {
+    results.iter().map(|(label, _, _)| label.as_str()).collect()
+}
+
+#[gpui::test]
+async fn the_palette_offers_a_new_thread_in_each_project(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (workspace, cx) = workspace(backend, cx).await;
+
+    // Every project but T3's scratch one, by name.
+    let results = palette("new thread", &workspace, cx);
+    assert_eq!(
+        labels(&results),
+        [
+            "thread chat: new thread in api",
+            "thread chat: new thread in web"
+        ]
+    );
+    assert_eq!(results[0].1, json!({ "project_id": "project-api" }));
+    // The matched characters, to highlight: "new" and "thread" after the namespace.
+    assert_eq!(results[0].2, [13, 14, 15, 17, 18, 19, 20, 21, 22]);
+    // A project's name alone finds it.
+    assert_eq!(
+        labels(&palette("WEB", &workspace, cx)),
+        ["thread chat: new thread in web"]
+    );
+    assert_eq!(
+        labels(&palette("new th a", &workspace, cx)),
+        ["thread chat: new thread in api"]
+    );
+    // The namespace, or a first keystroke, lists nothing, so Zed's commands stay on top.
+    for query in ["thread", "thread chat", "n", "", "new thread in docs"] {
+        assert!(palette(query, &workspace, cx).is_empty(), "{query:?} lists");
+    }
+
+    // The open thread's project comes first, as T3 lists it.
+    workspace.update_in(cx, |workspace, window, cx| {
+        ThreadView::open("thread-web".into(), "Fix".into(), workspace, window, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        labels(&palette("new", &workspace, cx)),
+        [
+            "thread chat: new thread in web",
+            "thread chat: new thread in api"
+        ]
+    );
+}
+
+#[gpui::test]
+async fn new_threads_from_the_palette_start_where_t3_says(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+
+    cx.dispatch_action(NewThreadInProject {
+        project_id: "project-web".into(),
+    });
+    cx.run_until_parked();
+    let draft = active_view(&workspace, cx);
+    type_message(&draft, "Fix the header", cx);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+
+    cx.dispatch_action(NewThreadWithoutProject);
+    cx.run_until_parked();
+    let draft = active_view(&workspace, cx);
+    type_message(&draft, "Sketch a CLI", cx);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+
+    // T3's scratch folder, found or made with `orchestration:operate`.
+    assert_eq!(
+        backend.calls("projects.ensureScratch"),
+        [(json!({}), Access::Operate)]
+    );
+    let launches = backend.launches();
+    assert_eq!(
+        launches
+            .iter()
+            .map(|launch| (&launch["projectId"], &launch["workspaceStrategy"]))
+            .collect::<Vec<_>>(),
+        [
+            // T3's default for new threads is the project's checkout here.
+            (&json!("project-web"), &json!({ "type": "root" })),
+            (&json!("scratch-1"), &json!({ "type": "root" })),
+        ]
+    );
+}
+
+#[gpui::test]
+async fn the_palette_copies_the_thread_id_and_finds_in_it(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (workspace, cx) = workspace(backend, cx).await;
+    // On a draft there's no thread to copy.
+    new_draft(&workspace, cx);
+    cx.dispatch_action(crate::CopyThreadId);
+    assert_eq!(cx.read_from_clipboard(), None);
+
+    workspace.update_in(cx, |workspace, window, cx| {
+        ThreadView::open("thread-web".into(), "Fix".into(), workspace, window, cx)
+    });
+    cx.run_until_parked();
+    cx.dispatch_action(crate::CopyThreadId);
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("thread-web".to_string())
+    );
+}

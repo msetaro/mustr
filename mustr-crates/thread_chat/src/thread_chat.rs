@@ -66,6 +66,14 @@ pub use organize::{
 pub use sidebar::{NextThread, PreviousThread, RowPullRequest};
 pub use snooze::SnoozeThread;
 // WP14, agent setup and T3's settings:
+// WP17, threads, creation and navigation:
+#[cfg(test)]
+mod creation_tests;
+pub mod palette;
+pub use palette::{
+    CopyThreadId, FindInThread, NewThreadInProject, NewThreadWithoutProject, PaletteResult,
+    palette_results,
+};
 
 #[cfg(test)]
 mod tests;
@@ -117,6 +125,8 @@ pub fn init(cx: &mut App) {
     snooze::init(cx);
     // WP14, agent setup and T3's settings:
     thread_settings::FollowUpBehavior::load(cx);
+    // WP17, threads, creation and navigation:
+    palette::init(cx);
 }
 
 /// mustr's key bindings for threads. The app binds them after Zed's, so users can rebind them:
@@ -188,6 +198,7 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-z", UndoThreadAction, Some("ThreadView")),
         KeyBinding::new("secondary-z", UndoThreadAction, Some("ThreadsSidebar")),
         // WP14, agent setup and T3's settings:
+        // WP17, threads, creation and navigation:
     ]
 }
 
