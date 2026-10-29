@@ -516,7 +516,7 @@ impl Render for ThreadView {
             .size_full()
             .bg(palette.background.hsla())
             .when(self.new_thread.is_none(), |this| {
-                this.child(self.render_header(cx))
+                this.child(self.render_header(window, cx))
                     .child(self.family_bar.clone())
                     .child(self.worktree_setup.clone())
             })

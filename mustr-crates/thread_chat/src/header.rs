@@ -11,14 +11,29 @@ use gpui::{
     AnyElement, App, Context, FontWeight, Hsla, IntoElement, ParentElement as _, Styled as _,
     WeakEntity, px,
 };
-use mustr_ui::{Pill, palette, tokens, tokens::scaled};
+use mustr_ui::{OverflowItem, Pill, overflow, palette, tokens, tokens::scaled};
 use ui::{
     Color, ContextMenu, ContextMenuEntry, IconButton, IconName, IconSize, Label, LabelCommon as _,
     LabelSize, PopoverMenu, Tooltip, prelude::*,
 };
 
+/// The narrowest the header's title gets, at mustr's design size, before the usage meters make
+/// way for it.
+const TITLE_MIN_WIDTH: gpui::Pixels = px(240.);
+
+const HEADER_TITLE: &str = "thread-header-title";
+const HEADER_USAGE: &str = "thread-header-usage";
+const HEADER_CONTEXT: &str = "thread-header-context";
+const HEADER_MENU: &str = "thread-header-menu";
+
 impl ThreadView {
-    pub(crate) fn render_header(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    /// In a narrow window, the usage limits go first, then the context meter, so the title keeps
+    /// [`TITLE_MIN_WIDTH`]; the thread's menu has both.
+    pub(crate) fn render_header(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         self.observe_history(cx);
         let palette = palette(cx);
         let state = self.thread_state();
@@ -30,56 +45,96 @@ impl ThreadView {
         let context_meter = usage.map(|usage| self.render_context_meter(usage, cx));
         let menu = loaded.then(|| self.render_thread_menu(cx));
         let banners = self.render_banners(cx);
+        let gap = gpui::rems(0.75);
+        let mut items = vec![
+            OverflowItem::new(HEADER_TITLE, overflow::ALWAYS)
+                .shrinks_to(tokens::scaled_pixels(TITLE_MIN_WIDTH, cx)),
+        ];
+        if usage_summary.is_some() {
+            items.push(OverflowItem::new(HEADER_USAGE, 1));
+        }
+        if context_meter.is_some() {
+            items.push(OverflowItem::new(HEADER_CONTEXT, 2));
+        }
+        if menu.is_some() {
+            items.push(OverflowItem::new(HEADER_MENU, overflow::ALWAYS));
+        }
+        // What doesn't fit is in the thread's menu, so there's no "…" button.
+        let visible =
+            self.history
+                .header_overflow
+                .visible(&items, gap.to_pixels(window.rem_size()), px(0.));
+        let shows = |key: &str| {
+            items
+                .iter()
+                .zip(&visible)
+                .any(|(item, visible)| *visible && item.key == key)
+        };
+        let (show_usage, show_context) = (shows(HEADER_USAGE), shows(HEADER_CONTEXT));
+        let title = v_flex()
+            .flex_1()
+            .min_w_0()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(
+                        Label::new(self.title())
+                            .weight(FontWeight::SEMIBOLD)
+                            .truncate(),
+                    )
+                    .when_some(activity, |this, activity| {
+                        this.child(activity_pill(&activity, cx))
+                    })
+                    .when(self.connection == Connection::Reconnecting, |this| {
+                        this.child(Pill::tinted("reconnecting", palette.warning))
+                    })
+                    .when(self.is_rewinding(), |this| {
+                        this.child(Pill::tinted("rewinding", palette.accent))
+                    }),
+            )
+            .when(!details.is_empty(), |this| {
+                this.child(
+                    div()
+                        .debug_selector(|| "thread-header-details".into())
+                        .child(
+                            Label::new(details.join(" · "))
+                                .size(LabelSize::Small)
+                                .color(Color::Muted)
+                                .truncate(),
+                        ),
+                )
+            });
+        let children = [
+            (Some(HEADER_TITLE.into()), Some(title.into_any_element())),
+            (
+                Some(HEADER_USAGE.into()),
+                usage_summary.filter(|_| show_usage),
+            ),
+            (
+                Some(HEADER_CONTEXT.into()),
+                context_meter.filter(|_| show_context),
+            ),
+            (Some(HEADER_MENU.into()), menu),
+        ]
+        .into_iter()
+        .filter_map(|(key, child)| Some((key, child?)));
         v_flex()
             .flex_none()
             .w_full()
             .child(
-                h_flex()
+                div()
                     .w_full()
-                    .gap_3()
                     .px_4()
                     .py(scaled(px(8.)))
                     .border_b(tokens::BORDER_WIDTH)
                     .border_color(palette.border.hsla())
                     .bg(palette.surface.hsla())
                     .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                h_flex()
-                                    .gap_2()
-                                    .child(
-                                        Label::new(self.title())
-                                            .weight(FontWeight::SEMIBOLD)
-                                            .truncate(),
-                                    )
-                                    .when_some(activity, |this, activity| {
-                                        this.child(activity_pill(&activity, cx))
-                                    })
-                                    .when(self.connection == Connection::Reconnecting, |this| {
-                                        this.child(Pill::tinted("reconnecting", palette.warning))
-                                    })
-                                    .when(self.is_rewinding(), |this| {
-                                        this.child(Pill::tinted("rewinding", palette.accent))
-                                    }),
-                            )
-                            .when(!details.is_empty(), |this| {
-                                this.child(
-                                    div()
-                                        .debug_selector(|| "thread-header-details".into())
-                                        .child(
-                                            Label::new(details.join(" · "))
-                                                .size(LabelSize::Small)
-                                                .color(Color::Muted)
-                                                .truncate(),
-                                        ),
-                                )
-                            }),
-                    )
-                    .children(usage_summary)
-                    .children(context_meter)
-                    .children(menu),
+                        self.history
+                            .header_overflow
+                            .render(children, window)
+                            .gap(gap),
+                    ),
             )
             .children(banners)
             .into_any_element()
