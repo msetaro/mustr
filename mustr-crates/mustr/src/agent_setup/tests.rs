@@ -820,12 +820,7 @@ async fn servers_without_agent_setup_say_so(cx: &mut TestAppContext) {
         .unsupported
         .lock()
         .extend(["provider.install.subscribe".to_string()]);
-    let (view, cx) = open_page(
-        backend,
-        vec![codex_managed(json!({}))],
-        json!({}),
-        cx,
-    );
+    let (view, cx) = open_page(backend, vec![codex_managed(json!({}))], json!({}), cx);
     view.read_with(cx, |view, _| {
         assert_eq!(
             view.agent("codex").unwrap().follow_error.as_deref(),
@@ -1061,4 +1056,77 @@ fn sign_in_terminals_read_as_plain_lines() {
     );
     assert_eq!(terminal_chunks(""), [String::new()]);
     assert_eq!(terminal_chunks("abc"), ["abc".to_string()]);
+}
+
+#[gpui::test]
+async fn custom_models_join_the_agents_list(cx: &mut TestAppContext) {
+    let backend = Arc::new(FakeBackend::default());
+    let settings = json!({
+        "providerInstances": {
+            "codex": {
+                "driver": "codex",
+                "config": {
+                    "binaryPath": "codex",
+                    "customModels": ["gpt-5.5-codex", { "slug": "o9", "name": "O9" }]
+                }
+            }
+        }
+    });
+    let ready = provider("codex", "codex", "Codex", json!({}));
+    let (view, cx) = open_page(backend.clone(), vec![ready.clone()], settings.clone(), cx);
+    view.read_with(cx, |view, cx| {
+        assert_eq!(
+            custom_models(&decode(ready.clone()), view.configs.read(cx).settings()),
+            ["gpt-5.5-codex", "o9"]
+        );
+    });
+    click("agent-remove-model-codex-o9", cx);
+    // Add shows a field until it's used or cancelled.
+    click("agent-add-model-codex", cx);
+    assert!(cx.debug_bounds("agent-save-model-codex").is_some());
+    click("agent-cancel-model-codex", cx);
+    assert!(cx.debug_bounds("agent-save-model-codex").is_none());
+    assert_eq!(
+        backend.commands(),
+        [manage(
+            "server.updateSettings",
+            json!({
+                "patch": {},
+                "providerInstanceMutation": {
+                    "operation": "upsert", "instanceId": "codex",
+                    "instance": {
+                        "driver": "codex",
+                        "config": { "binaryPath": "codex", "customModels": ["gpt-5.5-codex"] }
+                    }
+                }
+            })
+        )]
+    );
+
+    // Adding keeps the others as T3 has them; a model already there, or none, changes nothing.
+    let settings: ServerSettings = decode(settings);
+    let codex: ServerProvider = decode(ready);
+    let added = change_custom_model(&codex, Some(&settings), " gpt-6 ", true).unwrap();
+    assert_eq!(
+        serde_json::to_value(&added).unwrap()["providerInstanceMutation"]["instance"]["config"]["customModels"],
+        json!(["gpt-5.5-codex", { "slug": "o9", "name": "O9" }, "gpt-6"])
+    );
+    assert_eq!(
+        change_custom_model(&codex, Some(&settings), "o9", true),
+        None
+    );
+    assert_eq!(
+        change_custom_model(&codex, Some(&settings), "  ", true),
+        None
+    );
+    assert_eq!(
+        change_custom_model(&codex, Some(&settings), "gpt-6", false),
+        None
+    );
+    // An agent T3's settings don't have yet gets its first.
+    let first = change_custom_model(&codex, None, "gpt-6", true).unwrap();
+    assert_eq!(
+        serde_json::to_value(&first).unwrap()["providerInstanceMutation"]["instance"],
+        json!({ "driver": "codex", "config": { "customModels": ["gpt-6"] } })
+    );
 }

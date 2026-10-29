@@ -540,6 +540,72 @@ pub(crate) fn turned_on(
     upsert(provider, instance)
 }
 
+/// The models the user added to the agent's list in T3's settings (`customModels`, each a slug
+/// or `{slug, name, capabilities}`), by slug.
+pub(crate) fn custom_models(
+    provider: &ServerProvider,
+    settings: Option<&ServerSettings>,
+) -> Vec<String> {
+    instance_config(provider, settings)
+        .config
+        .as_ref()
+        .and_then(|config| config.get("customModels"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|model| match model {
+            Value::String(slug) => Some(slug.trim().to_string()),
+            model => model
+                .get("slug")?
+                .as_str()
+                .map(|slug| slug.trim().to_string()),
+        })
+        .filter(|slug| !slug.is_empty())
+        .collect()
+}
+
+/// The settings change that adds `slug` to the agent's custom models, or removes it, keeping the
+/// others as T3 has them. `None` when there's nothing to change.
+pub(crate) fn change_custom_model(
+    provider: &ServerProvider,
+    settings: Option<&ServerSettings>,
+    slug: &str,
+    add: bool,
+) -> Option<ServerUpdateSettingsPayload> {
+    let slug = slug.trim();
+    if slug.is_empty() {
+        return None;
+    }
+    let mut instance = instance_config(provider, settings);
+    let mut config = match instance.config.take() {
+        Some(Value::Object(config)) => config,
+        _ => serde_json::Map::new(),
+    };
+    let mut models = config
+        .get("customModels")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let slug_of = |model: &Value| match model {
+        Value::String(slug) => Some(slug.trim().to_string()),
+        model => model
+            .get("slug")?
+            .as_str()
+            .map(|slug| slug.trim().to_string()),
+    };
+    let present = models
+        .iter()
+        .any(|model| slug_of(model).as_deref() == Some(slug));
+    match (add, present) {
+        (true, false) => models.push(Value::String(slug.to_string())),
+        (false, true) => models.retain(|model| slug_of(model).as_deref() != Some(slug)),
+        _ => return None,
+    }
+    config.insert("customModels".into(), Value::Array(models));
+    instance.config = Some(Value::Object(config));
+    Some(upsert(provider, instance))
+}
+
 /// The agent's instance in T3's settings, or a new one for its driver.
 fn instance_config(
     provider: &ServerProvider,
@@ -661,6 +727,8 @@ pub struct AgentSetupView {
     /// The agent the page was opened for, listed first.
     focused: Option<String>,
     show_turned_off: bool,
+    /// The agent whose custom model is being typed.
+    adding_model: Option<String>,
     refreshing: bool,
     error: Option<SharedString>,
     /// The command just copied, by its selector.
@@ -687,6 +755,7 @@ impl AgentSetupView {
             agents: HashMap::default(),
             focused,
             show_turned_off: false,
+            adding_model: None,
             refreshing: false,
             error: None,
             copied: None,
@@ -1403,6 +1472,9 @@ impl AgentSetupView {
                 parts.push(self.render_account(provider, window, cx));
             }
             (None, _) => parts.extend(self.render_cli(provider, cx)),
+        }
+        if state != AgentState::Disabled && provider.installed {
+            parts.push(self.render_custom_models(provider, window, cx));
         }
         if let Some(agent) = agent {
             if let Some(error) = agent.follow_error.clone().or(agent.error.clone()) {
@@ -2226,6 +2298,158 @@ impl AgentSetupView {
             );
         }
         parts
+    }
+
+    /// Models the agent can run that T3 doesn't list, as T3's custom model editor adds them
+    /// (`customModels` in the agent's settings, which `providers:manage` guards). T3 then lists
+    /// them with the agent's models, so every model picker offers them.
+    fn render_custom_models(
+        &self,
+        provider: &ServerProvider,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let palette = palette(cx);
+        let id = provider.instance_id.clone();
+        let models = custom_models(provider, self.configs.read(cx).settings());
+        let busy = self
+            .agents
+            .get(&id)
+            .is_some_and(|agent| agent.pending.is_some());
+        let blocked = self
+            .blocked(Access::ProvidersManage)
+            .or_else(|| busy.then(|| "Busy".to_string()));
+        let adding = self.adding_model.as_deref() == Some(id.as_str());
+        let mut controls = Vec::new();
+        if !adding {
+            controls.push(self.button(
+                format!("agent-add-model-{id}"),
+                "Add model",
+                ButtonStyle::Default,
+                blocked.clone(),
+                cx,
+                {
+                    let id = id.clone();
+                    move |this, _, cx| {
+                        this.adding_model = Some(id.clone());
+                        cx.notify();
+                    }
+                },
+            ));
+        }
+        let description = if models.is_empty() {
+            "None. Add a model the agent runs that T3 Code doesn't list yet, by its id."
+        } else {
+            "Listed with the agent's own models."
+        };
+        let chips = models.iter().map(|slug| {
+            let remove = {
+                let provider = provider.clone();
+                let slug = slug.clone();
+                self.button(
+                    format!("agent-remove-model-{id}-{slug}"),
+                    "Remove",
+                    ButtonStyle::Default,
+                    blocked.clone(),
+                    cx,
+                    move |this, _, cx| {
+                        let settings = this.configs.read(cx).settings();
+                        if let Some(payload) =
+                            change_custom_model(&provider, settings, &slug, false)
+                        {
+                            this.change_instance(
+                                provider.instance_id.clone(),
+                                "Removing the model",
+                                payload,
+                                cx,
+                            );
+                        }
+                    },
+                )
+            };
+            h_flex()
+                .gap_2()
+                .child(code(slug.clone(), cx))
+                .child(remove)
+                .into_any_element()
+        });
+        let chips = chips.collect::<Vec<_>>();
+        let editor = adding.then(|| {
+            let input = window.use_keyed_state(
+                SharedString::from(format!("agent-model-input-{id}")),
+                cx,
+                |window, cx| {
+                    let mut editor = Editor::single_line(window, cx);
+                    editor.set_placeholder_text("Model id, such as gpt-5.5-codex", window, cx);
+                    editor
+                },
+            );
+            let add = {
+                let (provider, input) = (provider.clone(), input.clone());
+                self.button(
+                    format!("agent-save-model-{id}"),
+                    "Add",
+                    ButtonStyle::Primary,
+                    blocked.clone(),
+                    cx,
+                    move |this, window, cx| {
+                        let slug = input.read(cx).text(cx);
+                        let settings = this.configs.read(cx).settings();
+                        if let Some(payload) = change_custom_model(&provider, settings, &slug, true)
+                        {
+                            this.change_instance(
+                                provider.instance_id.clone(),
+                                "Adding the model",
+                                payload,
+                                cx,
+                            );
+                        }
+                        input.update(cx, |input, cx| input.clear(window, cx));
+                        this.adding_model = None;
+                        cx.notify();
+                    },
+                )
+            };
+            let cancel = self.button(
+                format!("agent-cancel-model-{id}"),
+                "Cancel",
+                ButtonStyle::Default,
+                None,
+                cx,
+                |this, _, cx| {
+                    this.adding_model = None;
+                    cx.notify();
+                },
+            );
+            h_flex()
+                .w_full()
+                .gap_2()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .px_2()
+                        .py_1()
+                        .rounded(scaled(tokens::CONTROL_RADIUS))
+                        .border(tokens::BORDER_WIDTH)
+                        .border_color(palette.border.hsla())
+                        .bg(palette.background.hsla())
+                        .child(input),
+                )
+                .child(add)
+                .child(cancel)
+        });
+        v_flex()
+            .w_full()
+            .gap_1()
+            .debug_selector({
+                let id = id.clone();
+                move || format!("agent-models-{id}")
+            })
+            .child(part("Custom models", description, controls))
+            .children(chips)
+            .children(editor)
+            .into_any_element()
     }
 
     fn render_list(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
