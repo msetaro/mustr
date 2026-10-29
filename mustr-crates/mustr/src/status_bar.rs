@@ -8,7 +8,7 @@ use crate::{
     t3_engine::T3Mode,
 };
 use gpui::{
-    App, AppContext as _, Context, Entity, Hsla, IntoElement, ParentElement as _, Render,
+    App, AppContext as _, Context, Entity, Hsla, IntoElement, ParentElement as _, Pixels, Render,
     SharedString, Styled as _, Subscription, Task, Window, div, px,
 };
 use mustr_ui::{StatusHint, tokens, tokens::scaled};
@@ -239,8 +239,30 @@ const REVIEW_HINTS: [(&[&str], &str); 4] = [
     (&["v"], "viewed"),
 ];
 
+/// The room each key hint takes, what the status bar's left items keep, and what an update's
+/// status takes, at mustr's design size.
+const HINT_WIDTH: Pixels = px(75.);
+const LEFT_ITEMS_WIDTH: Pixels = px(200.);
+const UPDATE_STATUS_WIDTH: Pixels = px(130.);
+
+/// How many of the key hints fit in a window `window_width` wide, next to `others` (such as an
+/// update's status), at `rem_size`: in a narrow window, the first ones, so they don't run over
+/// the sync state.
+fn hints_that_fit(window_width: Pixels, others: Pixels, rem_size: Pixels) -> usize {
+    let room = window_width - others - scaled(LEFT_ITEMS_WIDTH).to_pixels(rem_size);
+    let count = (room / scaled(HINT_WIDTH).to_pixels(rem_size)).floor();
+    (count.max(0.) as usize).min(REVIEW_HINTS.len())
+}
+
 impl Render for KeyHints {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let rem_size = window.rem_size();
+        let others = if crate::updates::Updater::shows_status(cx) {
+            scaled(UPDATE_STATUS_WIDTH).to_pixels(rem_size)
+        } else {
+            px(0.)
+        };
+        let count = hints_that_fit(window.viewport_size().width, others, rem_size);
         h_flex()
             .gap(scaled(px(14.)))
             .pr(scaled(px(5.)))
@@ -248,6 +270,7 @@ impl Render for KeyHints {
                 this.children(
                     REVIEW_HINTS
                         .iter()
+                        .take(count)
                         .map(|(keys, label)| StatusHint::new(keys.iter().copied(), *label)),
                 )
             })
@@ -284,6 +307,20 @@ mod tests {
         assert_eq!(ago(Duration::from_secs(12)), "12s ago");
         assert_eq!(ago(Duration::from_secs(185)), "3m ago");
         assert_eq!(ago(Duration::from_secs(7300)), "2h ago");
+    }
+
+    /// On a MacBook's screen at mustr's default size every hint fits; in a half-screen window,
+    /// the first two.
+    #[test]
+    fn key_hints_fit_the_window() {
+        assert_eq!(hints_that_fit(px(1512.), px(0.), px(26.)), 4);
+        assert_eq!(hints_that_fit(px(1470.), px(0.), px(26.)), 4);
+        assert_eq!(hints_that_fit(px(756.), px(0.), px(26.)), 2);
+        assert_eq!(hints_that_fit(px(756.), px(0.), px(13.)), 4);
+        assert_eq!(hints_that_fit(px(300.), px(0.), px(26.)), 0);
+        // With "Restart to update" next to them.
+        assert_eq!(hints_that_fit(px(756.), px(260.), px(26.)), 0);
+        assert_eq!(hints_that_fit(px(1512.), px(260.), px(26.)), 4);
     }
 
     #[test]

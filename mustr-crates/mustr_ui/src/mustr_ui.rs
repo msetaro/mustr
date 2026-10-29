@@ -3,10 +3,12 @@
 
 pub mod components;
 pub mod icons;
+pub mod overflow;
 pub mod tokens;
 
 pub use components::*;
 pub use icons::{MustrAssets, MustrIcon};
+pub use overflow::{OverflowItem, OverflowRow};
 
 use anyhow::{Context as _, Result};
 use gpui::App;

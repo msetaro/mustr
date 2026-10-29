@@ -69,9 +69,13 @@ impl RenderOnce for SegmentedControl {
         let palette = palette(cx);
         let selected = self.selected;
         let on_select = self.on_select;
+        // In a row too narrow for every segment, the segments wrap inside the control rather
+        // than running out of it.
         h_flex()
             .id(self.id)
-            .flex_none()
+            .flex_shrink_1()
+            .min_w_0()
+            .flex_wrap()
             .border(tokens::BORDER_WIDTH)
             .border_color(palette.border.hsla())
             .rounded(scaled(tokens::CONTROL_RADIUS))
@@ -87,6 +91,7 @@ impl RenderOnce for SegmentedControl {
                         div()
                             .id(("segment", index))
                             .debug_selector(move || format!("segment-{label}"))
+                            .flex_none()
                             .px(scaled(px(8.)))
                             .py(scaled(px(1.)))
                             .whitespace_nowrap()

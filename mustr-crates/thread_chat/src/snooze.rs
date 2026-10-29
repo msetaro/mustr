@@ -450,7 +450,7 @@ fn field(label: &'static str, editor: &Entity<Editor>, cx: &App) -> impl IntoEle
 }
 
 impl Render for SnoozeDialog {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = palette(cx);
         let this = cx.entity().downgrade();
         let modes = SegmentedControl::new("snooze-mode")
@@ -526,7 +526,7 @@ impl Render for SnoozeDialog {
             .key_context("SnoozeDialog")
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::cancel))
-            .w(rems(30.))
+            .w(tokens::modal_width(rems(30.), window))
             .p_4()
             .gap_3()
             .rounded(scaled(tokens::CORNER_RADIUS))

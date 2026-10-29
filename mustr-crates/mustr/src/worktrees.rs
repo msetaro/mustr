@@ -1263,7 +1263,9 @@ impl WorktreesView {
                     ),
             )
             .child(
+                // In a narrow window, the summary and Refresh go to the next line.
                 h_flex()
+                    .flex_wrap()
                     .gap_3()
                     .child(filters)
                     .child(
@@ -1271,11 +1273,12 @@ impl WorktreesView {
                             .size(LabelSize::Small)
                             .color(Color::Muted),
                     )
-                    .child(div().flex_1())
                     .child(
-                        TextButton::new("refresh-worktrees", "Refresh")
-                            .tooltip("Read T3's threads and check every folder again")
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                        div().ml_auto().child(
+                            TextButton::new("refresh-worktrees", "Refresh")
+                                .tooltip("Read T3's threads and check every folder again")
+                                .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                        ),
                     ),
             )
             .when(!local, |this| {
@@ -1581,6 +1584,7 @@ impl WorktreesView {
             let cancel_path = path.clone();
             h_flex()
                 .w_full()
+                .flex_wrap()
                 .gap_2()
                 .mt_2()
                 .px_2()
@@ -1594,23 +1598,29 @@ impl WorktreesView {
                     ))
                     .size(LabelSize::Small),
                 )
-                .child(div().flex_1())
                 .child(
-                    TextButton::new(
-                        SharedString::from(format!("cancel-remove-{path}")),
-                        "Cancel",
-                    )
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.set_removal(&cancel_path, None, cx)),
-                    ),
-                )
-                .child(
-                    TextButton::new(
-                        SharedString::from(format!("confirm-remove-{path}")),
-                        "Remove worktree",
-                    )
-                    .style(mustr_ui::ButtonStyle::Primary)
-                    .on_click(cx.listener(move |this, _, _, cx| this.remove(&confirm_path, cx))),
+                    h_flex()
+                        .ml_auto()
+                        .gap_2()
+                        .child(
+                            TextButton::new(
+                                SharedString::from(format!("cancel-remove-{path}")),
+                                "Cancel",
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| this.set_removal(&cancel_path, None, cx),
+                            )),
+                        )
+                        .child(
+                            TextButton::new(
+                                SharedString::from(format!("confirm-remove-{path}")),
+                                "Remove worktree",
+                            )
+                            .style(mustr_ui::ButtonStyle::Primary)
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.remove(&confirm_path, cx)),
+                            ),
+                        ),
                 )
         });
 
@@ -1630,8 +1640,10 @@ impl WorktreesView {
             .when(last, |this| this.rounded_b(scaled(tokens::CORNER_RADIUS)))
             .when(folder.exists == Some(false), |this| this.opacity(0.6))
             .child(
+                // Open and Remove go under the worktree when there's no room beside it.
                 h_flex()
                     .w_full()
+                    .flex_wrap()
                     .gap_3()
                     .items_start()
                     .child(
@@ -1644,10 +1656,12 @@ impl WorktreesView {
                     .child(
                         v_flex()
                             .flex_1()
-                            .min_w_0()
+                            .min_w(scaled(px(120.)))
                             .gap_0p5()
                             .child(
+                                // The pills go under the name when there's no room for both.
                                 h_flex()
+                                    .flex_wrap()
                                     .gap_2()
                                     .min_w_0()
                                     .child(
@@ -1665,7 +1679,7 @@ impl WorktreesView {
                             )
                             .child(threads),
                     )
-                    .children(actions),
+                    .children(actions.map(|actions| div().ml_auto().child(actions))),
             )
             .children(confirm)
             .when_some(failure, |this, error| {

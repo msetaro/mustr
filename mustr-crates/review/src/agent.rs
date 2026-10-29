@@ -8,16 +8,20 @@
 //! of T3's `review-comment` records.
 
 use gpui::{
-    Action, AnyElement, App, IntoElement, ParentElement as _, SharedString, Styled as _, WeakEntity,
+    Action, AnyElement, App, ClickEvent, IntoElement, ParentElement as _, SharedString,
+    Styled as _, WeakEntity, Window,
 };
 use mustr_ui::tokens;
 use serde::Deserialize;
 use ui::{
-    Button, ButtonSize, ButtonStyle, Color, ContextMenu, Icon, IconName, IconPosition, IconSize,
-    Label, LabelCommon as _, LabelSize, PopoverMenu, Tooltip, prelude::*,
+    Button, ButtonSize, ButtonStyle, Color, ContextMenu, Icon, IconButton, IconName, IconPosition,
+    IconSize, Label, LabelCommon as _, LabelSize, PopoverMenu, Tooltip, prelude::*,
 };
 
-use crate::{ReviewView, header::pill};
+use crate::{
+    ReviewView,
+    header::{TITLE_MIN_WIDTH, detail, pill, separator},
+};
 
 /// Opens the agent thread's chat. The review only dispatches it; the app decides what opens.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, schemars::JsonSchema, Action)]
@@ -174,29 +178,33 @@ fn render_scope_picker(
 
 /// The header card of an agent thread's review. `actions` go at the end of the title row, and
 /// `extra` below the details.
+/// `compact` shows Restricted Mode and Open chat as icons, with their labels in tooltips.
 pub(crate) fn render_agent_header(
     header: &AgentThreadHeader,
     review: WeakEntity<ReviewView>,
     restricted_worktree: bool,
+    compact: bool,
     actions: Option<AnyElement>,
     extra: Option<AnyElement>,
     cx: &App,
 ) -> impl IntoElement {
     let colors = cx.theme().colors();
-    let separator = || Label::new("·").size(LabelSize::Small).color(Color::Muted);
-    let muted = |text: String| Label::new(text).size(LabelSize::Small).color(Color::Muted);
+    let muted = |text: String| detail(Label::new(text).size(LabelSize::Small).color(Color::Muted));
 
     let mut details = h_flex().gap_1p5().flex_wrap().child(
         h_flex()
+            .flex_none()
             .gap_1()
             .child(
                 Icon::new(IconName::ZedAgent)
                     .size(IconSize::XSmall)
                     .color(Color::Custom(mustr_ui::palette(cx).agent.hsla())),
             )
-            .child(muted(
-                header.agent.clone().unwrap_or_else(|| "Agent".into()),
-            )),
+            .child(
+                Label::new(header.agent.clone().unwrap_or_else(|| "Agent".into()))
+                    .size(LabelSize::Small)
+                    .color(Color::Muted),
+            ),
     );
     if let Some(project) = &header.project {
         details = details.child(separator()).child(muted(project.clone()));
@@ -204,13 +212,19 @@ pub(crate) fn render_agent_header(
     if let Some(branch) = &header.branch {
         details = details.child(separator()).child(
             h_flex()
+                .flex_none()
                 .gap_1()
                 .child(
                     Icon::new(IconName::GitBranch)
                         .size(IconSize::XSmall)
                         .color(Color::Muted),
                 )
-                .child(muted(branch.clone()).buffer_font(cx)),
+                .child(
+                    Label::new(branch.clone())
+                        .size(LabelSize::Small)
+                        .color(Color::Muted)
+                        .buffer_font(cx),
+                ),
         );
     }
     if let Some(source) = &header.source {
@@ -231,61 +245,85 @@ pub(crate) fn render_agent_header(
         .border_color(colors.border)
         .child(
             h_flex()
+                .flex_wrap()
                 .gap_2()
                 .child(pill(header.status.clone(), header.status_color(cx), cx))
                 .child(
-                    div().flex_1().min_w_0().child(
-                        Label::new(header.title.clone())
-                            .size(LabelSize::Large)
-                            .weight(gpui::FontWeight::SEMIBOLD)
-                            .truncate(),
-                    ),
+                    div()
+                        .flex_1()
+                        .min_w(tokens::scaled_pixels(TITLE_MIN_WIDTH, cx))
+                        .child(
+                            Label::new(header.title.clone())
+                                .size(LabelSize::Large)
+                                .weight(gpui::FontWeight::SEMIBOLD)
+                                .truncate(),
+                        ),
                 )
                 .children(render_scope_picker(header, review))
                 .when(restricted_worktree, |this| {
-                    this.child(
-                        Button::new("trust-worktree", "Restricted Mode")
-                            .style(ButtonStyle::Subtle)
-                            .size(ButtonSize::Compact)
-                            .label_size(LabelSize::Small)
-                            .start_icon(
-                                Icon::new(IconName::Warning)
-                                    .size(IconSize::XSmall)
-                                    .color(Color::Warning),
-                            )
-                            .tooltip(Tooltip::text(
-                                "Language servers don't run in this worktree until you trust \
-                                 it. Click to review Zed's trust options.",
-                            ))
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(
-                                    Box::new(workspace::ToggleWorktreeSecurity),
-                                    cx,
-                                )
-                            }),
-                    )
-                })
-                .child(
-                    Button::new("open-thread-chat", "Open chat")
-                        .style(ButtonStyle::Subtle)
-                        .size(ButtonSize::Compact)
-                        .label_size(LabelSize::Small)
-                        .start_icon(
-                            Icon::new(IconName::Chat)
-                                .size(IconSize::XSmall)
-                                .color(Color::Muted),
+                    let tooltip = "Restricted Mode: language servers don't run in this worktree \
+                                   until you trust it. Click to review Zed's trust options.";
+                    let trust = |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                        window.dispatch_action(Box::new(workspace::ToggleWorktreeSecurity), cx)
+                    };
+                    if compact {
+                        this.child(
+                            IconButton::new("trust-worktree", IconName::Warning)
+                                .icon_size(IconSize::Small)
+                                .icon_color(Color::Warning)
+                                .tooltip(Tooltip::text(tooltip))
+                                .on_click(trust),
                         )
-                        .tooltip(Tooltip::text("Open the agent thread's chat"))
-                        .on_click(move |_, window, cx| {
-                            window.dispatch_action(
-                                Box::new(OpenThreadChat {
-                                    thread_id: thread_id.clone(),
-                                    title: thread_title.to_string(),
-                                }),
-                                cx,
-                            )
-                        }),
-                )
+                    } else {
+                        this.child(
+                            Button::new("trust-worktree", "Restricted Mode")
+                                .style(ButtonStyle::Subtle)
+                                .size(ButtonSize::Compact)
+                                .label_size(LabelSize::Small)
+                                .start_icon(
+                                    Icon::new(IconName::Warning)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Warning),
+                                )
+                                .tooltip(Tooltip::text(tooltip))
+                                .on_click(trust),
+                        )
+                    }
+                })
+                .map(|this| {
+                    let open_chat = move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+                        window.dispatch_action(
+                            Box::new(OpenThreadChat {
+                                thread_id: thread_id.clone(),
+                                title: thread_title.to_string(),
+                            }),
+                            cx,
+                        )
+                    };
+                    if compact {
+                        this.child(
+                            IconButton::new("open-thread-chat", IconName::Chat)
+                                .icon_size(IconSize::Small)
+                                .icon_color(Color::Muted)
+                                .tooltip(Tooltip::text("Open chat: the agent thread's chat"))
+                                .on_click(open_chat),
+                        )
+                    } else {
+                        this.child(
+                            Button::new("open-thread-chat", "Open chat")
+                                .style(ButtonStyle::Subtle)
+                                .size(ButtonSize::Compact)
+                                .label_size(LabelSize::Small)
+                                .start_icon(
+                                    Icon::new(IconName::Chat)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                                .tooltip(Tooltip::text("Open the agent thread's chat"))
+                                .on_click(open_chat),
+                        )
+                    }
+                })
                 .children(actions),
         )
         .child(details)

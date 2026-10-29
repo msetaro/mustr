@@ -7,6 +7,13 @@
 //! lasts across restarts. Reset Zoom removes both settings, so mustr's defaults
 //! (`assets/default_overrides.json`) apply again.
 //!
+//! Terminals (Zed's `TerminalElement`, local and remote alike) draw their text at the terminal's
+//! own `terminal.font_size` when it's set, or else at `buffer_font_size`. So a terminal follows
+//! the zoom through `buffer_font_size`, but a `terminal.font_size` (which Zed users often set)
+//! would pin it: Zed scales it only with Zed's unsaved font size adjustments
+//! (`theme_settings::adjusted_font_size`). A zoom step scales it too, by as much as the UI, and
+//! Reset Zoom removes it, so terminals go back to the code's size.
+//!
 //! Zed binds the same keys to its own font size actions, whose handlers are in `crates/zed`,
 //! which mustr doesn't include. mustr's bindings ([`key_bindings`]) are bound after Zed's, so
 //! they win.
@@ -14,6 +21,7 @@
 use fs::Fs;
 use gpui::{App, KeyBinding, Pixels, actions, px};
 use settings::{Settings as _, update_settings_file};
+use terminal::terminal_settings::TerminalSettings;
 use theme_settings::{ThemeSettings, clamp_font_size};
 
 actions!(
@@ -79,20 +87,39 @@ fn zoom(step: Step, cx: &mut App) {
     clear_unsaved_adjustments(cx);
     update_settings_file(<dyn Fs>::global(cx), cx, move |settings, cx| {
         let theme = ThemeSettings::get_global(cx);
-        let (ui_font_size, buffer_font_size) =
-            zoomed(theme.ui_font_size(cx), theme.buffer_font_size(cx), step);
+        let ui = theme.ui_font_size(cx);
+        let (ui_font_size, buffer_font_size) = zoomed(ui, theme.buffer_font_size(cx), step);
         settings.theme.ui_font_size = Some(f32::from(ui_font_size).into());
         settings.theme.buffer_font_size = Some(f32::from(buffer_font_size).into());
+        if let Some(terminal) = TerminalSettings::get_global(cx).font_size {
+            let terminal = clamp_font_size(round(terminal * (ui_font_size / ui)));
+            settings.terminal.get_or_insert_default().font_size = Some(f32::from(terminal).into());
+        }
     });
 }
 
-/// Removes both sizes from the user's settings, so mustr's defaults apply.
+/// Removes the sizes from the user's settings, so mustr's defaults apply: the UI's, the code's,
+/// and the terminal's, so terminals go back to the code's size.
 fn reset_zoom(cx: &mut App) {
     clear_unsaved_adjustments(cx);
     update_settings_file(<dyn Fs>::global(cx), cx, |settings, _| {
         settings.theme.ui_font_size = None;
         settings.theme.buffer_font_size = None;
+        if let Some(terminal) = settings.terminal.as_mut() {
+            terminal.font_size = None;
+        }
     });
+}
+
+/// The size a terminal draws its text at: what Zed's `TerminalElement` uses for a terminal view
+/// (`TerminalMode::Standalone`, as mustr's local and remote terminals are) in
+/// `crates/terminal_view/src/terminal_element.rs`.
+#[cfg(test)]
+fn terminal_font_size(cx: &App) -> Pixels {
+    TerminalSettings::get_global(cx).font_size.map_or_else(
+        || ThemeSettings::get_global(cx).buffer_font_size(cx),
+        |size| theme_settings::adjusted_font_size(size, cx),
+    )
 }
 
 /// Zed can also change the font sizes without saving them (`theme_settings::adjust_ui_font_size`),
@@ -275,6 +302,66 @@ mod tests {
                 "buffer_font_size": f32::from(buffer),
             })
         );
+    }
+
+    /// Terminals draw their text at the code's size, so they follow the zoom with it.
+    #[gpui::test]
+    async fn terminals_follow_the_zoom(cx: &mut TestAppContext) {
+        let fs = init_test(r#"{"ui_font_size": 26, "buffer_font_size": 26}"#, cx).await;
+        cx.read(|cx| assert_eq!(terminal_font_size(cx), px(26.)));
+        cx.update(|cx| cx.dispatch_action(&ZoomOut));
+        cx.run_until_parked();
+        cx.read(|cx| assert_eq!(terminal_font_size(cx), px(23.5)));
+        assert_eq!(
+            saved_settings(&fs).await,
+            json!({"ui_font_size": 23.5, "buffer_font_size": 23.5})
+        );
+        cx.update(|cx| cx.dispatch_action(&ResetZoom));
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert_eq!(
+                terminal_font_size(cx),
+                ThemeSettings::get_global(cx).buffer_font_size(cx)
+            )
+        });
+    }
+
+    /// A terminal size of the user's own (`terminal.font_size`) would pin terminals, so a zoom
+    /// scales it by as much as the UI, and Reset Zoom removes it.
+    #[gpui::test]
+    async fn the_terminals_own_size_follows_the_zoom(cx: &mut TestAppContext) {
+        let fs = init_test(
+            r#"{"ui_font_size": 26, "buffer_font_size": 26, "terminal": {"font_size": 15, "line_height": "standard"}}"#,
+            cx,
+        )
+        .await;
+        cx.read(|cx| assert_eq!(terminal_font_size(cx), px(15.)));
+        cx.update(|cx| cx.dispatch_action(&ZoomIn));
+        cx.run_until_parked();
+        // 15 × 28.5 / 26, to the half pixel.
+        cx.read(|cx| assert_eq!(terminal_font_size(cx), px(16.5)));
+        cx.update(|cx| cx.dispatch_action(&ZoomOut));
+        cx.update(|cx| cx.dispatch_action(&ZoomOut));
+        cx.run_until_parked();
+        cx.read(|cx| assert_eq!(terminal_font_size(cx), px(13.5)));
+        assert_eq!(
+            saved_settings(&fs).await["terminal"],
+            json!({"font_size": 13.5, "line_height": "standard"})
+        );
+
+        // Reset goes back to the code's size, at mustr's default.
+        cx.update(|cx| cx.dispatch_action(&ResetZoom));
+        cx.run_until_parked();
+        assert_eq!(
+            saved_settings(&fs).await,
+            json!({"terminal": {"line_height": "standard"}})
+        );
+        cx.read(|cx| {
+            assert_eq!(
+                terminal_font_size(cx),
+                ThemeSettings::get_global(cx).buffer_font_size(cx)
+            )
+        });
     }
 
     /// The View menu shows each action's first binding (`set_menus` in

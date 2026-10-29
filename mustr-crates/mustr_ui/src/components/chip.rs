@@ -15,6 +15,7 @@ pub struct Chip {
     accent: bool,
     dot: Option<Hsla>,
     menu_indicator: bool,
+    truncate: bool,
     tooltip: Option<SharedString>,
     on_click: Option<ClickHandler>,
 }
@@ -27,9 +28,17 @@ impl Chip {
             accent: false,
             dot: None,
             menu_indicator: false,
+            truncate: false,
             tooltip: None,
             on_click: None,
         }
+    }
+
+    /// Lets the chip shrink in a row that's too narrow, cutting its label with an ellipsis. Give
+    /// it a tooltip with the whole label.
+    pub fn truncate(mut self, truncate: bool) -> Self {
+        self.truncate = truncate;
+        self
     }
 
     /// Fills the chip with the accent color.
@@ -93,7 +102,13 @@ impl RenderOnce for Chip {
 
         h_flex()
             .id(self.id)
-            .flex_none()
+            .map(|this| {
+                if self.truncate {
+                    this.flex_shrink_1().min_w_0()
+                } else {
+                    this.flex_none()
+                }
+            })
             .gap(scaled(px(5.)))
             .px(scaled(px(8.)))
             .py(scaled(px(1.)))
@@ -113,7 +128,19 @@ impl RenderOnce for Chip {
                         .bg(color),
                 )
             })
-            .child(self.label)
+            .map(|this| {
+                if self.truncate {
+                    this.child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(self.label),
+                    )
+                } else {
+                    this.child(self.label)
+                }
+            })
             .when(self.menu_indicator, |this| this.child("▾"))
             .when_some(self.tooltip, |this, tooltip| {
                 this.tooltip(Tooltip::text(tooltip))
