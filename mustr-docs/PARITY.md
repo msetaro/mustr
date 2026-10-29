@@ -3,10 +3,10 @@
 What T3 Code's web and desktop app does for agent-driven development, what mustr does today, and
 what to build so a developer can stop opening T3's app.
 
-- **Compared:** mustr at `m3/next` (`ed22321621`, after WP0–WP14 landed) against T3 Code `v0.1.3`
-  (`d2c44031`, 2026-10-26). The list was first written at `m2/threads` (`a96368ce93`). Since
-  2026-10-28 mustr's `t3_api` is generated from T3 0.1.3 contracts (`t3_client/T3_VERSION`); the
-  local server is still 0.1.1. Calls added after 0.1.1 are marked *(0.1.3)*: a 0.1.1 server
+- **Compared:** mustr 0.1.0 (`m3/next` at `0c4bb5b473`, after WP0–WP18 landed) against T3 Code
+  `v0.1.3` (`d2c44031`, 2026-10-26). The list was first written at `m2/threads` (`a96368ce93`).
+  Since 2026-10-28 mustr's `t3_api` is generated from T3 0.1.3 contracts (`t3_client/T3_VERSION`);
+  the local server is still 0.1.1. Calls added after 0.1.1 are marked *(0.1.3)*: a 0.1.1 server
   doesn't have them, so mustr falls back there (`mustr-docs/T3-PROTOCOL.md`, "Compatibility").
 - **Paths:** T3 paths are relative to T3's `apps/web/src/` unless they start with `docs/`,
   `packages/` or `apps/`. `chat/`, `settings/`, `pullRequest/` and `preview/` are short for
@@ -23,29 +23,36 @@ what to build so a developer can stop opening T3's app.
   and scheduled tasks, worktrees and terminals, and the PR flow. Those rows say "P0: user's
   must-have".
 
-## 1. Where mustr stands
+## 1. Where mustr stands at v0.1.0
 
-With WP0–WP14 in, mustr covers T3's app for daily agent work on the user's own T3 or on mustr's
-own engine. All 41 P0 rows are done: thread settings and the new-thread form, images, drafts and
-prompt recall, the sidebar in T3's sections with settle, archive, pin and rename, commit, push and
-PR from the thread toolbar with link, watch, merge and Work on PR, the family bar for subagents,
-delegated tasks and workflows, the schedules page, per-thread terminals (T3's own, for threads on
-another machine) and the worktrees page. The `@`, `#`, `/` and `$` menu, notifications with the
-Dock badge, Edit from here, Fork, Compact, live command output, secret requests and usage limits
-are in too.
+mustr 0.1.0 covers T3's app for daily agent work, on the user's own T3 Code or on mustr's own
+engine. Every P0 and P1 row is done, and 33 of the 38 P2 rows (the counts are at the end of §2).
 
-Wave 3 closed 12 of the 13 open P1 rows: worktree setup progress, a PR's threads, the toolbar's
-keys and palette entries, T3's settings, installing and signing in to agents, file attachments and
-big pastes, terminal and review-comment chips, find in thread, the visit line, decline with
-feedback, dragging pinned and active threads, and message matches in the thread search. The one
-partial P1 is the command palette, which has the thread actions but not T3's "new thread in…".
-mustr now sends about 37 of the roughly 50 orchestration command types and calls about 70 of T3's
-RPCs. §3 lists what's left.
+- **The must-haves:** subagents, delegated tasks and workflows in the family bar; the scheduled
+  tasks page and editor; worktrees with T3's cleanup rules, worktree handoff and merge back;
+  per-thread terminals (local ones, or T3's own for a thread on another machine) with project
+  scripts; and the PR flow: commit, push and PR from the thread, link, watch, merge, Work on PR,
+  a PR's threads, reviewers, labels, title, stacks and review guides.
+- **Threads:** the new-thread form with T3's models, options, permissions and workspaces, one
+  prompt for several models, and starting in the background; T3's sidebar sections with settle,
+  snooze, pin, archive, delete, bulk select, drag, undo, hover cards and details; search by title
+  and by message; find in a thread; cloning a repository as a project.
+- **Composer and timeline:** images, files and big pastes; `@`, `#`, `/` and `$`; drafts, the
+  prompt stash, quotes and Markdown formatting; approvals, questions (with attachments), MCP
+  requests and secrets; the queue; Edit from here, Fork, Compact, hand off to another agent; file
+  links, HTML renders and plans saved to the folder.
+- **Reviewing agent work:** the whole thread's changes, its uncommitted changes, and each turn,
+  with comments sent back to the agent.
+- **Settings and accounts:** T3's settings, the agents page (installing, signing in, several
+  accounts, ACP agents), source control accounts, project settings, the usage dashboard, and
+  saved servers switched from the title bar.
+- **The app:** notifications and the Dock badge, the command palette's thread and project
+  actions, zoom, macOS menus, and a self-updating app bundle (`mustr-docs/RELEASING.md`).
 
-mustr also fits a MacBook's window at its default size (26, twice the designs' 13): toolbars and
-headers move what doesn't fit into a "…" menu or onto a second line, the sidebar takes a third of
-the window (and stays out of the way in a half-screen one), and the title bar, status bar, pages
-and dialogs narrow with the window.
+mustr sends 38 of T3's 55 orchestration command types (most of the rest are the server's own) and
+calls about 90 of its RPCs, with the scopes listed at the end of §2. It works against T3 0.1.1,
+0.1.3 and the 0.1.4 nightlies (all protocol 2). It fits a MacBook's window at its default size (26, twice the designs' 13)
+and at 13. §3 lists what's left after v0.1.0.
 
 ## 2. Features by area
 
@@ -290,10 +297,12 @@ mustr uses 0.1.1's data on servers without it:
   `thread.pin.reorder`, `thread.active.reorder`, `thread.auto-settle.set`, `queued-run.reorder` and
   `prepared-run.retry` commands are all in 0.1.1 (`t3_api/src/generated/methods.rs`, `tagged.rs`).
 
-**Counts** (125 rows):
+**Counts** at v0.1.0 (125 rows):
 - **P0:** 41, all done.
-- **P1:** 33. 32 are done and 1 is partial (the command palette).
-- **P2:** 38. 8 are done, 9 partial and 21 missing.
+- **P1:** 33, all done.
+- **P2:** 38. 33 are done (Markdown extras without math), 4 partial (several environments at once,
+  model visibility in two pickers, the minimap, and the preview browser) and 1 missing (remote
+  access).
 - **Skip:** 11.
 - **No priority:** 2 done rows.
 
@@ -304,78 +313,82 @@ mustr uses 0.1.1's data on servers without it:
 `mustr/src/t3_connection.rs`), each with an `Access` level (`thread_chat/src/backend.rs`).
 `access:*` and `relay:*` stay out.
 
-## 3. Build order
+## 3. After v0.1.0
 
-### Landed: WP0–WP14
+What's left once 0.1.0 is out: the open P2 rows, what each finished row still leaves out, and what
+the release checks found. Nothing here blocks daily use; T3's own app or CLI covers each gap.
 
-Each package owned its files, and a short seams change before each wave kept them apart. All are
-merged into `m3/next`.
+### Open rows (P2)
 
-- **WP0, seams:** split `ThreadView` into `thread_view.rs`, `timeline.rs`, `composer.rs` and
-  `header.rs`; `ThreadBackend::call_raw` and `upload`; empty settings and family bars; the thread
-  toolbar slot; the cross-package actions in `thread_chat/src/actions.rs`; the rail registry in
-  `mustr/src/nav_panel.rs`; and a labeled line per package in the shared files.
-- **WP1, thread settings and new threads** (`settings_bar.rs`, `thread_settings.rs`,
-  `new_thread.rs`): model, options, permission and plan modes, T3's defaults, scratch threads, base
-  branches, existing worktrees and branches, `NewThreadInWorktree`.
-- **WP2, composer and timeline** (`composer.rs`, `timeline.rs`, `attachments.rs`,
-  `t3_client/src/attachments.rs`): images in and out, the plan card's actions, Resume, drafts,
-  prompt recall, copy, queued edits, secret requests, and live command output.
-- **WP3, thread list and projects** (`sidebar.rs`, `organize.rs`, `projects.rs`): T3's sections,
-  settle and settle-and-advance, archive with Undo, pin, rename, mark unread, filter, copy, search,
-  and Add project.
-- **WP4, ship the work and the PR flow** (`mustr/src/thread_toolbar.rs`, `thread_git.rs`,
-  `pull_request_review.rs`): branch and git status, Review changes, Open in, Commit, push and PR,
-  the PR chip, link, unlink and watch, Work on PR, and merge, ready and close.
-- **WP5, subagents, workflows and scheduled tasks** (`family_bar.rs`, `mustr/src/schedules.rs`).
-- **WP6, terminals and worktrees** (`mustr/src/terminal_panel.rs`, `mustr/src/worktrees.rs`):
-  local per-thread terminals, the worktrees page, removal on archive, and Open as a project.
-- **WP7, macOS** (`mustr/src/macos.rs`, `script/mustr-bundle-mac`, `mustr-docs/MACOS.md`): menus,
-  About, the Dock icon, runtime Metal shaders, and a local app bundle.
-- **WP8, notifications** (`mustr/src/notifications.rs`): toasts, OS notifications, sounds, the
-  status bar's count and the Dock badge.
-- **WP9, mentions and slash commands** (`mentions.rs`, `slash_commands.rs`): `@`, `#`, `/` and
-  `$`, and `filesystem:read` for remote folders.
-- **WP10, history, agent status and usage** (`history.rs`, `usage.rs`): Edit from here, Fork,
-  Compact context, Restart agent session, the provider banner, usage limits and limit recovery.
+- **Several environments at once** (partial, L): one server is connected at a time (saved servers
+  switch between them); T3 lets each new thread pick its host and connects to all of them.
+- **Remote access** (missing, L): T3's SSH, Tailscale and T3 Connect setup. A server reached over
+  Tailscale or SSH forwarding can already be saved by its address.
+- **Model visibility** (partial, S): the schedule editor's and T3 settings' model pickers still
+  list the models T3's settings hide; custom models have no per-model options.
+- **Minimap** (partial, M): no timeline minimap. History paging isn't needed, since mustr reads the
+  whole thread.
+- **Preview browser** (partial, L): no preview panel, since mustr has no web engine; preview pages
+  and HTML renders open in the system browser.
+- **Math in Markdown**: Mermaid and tables render, math doesn't.
 
-### Landed: wave 3
+### What finished rows leave out
 
-- **Wave 3 seams:** the `terminal:*`, `settings:write` and `providers:manage` scopes with their
-  `Access` levels, `AddComposerContext`, and the empty `worktree_setup.rs` and `find_bar.rs`.
-- **WP11, terminals, worktrees and the PR flow** (`terminal_panel.rs`, `remote_terminal.rs`,
-  `worktree_setup.rs`, `thread_toolbar.rs`, `pull_request_review.rs`): T3's terminals for threads
-  on another machine, the worktree setup card with Cancel and Retry, a PR's threads, the toolbar's
-  keys and palette entries, a terminal's selection to the composer, and project scripts.
-- **WP12, composer and timeline** (`composer.rs`, `attachments.rs`, `timeline.rs`, `find_bar.rs`,
-  `agent_review.rs`): file attachments and big pastes, terminal and review-comment chips, review
-  comments as T3's records, find in thread, the visit line, decline with feedback, asking before
-  restarting a working agent, reordering the queue, Send now, and the goal line.
-- **WP13, thread list and navigation** (`sidebar.rs`, `organize.rs`, `snooze.rs`): dragging to
-  reorder, pin, settle and wake, message matches in the search, the list's keys, snooze and wake,
-  per-thread auto-settle, Undo, the archived list, the PR chip on rows, and Copy PR Link.
-- **WP14, agent setup and T3's settings** (`agent_setup.rs`, `t3_settings.rs`, `home.rs`,
-  `projects.rs`): the agents page (install, update, sign in and out), the T3 Code settings page,
-  "already a project", and custom models.
-- **Fit at 2x on a MacBook** (`mustr_ui/src/overflow.rs` and the views): at the default size (26)
-  in 1512x982, 1470x956 and half-screen 756x982 windows, toolbars and headers put what doesn't fit
-  into a "…" menu or onto another line, the sidebar takes a third of the window and stays out of a
-  half-screen one, the terminal panel opens at most 40% high, and the title bar, status bar, pages
-  and dialogs narrow with the window. The zoom scales a terminal's own font size too.
+- **Threads:** Regenerate title; grouping the sidebar by project (only the filter); T3's beta
+  Working section; browsing a forge's repositories when cloning (a URL or `owner/name` only).
+- **Plans:** Save to workspace for a thread whose folder is on T3's machine (T3's
+  `projects.writeFile` needs `filesystem:write`, which mustr doesn't ask for).
+- **Projects:** a project's icon; keybindings and previews for project scripts.
+- **Pull requests:** Merge stack and Rebase stack, and reviewers' verdicts beside the requested
+  reviewers.
+- **Accounts and agents:** saved forge tokens and a per-host account choice; renaming agent
+  accounts, their accent colors and environment variables, and importing ACP sessions.
+- **Usage:** price overrides, and usage across several environments.
 
-### What's left
+### Found by the release checks
 
-No P0 is open, and one P1 is partial. What the wave-3 packages left in their rows:
-- **Command palette** (P1): T3's "new thread in…" isn't in Zed's palette.
-- **Project scripts** (P2): script keybindings and previews.
-- **PR stacks** (P2): Merge stack and Rebase stack; reviewers' verdicts beside requested reviewers.
-- **Models** (P2): model visibility in the pickers, and per-model options for custom models.
-- **Project settings** (P2): a panel for a project's defaults, scripts and icon.
+From the integrated smoke test on 2026-10-29 (mustr's engine, and the user's T3 read-only):
 - **Zoom:** Zed's own command palette is 34 rems wide, so at 26 it's wider than a half-screen
-  window and clipped at both sides (Zed's file, so not changed). Setting `ui_font_size` alone in the
-  settings file leaves code and terminals at `buffer_font_size` (26); the zoom keys change both.
+  window and clipped at both sides (Zed's file). Setting `ui_font_size` alone in the settings file
+  leaves code and terminals at `buffer_font_size`; the zoom keys change both.
+- **Tooltips over menus:** a button's tooltip can cover the top of the menu it opened (Run ▾, the
+  connection chip) until the pointer moves. GPUI shows a tooltip that was pending when the click
+  came.
+- **Restricted Mode in reviews:** Zed's worktree trust keeps language servers off in T3's
+  worktrees until they're trusted, and the review header's tooltip calls the dialog "Zed's trust
+  options". A default for mustr (trust T3's worktrees, or say it in mustr's words) is open.
+- **The terminal panel at launch:** when mustr quit with a thread's terminals open, the panel comes
+  back open over the first page with its "Open a thread" note. Once, right after such a launch,
+  the first `mod+j` on a thread didn't show the panel (the second did); it didn't happen again.
+- **Empty scopes in an agent review:** choosing a scope with no changes (Uncommitted on a clean
+  worktree) keeps the current scope and says "Couldn't load Uncommitted: … has no changes in
+  Uncommitted", where T3 shows an empty diff.
+- **Startup log lines:** views restored at launch log one "… mustr isn't connected to T3" warning
+  each before the connection is up, then load once it is.
 
-**Later (P2):** several environments and remote access; start in background and
-one prompt for several models; cloning repos; math in Markdown and the minimap; source control
-accounts; the preview panel; outside agents; delete and bulk select; hover cards; and the usage
-dashboard and provider instances.
+### Not planned (Skip rows)
+
+Paired clients and pairing links (they need `access:*`), importing Claude or Codex sessions, MCP
+apps, device emulation, diagnostics and storage maintenance, guest share links, Snap Shot and
+browser import, voice input, mobile push and the mobile app, and T3's appearance settings. §2 gives
+each reason.
+
+### macOS
+
+Nothing has run on a Mac yet: the build, the app bundle, the release workflow, the installer, the
+updater's last steps, keychain prompts and the menus were checked on Linux only
+(`mustr-docs/MACOS.md`, "Known gaps"). Releases are signed ad hoc, not with a Developer ID, and
+Intel Macs have no T3 engine.
+
+### How v0.1.0 was built
+
+WP0 split the thread view and added the seams (`ThreadBackend`, shared shells, cross-package
+actions, rail entries, labeled slots); each later package owned its files. Wave 1 (WP1–WP7):
+thread settings and new threads, the composer and timeline, the thread list and projects, the PR
+flow, subagents and schedules, terminals and worktrees, and macOS. Wave 2 (WP8–WP10):
+notifications, mentions and slash commands, history and usage limits. Wave 3 (WP11–WP14): T3's
+terminals, setup progress and a PR's threads; attachments, chips and find; dragging, snooze and
+undo; the agents page and T3's settings. Then the 2x fit pass, release packaging and the updater,
+and the T3 0.1.3 pin. Wave 4 (WP15–WP18): the timeline and composer extras, git, PR details,
+handoffs and cleanup, background and multi-model launches, bulk actions and the palette, and the
+usage dashboard, saved servers, project settings and accounts. The commits are on `m3/next`.
