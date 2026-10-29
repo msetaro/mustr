@@ -18,7 +18,7 @@ use parking_lot::Mutex;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 use settings::SettingsStore;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use t3_api::{
     tagged::{
         OrchestrationV2Command, OrchestrationV2ShellStreamItem, OrchestrationV2ThreadStreamItem,
@@ -157,6 +157,8 @@ pub(crate) struct Recorder {
     launches: Mutex<Vec<OrchestrationV2ThreadLaunchInput>>,
     /// Models whose launches T3 refuses.
     failing_models: Mutex<HashSet<String>>,
+    /// What streaming RPCs send, by tag. `$PROJECT` is the project of the latest clone.
+    pub(crate) streams: Mutex<HashMap<String, Vec<Value>>>,
     read_only: bool,
 }
 
@@ -344,10 +346,29 @@ impl ThreadBackend for Recorder {
     fn subscribe_raw(
         &self,
         tag: &str,
-        _: Value,
-        _: Access,
+        payload: Value,
+        access: Access,
     ) -> Result<BoxStream<'static, Result<Value>>> {
-        Err(anyhow!("{tag} isn't followed here"))
+        self.calls.lock().push((tag.to_string(), payload, access));
+        let items = self
+            .streams
+            .lock()
+            .get(tag)
+            .cloned()
+            .ok_or_else(|| anyhow!("{tag} isn't followed here"))?;
+        let project = self
+            .calls("projectClone.start")
+            .last()
+            .and_then(|(payload, _)| payload["projectId"].as_str().map(str::to_string))
+            .unwrap_or_default();
+        let items = items
+            .into_iter()
+            .map(|item| {
+                let text = item.to_string().replace("$PROJECT", &project);
+                Ok(serde_json::from_str(&text).unwrap())
+            })
+            .collect::<Vec<_>>();
+        Ok(futures::stream::iter(items).boxed())
     }
 
     fn upload(&self, _: AttachmentUpload) -> BoxFuture<'static, Result<()>> {
@@ -841,4 +862,177 @@ async fn pickers_hide_the_models_t3_hides(cx: &mut TestAppContext) {
         bar.update(cx, |bar, cx| bar.shown_models(cx))[0].1,
         ["claude-sonnet-4-6", "my-fine-tune"]
     );
+}
+
+// Cloning a repository.
+
+fn clone_snapshot(phase: &str, stage: &str, percent: Option<i64>, error: Option<&str>) -> Value {
+    json!([{
+        "projectId": "$PROJECT", "remoteUrl": "https://example.com/acme/widgets.git",
+        "destinationPath": "/home/me/widgets", "repository": null, "phase": phase,
+        "stage": stage, "percent": percent, "detail": "1.2 MiB/s", "error": error,
+        "startedAt": NOW, "endedAt": null, "sequence": 1
+    }])
+}
+
+fn clone_modal(
+    workspace: &Entity<Workspace>,
+    cx: &mut VisualTestContext,
+) -> Option<Entity<crate::clone::CloneRepositoryModal>> {
+    workspace.read_with(cx, |workspace, cx| {
+        workspace.active_modal::<crate::clone::CloneRepositoryModal>(cx)
+    })
+}
+
+#[test]
+fn clones_are_named_and_sent_as_t3_does() {
+    use crate::clone::{default_destination, directory_name, is_shorthand, start_input};
+    for (repository, name) in [
+        ("https://github.com/acme/widgets.git", "widgets"),
+        ("git@github.com:acme/widgets.git", "widgets"),
+        ("https://gitlab.example.com/group/sub/tool?ref=main", "tool"),
+        ("acme/widgets", "widgets"),
+        ("/srv/git/local-repo", "local-repo"),
+        ("https://github.com", ""),
+    ] {
+        assert_eq!(directory_name(repository), name, "{repository}");
+    }
+    assert!(is_shorthand("acme/widgets"));
+    assert!(!is_shorthand("https://github.com/acme/widgets"));
+    assert!(!is_shorthand("/srv/git/widgets"));
+    assert_eq!(default_destination(None, "acme/widgets"), "~/widgets");
+    assert_eq!(
+        default_destination(Some("/work/src"), "acme/widgets"),
+        "/work/src/widgets"
+    );
+
+    // A URL goes as T3's `remoteUrl`; GitHub's `owner/name` for T3 to look up.
+    let wire = |input| serde_json::to_value(input).unwrap();
+    assert_eq!(
+        wire(start_input(
+            "project-1".into(),
+            " https://example.com/acme/widgets.git ",
+            "~/src/widgets/",
+            NOW.into(),
+        )),
+        json!({
+            "projectId": "project-1", "title": "widgets", "createdAt": NOW,
+            "remoteUrl": "https://example.com/acme/widgets.git", "destinationPath": "~/src/widgets"
+        })
+    );
+    assert_eq!(
+        wire(start_input(
+            "project-1".into(),
+            "acme/widgets",
+            "~/widgets",
+            NOW.into()
+        )),
+        json!({
+            "projectId": "project-1", "title": "widgets", "createdAt": NOW,
+            "provider": "github", "repository": "acme/widgets", "destinationPath": "~/widgets"
+        })
+    );
+}
+
+#[gpui::test]
+async fn cloning_adds_the_project_and_opens_a_thread_in_it(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    backend.respond(
+        "projectClone.start",
+        json!({
+            "projectId": "ignored", "cwd": "/home/me/widgets",
+            "remoteUrl": "https://example.com/acme/widgets.git", "repository": null
+        }),
+    );
+    backend.streams.lock().insert(
+        "subscribeProjectClones".into(),
+        vec![
+            clone_snapshot("running", "receiving", Some(45), None),
+            clone_snapshot("done", "checkout", Some(100), None),
+        ],
+    );
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    cx.dispatch_action(crate::CloneRepository);
+    cx.run_until_parked();
+    let modal = clone_modal(&workspace, cx).expect("the clone modal is open");
+    let (repository, destination) = modal.read_with(cx, |modal, _| modal.editors());
+    repository.update_in(cx, |editor, window, cx| {
+        editor.set_text("https://example.com/acme/widgets.git", window, cx)
+    });
+    // The folder follows the repository, in `~/` without T3's base folder.
+    assert_eq!(
+        destination.read_with(cx, |editor, cx| editor.text(cx)),
+        "~/widgets"
+    );
+    modal.update_in(cx, |modal, window, cx| modal.clone_repository(window, cx));
+    cx.run_until_parked();
+
+    let calls = backend.calls("projectClone.start");
+    assert_eq!(calls.len(), 1);
+    let (mut payload, access) = calls[0].clone();
+    assert_eq!(access, Access::SourceControlWrite);
+    for id in ["projectId", "createdAt"] {
+        assert!(payload[id].take().is_string());
+    }
+    assert_eq!(
+        payload,
+        json!({
+            "projectId": null, "createdAt": null, "title": "widgets",
+            "remoteUrl": "https://example.com/acme/widgets.git", "destinationPath": "~/widgets"
+        })
+    );
+    assert_eq!(
+        backend.calls("subscribeProjectClones"),
+        [(json!({}), Access::Read)]
+    );
+    // Once it's done, the modal closes and a new thread opens in the project.
+    cx.executor().advance_clock(Duration::from_secs(4));
+    cx.run_until_parked();
+    assert!(clone_modal(&workspace, cx).is_none());
+    assert!(active_view(&workspace, cx).read_with(cx, |view, _| view.new_thread.is_some()));
+}
+
+#[gpui::test]
+async fn a_failed_clone_says_why_and_retries(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    backend.respond(
+        "projectClone.start",
+        json!({
+            "projectId": "ignored", "cwd": "/home/me/widgets",
+            "remoteUrl": "acme/widgets", "repository": null
+        }),
+    );
+    backend.respond("projectClone.retry", json!({ "applied": true }));
+    backend.streams.lock().insert(
+        "subscribeProjectClones".into(),
+        vec![clone_snapshot(
+            "failed",
+            "connecting",
+            None,
+            Some("Repository not found."),
+        )],
+    );
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    cx.dispatch_action(crate::CloneRepository);
+    cx.run_until_parked();
+    let modal = clone_modal(&workspace, cx).unwrap();
+    let (repository, _) = modal.read_with(cx, |modal, _| modal.editors());
+    repository.update_in(cx, |editor, window, cx| {
+        editor.set_text("acme/widgets", window, cx)
+    });
+    modal.update_in(cx, |modal, window, cx| modal.clone_repository(window, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        modal.read_with(cx, |modal, _| modal.status()),
+        Some("Repository not found.".into())
+    );
+    // Clone again is Retry, for the same project.
+    modal.update_in(cx, |modal, window, cx| modal.clone_repository(window, cx));
+    cx.run_until_parked();
+    let project = backend.calls("projectClone.start")[0].0["projectId"].clone();
+    assert_eq!(
+        backend.calls("projectClone.retry"),
+        [(json!({ "projectId": project }), Access::SourceControlWrite)]
+    );
+    assert_eq!(backend.calls("projectClone.start").len(), 1);
 }

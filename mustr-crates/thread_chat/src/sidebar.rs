@@ -2601,11 +2601,21 @@ impl Render for ThreadsSidebar {
                             }),
                     )
                     .child(
-                        IconButton::new("add-project", IconName::FolderAdd)
-                            .icon_size(IconSize::Small)
-                            .tooltip(Tooltip::text("Add project…"))
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(AddProject), cx)
+                        // A folder on this computer, or a repository T3 clones (`clone.rs`).
+                        PopoverMenu::new("add-project-menu")
+                            .trigger_with_tooltip(
+                                IconButton::new("add-project", IconName::FolderAdd)
+                                    .icon_size(IconSize::Small),
+                                Tooltip::text("Add project…"),
+                            )
+                            .anchor(gpui::Anchor::TopRight)
+                            .menu(|window, cx| {
+                                Some(ContextMenu::build(window, cx, |menu, _, _| {
+                                    menu.action("Add Folder…", Box::new(AddProject)).action(
+                                        "Clone Repository…",
+                                        Box::new(crate::CloneRepository),
+                                    )
+                                }))
                             }),
                     )
                     .child(
