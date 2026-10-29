@@ -62,13 +62,16 @@ pub enum Access {
     /// Needs `providers:manage`: installs, signs in to, signs out of, and removes agents
     /// (`provider.install.*`, `provider.auth.*`).
     ProvidersManage,
+    /// Needs `diagnostics:read`: T3's usage summary (`server.getUsageSummary`) and its process
+    /// diagnostics. A read, so dry runs let it through.
+    DiagnosticsRead,
 }
 
 impl Access {
     /// Whether dry runs refuse calls that need this.
     pub fn is_write(self) -> bool {
         match self {
-            Self::Read | Self::FilesystemRead | Self::TerminalRead => false,
+            Self::Read | Self::FilesystemRead | Self::TerminalRead | Self::DiagnosticsRead => false,
             Self::Operate
             | Self::SourceControlWrite
             | Self::TerminalOperate
@@ -191,6 +194,13 @@ pub trait ThreadBackend: Send + Sync + 'static {
     fn fetch_asset(&self, relative_url: &str) -> BoxFuture<'static, Result<Vec<u8>>> {
         let error = anyhow!("mustr can't load {relative_url} from T3 here");
         futures::future::ready(Err(error)).boxed()
+    }
+
+    /// The address of the T3 server, as mustr reaches it, such as `http://127.0.0.1:3773/`, for
+    /// what T3 serves to other clients (its MCP server for outside agents). Backends that aren't
+    /// a server's have none.
+    fn server_url(&self) -> Option<String> {
+        None
     }
 
     /// Why writes are refused before they're sent, if they are: the pairing lacks
@@ -436,6 +446,10 @@ impl ThreadBackend for ReadOnlyBackend {
 
     fn fetch_asset(&self, relative_url: &str) -> BoxFuture<'static, Result<Vec<u8>>> {
         self.inner.fetch_asset(relative_url)
+    }
+
+    fn server_url(&self) -> Option<String> {
+        self.inner.server_url()
     }
 
     fn write_blocked_reason(&self) -> Option<String> {

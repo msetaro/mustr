@@ -98,7 +98,7 @@ pub(crate) fn previous_worktree<'a>(
 
 /// T3's title for its scratch project (`ensureScratchProject` in T3's
 /// `ManagedProjectFolders.ts`). The form offers it as "No project", ahead of the others.
-const SCRATCH_PROJECT_TITLE: &str = "No project";
+pub(crate) const SCRATCH_PROJECT_TITLE: &str = "No project";
 
 /// How many refs one `vcs.listRefs` page holds, as in T3's branch picker.
 const REF_PAGE_SIZE: i64 = 100;
@@ -147,6 +147,21 @@ struct RefList {
     total: i64,
 }
 
+/// One of the models a draft starts a thread with, when it starts several (T3's multiple-model
+/// send): the agent's instance, the model, and the options picked for it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ModelPick {
+    pub instance_id: String,
+    pub slug: String,
+    pub options: Vec<ProviderOptionSelection>,
+}
+
+/// One thread a draft starts, with the name of its model.
+pub(crate) struct Launch {
+    pub new_thread: NewThread,
+    pub model_name: String,
+}
+
 pub struct NewThreadForm {
     backend: Arc<dyn ThreadBackend>,
     projects: Loadable<Vec<OrchestrationProjectShell>>,
@@ -175,6 +190,11 @@ pub struct NewThreadForm {
     worktree_picker: PopoverMenuHandle<Picker<RefPickerDelegate>>,
     /// The menu of where the agent works, while it's open, and what had focus before it.
     workspace_menu: Option<(Entity<ContextMenu>, Option<FocusHandle>, Subscription)>,
+    /// The models to start one thread each with, when there are several (T3's
+    /// `draftFanoutSelectionsAtom`): each in a new worktree, in the background.
+    several: Option<Vec<ModelPick>>,
+    /// Whether the next launch starts in the background, keeping the draft (`launch.rs`).
+    pub(crate) background: bool,
     _tasks: Vec<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -281,6 +301,8 @@ impl NewThreadForm {
             base_ref_picker: PopoverMenuHandle::default(),
             worktree_picker: PopoverMenuHandle::default(),
             workspace_menu: None,
+            several: None,
+            background: false,
             _tasks: vec![load_projects, load_agents, load_settings],
             _subscriptions: subscriptions,
         }
@@ -361,6 +383,11 @@ impl NewThreadForm {
         loaded
     }
 
+    /// T3's settings, once they've loaded.
+    pub(crate) fn server_settings(&self) -> Option<&ServerSettings> {
+        self.settings.loaded()
+    }
+
     pub(crate) fn agents(&self) -> Option<&[AgentChoice]> {
         self.agents.loaded().map(Vec::as_slice)
     }
@@ -399,7 +426,7 @@ impl NewThreadForm {
             .find(|project| project.id == id)
     }
 
-    fn selected_project_id(&self) -> Option<&str> {
+    pub(crate) fn selected_project_id(&self) -> Option<&str> {
         match self.project.as_ref()? {
             ProjectPick::Project(id) => Some(id),
             ProjectPick::Scratch => match &self.scratch {
@@ -460,6 +487,8 @@ impl NewThreadForm {
     /// Picks no project: T3's scratch project, which `projects.ensureScratch` finds or creates.
     pub(crate) fn select_scratch(&mut self, cx: &mut Context<Self>) {
         self.project = Some(ProjectPick::Scratch);
+        // Without a repository, there are no worktrees for several models.
+        self.several = None;
         self.branch = None;
         self.worktree = None;
         if matches!(self.scratch, Scratch::Idle | Scratch::Failed(_)) {
@@ -543,6 +572,10 @@ impl NewThreadForm {
         if self.is_scratch() || !self.is_repository() {
             return WorkspaceKind::Checkout;
         }
+        // Each of several models gets a worktree of its own, as in T3.
+        if self.several.is_some() {
+            return WorkspaceKind::NewWorktree;
+        }
         self.workspace
             .unwrap_or_else(|| match self.defaults().env_mode {
                 ThreadEnvMode::Worktree => WorkspaceKind::NewWorktree,
@@ -624,6 +657,18 @@ impl NewThreadForm {
                 self.worktree = None;
                 self.branch = action.branch.clone();
             }
+        }
+        self.changed(cx);
+    }
+
+    /// Opens the draft in `project_id`, working where T3's settings say, as T3's palette's "New
+    /// thread in <project>" does.
+    pub(crate) fn start_in_project(&mut self, project_id: String, cx: &mut Context<Self>) {
+        if self.projects.loaded().is_some() {
+            self.select_project_id(project_id, cx);
+        } else {
+            self.pending_project = Some(project_id.clone());
+            self.project = Some(ProjectPick::Project(project_id));
         }
         self.changed(cx);
     }
@@ -816,6 +861,7 @@ impl NewThreadForm {
     }
 
     pub(crate) fn pick_model(&mut self, instance_id: String, slug: String, cx: &mut Context<Self>) {
+        self.several = None;
         let picked = self.picked_options();
         let options = self
             .agents()
@@ -846,6 +892,157 @@ impl NewThreadForm {
         }
         self.options = Some(options);
         self.changed(cx);
+    }
+
+    /// The models the draft starts a thread each with, when there are several.
+    pub(crate) fn several_models(&self) -> Option<&[ModelPick]> {
+        self.several.as_deref()
+    }
+
+    /// Whether the draft can start a thread with each of several models: each gets a worktree
+    /// of its own, so it takes a project with a repository (T3's `multipleModelSendBlock`).
+    pub(crate) fn can_start_several(&self) -> bool {
+        self.can_pick_workspace()
+    }
+
+    /// Adds a model to the ones the draft starts threads with, or takes it out, as T3's model
+    /// picker does on a shift-click (`ComposerModelPicker`'s `toggleModel`). The model picked so
+    /// far is the first, with its options; down to one, the draft starts one thread again.
+    pub(crate) fn toggle_model(
+        &mut self,
+        instance_id: String,
+        slug: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.can_start_several() {
+            self.pick_model(instance_id, slug, cx);
+            return;
+        }
+        let mut picks = self.several.clone().unwrap_or_else(|| {
+            self.model()
+                .map(|(agent, model)| ModelPick {
+                    instance_id: agent.instance_id.clone(),
+                    slug: model.slug.clone(),
+                    options: self.picked_options(),
+                })
+                .into_iter()
+                .collect()
+        });
+        match picks
+            .iter()
+            .position(|pick| pick.instance_id == instance_id && pick.slug == slug)
+        {
+            Some(index) => {
+                picks.remove(index);
+            }
+            None => picks.push(ModelPick {
+                instance_id,
+                slug,
+                options: Vec::new(),
+            }),
+        }
+        if picks.len() > 1 {
+            self.several = Some(picks);
+        } else {
+            self.several = None;
+            if let Some(remaining) = picks.pop() {
+                self.model = Some((remaining.instance_id, remaining.slug));
+                self.options = Some(remaining.options);
+            }
+        }
+        self.changed(cx);
+    }
+
+    /// Keeps only `failed` of the several models, after the others started.
+    pub(crate) fn keep_models(&mut self, failed: &[ModelPick], cx: &mut Context<Self>) {
+        match failed {
+            [] => {}
+            [one] => {
+                self.several = None;
+                self.model = Some((one.instance_id.clone(), one.slug.clone()));
+                self.options = Some(one.options.clone());
+            }
+            several => self.several = Some(several.to_vec()),
+        }
+        self.changed(cx);
+    }
+
+    /// The threads to launch with `text` as their first message: one per model when there are
+    /// several, each in a new worktree from the base branch, or the one thread. Or why they
+    /// can't be launched yet.
+    pub(crate) fn launches(&self, text: &str, cx: &App) -> Result<Vec<Launch>, SharedString> {
+        let Some(picks) = &self.several else {
+            let new_thread = self.new_thread(text, cx)?;
+            let model_name = self
+                .model()
+                .map(|(_, model)| model.name.clone())
+                .unwrap_or_default();
+            return Ok(vec![Launch {
+                new_thread,
+                model_name,
+            }]);
+        };
+        if matches!(self.settings, Loadable::Loading) {
+            return Err("Still reading T3's settings for new threads.".into());
+        }
+        let project_id = match &self.project {
+            Some(ProjectPick::Project(id)) if self.can_start_several() => id.clone(),
+            _ => {
+                return Err(
+                    "Several models need a new thread in a git project: each gets its \
+                            own worktree."
+                        .into(),
+                );
+            }
+        };
+        let base_ref = match self.base_ref_name() {
+            Some(base_ref) => base_ref,
+            None if self.project_refs().is_some_and(|(_, refs)| refs.is_none()) => {
+                return Err("Still loading the project's branches.".into());
+            }
+            None => "main".to_string(),
+        };
+        let agents = self
+            .agents()
+            .ok_or_else(|| SharedString::from("Still loading T3's agents."))?;
+        let runtime_mode = self
+            .runtime_mode
+            .clone()
+            .unwrap_or_else(|| self.defaults().runtime_mode);
+        picks
+            .iter()
+            .map(|pick| {
+                let (agent, model) = agents
+                    .iter()
+                    .find(|agent| agent.instance_id == pick.instance_id)
+                    .and_then(|agent| Some((agent, agent.model(&pick.slug)?)))
+                    .ok_or_else(|| {
+                        SharedString::from(format!(
+                            "T3 can't run {} now. Pick another model.",
+                            pick.slug
+                        ))
+                    })?;
+                let options = launch_options(&model.options, &pick.options);
+                Ok(Launch {
+                    new_thread: NewThread {
+                        project_id: project_id.clone(),
+                        model_selection: model_selection(&agent.instance_id, &model.slug, &options),
+                        runtime_mode: runtime_mode_for(agent, runtime_mode.clone()),
+                        interaction_mode: if agent.plan_mode {
+                            self.interaction_mode.clone()
+                        } else {
+                            ProviderInteractionMode::Default
+                        },
+                        workspace: ThreadWorkspace::NewWorktree {
+                            base_ref: base_ref.clone(),
+                            start_from_origin: self.start_from_origin(),
+                        },
+                        text: text.to_string(),
+                    },
+                    model_name: model.name.clone(),
+                })
+            })
+            .collect()
     }
 
     /// The permission mode the thread starts in.
@@ -1129,6 +1326,15 @@ impl Render for NewThreadForm {
             _ => None,
         };
         let summary = self.summary();
+        // The keys bound where the user types, so a rebinding shows.
+        let background = window
+            .focused(cx)
+            .filter(|_| self.several.is_none())
+            .map(|focus| {
+                ui::KeyBinding::for_action_in(&crate::launch::StartInBackground, &focus, cx)
+                    .size(rems_from_px(10_f32))
+            })
+            .filter(|keys| keys.has_binding(window));
         Card::new()
             .gap_3()
             .px(scaled(px(14.)))
@@ -1154,6 +1360,15 @@ impl Render for NewThreadForm {
                     Label::new(summary)
                         .size(LabelSize::XSmall)
                         .color(Color::Muted),
+                )
+            })
+            .when_some(background, |this, keys| {
+                this.child(
+                    h_flex().gap_1().child(keys).child(
+                        Label::new("starts it in the background and keeps this draft.")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
                 )
             })
     }
@@ -1186,6 +1401,17 @@ impl NewThreadForm {
             .into_any_element();
         }
         let kind = self.workspace_kind();
+        if self.several.is_some() {
+            let label = self
+                .base_ref_name()
+                .unwrap_or_else(|| "Loading branches…".to_string());
+            return h_flex()
+                .gap_1()
+                .flex_wrap()
+                .child(note("A new worktree for each model, from", Color::Muted))
+                .child(self.ref_picker(RefPickerMode::BaseRef, label, cx))
+                .into_any_element();
+        }
         let this = cx.entity().downgrade();
         let segments = SegmentedControl::new("new-thread-workspace")
             .segment_with_tooltip("New worktree", "A new worktree and branch for this thread")
@@ -1280,6 +1506,25 @@ impl NewThreadForm {
 
     /// One line on how the thread will start, so nothing about it is a surprise.
     fn summary(&self) -> Option<String> {
+        if let Some(picks) = &self.several {
+            let agents = self.agents()?;
+            let names = picks
+                .iter()
+                .map(|pick| {
+                    agents
+                        .iter()
+                        .find(|agent| agent.instance_id == pick.instance_id)
+                        .and_then(|agent| agent.model(&pick.slug))
+                        .map_or_else(|| pick.slug.clone(), |model| model.name.clone())
+                })
+                .collect::<Vec<_>>();
+            return Some(format!(
+                "Starts {} threads in the background, one each for {}, with {}.",
+                picks.len(),
+                names.join(", "),
+                thread_settings::runtime_mode_label(&self.runtime_mode()),
+            ));
+        }
         let (agent, model) = self.model()?;
         let mode = self.runtime_mode();
         let plan = if self.interaction_mode() == ProviderInteractionMode::Plan {

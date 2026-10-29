@@ -39,6 +39,7 @@ pub enum Scope {
     FilesystemRead,
     SettingsWrite,
     ProvidersManage,
+    DiagnosticsRead,
 }
 
 impl Scope {
@@ -52,6 +53,7 @@ impl Scope {
             Scope::FilesystemRead => "filesystem:read",
             Scope::SettingsWrite => "settings:write",
             Scope::ProvidersManage => "providers:manage",
+            Scope::DiagnosticsRead => "diagnostics:read",
         }
     }
 }
@@ -256,6 +258,7 @@ mod tests {
             Scope::FilesystemRead,
             Scope::SettingsWrite,
             Scope::ProvidersManage,
+            Scope::DiagnosticsRead,
         ] {
             assert!(
                 t3_api::types::AuthGrantScope::KNOWN_VALUES.contains(&scope.as_str()),

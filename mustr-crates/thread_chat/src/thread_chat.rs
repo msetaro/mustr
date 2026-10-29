@@ -79,13 +79,33 @@ pub use formatting::{ToggleBold, ToggleInlineCode, ToggleItalic};
 mod quote;
 mod stash;
 pub use stash::StashPrompt;
+// WP17, threads, creation and navigation:
+pub mod bulk;
+mod clone;
+mod details;
+mod launch;
+mod outside;
+pub mod palette;
+pub use bulk::DeleteThread;
+pub use clone::CloneRepository;
+pub use details::ShowThreadDetails;
+pub use launch::StartInBackground;
+pub use outside::ConnectOutsideAgent;
+#[cfg(test)]
+mod creation_tests;
+#[cfg(test)]
+mod selection_tests;
+pub use palette::{
+    CopyThreadId, FindInThread, NewThreadInProject, NewThreadWithoutProject, PaletteResult,
+    palette_results,
+};
 
 #[cfg(test)]
 mod tests;
 
 pub use actions::{
-    AddComposerContext, ComposerContext, NewThreadInWorktree, OpenInEditor, OpenThreadTerminal,
-    RemoveThreadWorktree, ReviewThreadChanges,
+    AddComposerContext, ComposerContext, NewThreadInWorktree, OpenInEditor, OpenProjectSettings,
+    OpenThreadTerminal, RemoveThreadWorktree, ReviewThreadChanges,
 };
 pub use backend::{
     Access, AttachmentUpload, GlobalThreadBackend, ReadOnlyBackend, ThreadBackend,
@@ -130,6 +150,13 @@ pub fn init(cx: &mut App) {
     snooze::init(cx);
     // WP14, agent setup and T3's settings:
     thread_settings::FollowUpBehavior::load(cx);
+    // WP17, threads, creation and navigation:
+    palette::init(cx);
+    launch::init(cx);
+    bulk::init(cx);
+    details::init(cx);
+    clone::init(cx);
+    outside::init(cx);
 }
 
 /// mustr's key bindings for threads. The app binds them after Zed's, so users can rebind them:
@@ -207,6 +234,13 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-b", ToggleBold, composer),
         KeyBinding::new("secondary-i", ToggleItalic, composer),
         KeyBinding::new("secondary-e", ToggleInlineCode, composer),
+        // WP17, threads, creation and navigation: T3's `mod+Enter` and `mod+alt+Enter` start a
+        // draft's thread in the background. On other threads they go on to Send.
+        KeyBinding::new("secondary-alt-enter", StartInBackground, composer),
+        KeyBinding::new("secondary-enter", StartInBackground, composer),
+        // `mod+z` undoes a settle, unpin or snooze from an empty composer too, as the next
+        // thread's composer has focus after settling. With text in it, it's the editor's undo.
+        KeyBinding::new("secondary-z", UndoThreadAction, composer),
     ]
 }
 

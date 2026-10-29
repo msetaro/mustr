@@ -24,6 +24,7 @@ runtime_shaders = ["gpui_platform/runtime_shaders"]
 anyhow.workspace = true
 askpass.workspace = true
 assets.workspace = true
+chrono = { workspace = true, features = ["clock"] }
 clap.workspace = true
 client.workspace = true
 command_palette.workspace = true
@@ -44,6 +45,7 @@ gpui = { workspace = true, features = ["stacker"] }
 gpui_platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
 gpui_tokio.workspace = true
 http_client.workspace = true
+iana-time-zone = "0.1"
 inspector_ui.workspace = true
 language.workspace = true
 languages = { workspace = true, features = ["load-grammars"] }

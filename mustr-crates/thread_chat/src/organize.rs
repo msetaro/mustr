@@ -862,8 +862,16 @@ fn register(workspace: &mut Workspace) {
             unpin_thread(&thread_id, workspace.weak_handle(), cx);
         }
     });
-    workspace.register_action(|_, _: &UndoThreadAction, _, cx| {
-        if !undo_latest(cx) {
+    workspace.register_action(|workspace, _: &UndoThreadAction, window, cx| {
+        // In a composer that holds text, `mod+z` is the editor's own undo (WP17).
+        let typing = workspace
+            .active_item(cx)
+            .and_then(|item| item.downcast::<ThreadView>())
+            .is_some_and(|view| {
+                let composer = view.read(cx).composer().read(cx);
+                composer.focus_handle(cx).is_focused(window) && !composer.is_empty(cx)
+            });
+        if typing || !undo_latest(cx) {
             cx.propagate();
         }
     });
@@ -1442,6 +1450,14 @@ pub(crate) fn thread_menu(
             );
         }
         menu = menu.separator();
+        // WP18: the project's settings (`mustr/src/project_settings.rs`).
+        menu = menu.item({
+            let action = crate::OpenProjectSettings {
+                project_id: thread.project_id.clone(),
+            };
+            entry("Project Settings…", IconName::Settings)
+                .handler(move |window, cx| window.dispatch_action(Box::new(action.clone()), cx))
+        });
         let copy = |label: &str, text: String| {
             entry(label, IconName::Copy).handler(move |_, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))
@@ -1461,22 +1477,46 @@ pub(crate) fn thread_menu(
         if let Some(pull_request) = &thread.pull_request {
             menu = menu.item(copy("Copy PR Link", pull_request.url.clone()));
         }
-        menu.separator().item({
-            let (workspace, focus) = (workspace.clone(), remove_focus);
-            entry("Archive Thread", IconName::Archive)
-                .disabled(!can_write || thread.running)
-                .handler(move |window, cx| {
-                    let open_view = open_view_of(&workspace, &id, cx);
-                    archive_thread(
-                        id.clone(),
-                        open_view,
-                        focus.clone(),
-                        workspace.clone(),
-                        window,
-                        cx,
-                    );
-                })
-        })
+        // WP17: the thread's details (`details.rs`).
+        menu = menu.item({
+            let (id, workspace) = (id.clone(), workspace.clone());
+            entry("Thread Details…", IconName::Info).handler(move |window, cx| {
+                crate::details::show_details(&id, workspace.clone(), window, cx)
+            })
+        });
+        let delete_id = id.clone();
+        menu.separator()
+            .item({
+                let (workspace, focus) = (workspace.clone(), remove_focus.clone());
+                entry("Archive Thread", IconName::Archive)
+                    .disabled(!can_write || thread.running)
+                    .handler(move |window, cx| {
+                        let open_view = open_view_of(&workspace, &id, cx);
+                        archive_thread(
+                            id.clone(),
+                            open_view,
+                            focus.clone(),
+                            workspace.clone(),
+                            window,
+                            cx,
+                        );
+                    })
+            })
+            .item({
+                // WP17: T3's Delete, after asking (`bulk.rs`).
+                let (workspace, focus) = (workspace.clone(), remove_focus.clone());
+                entry("Delete Thread…", IconName::Trash)
+                    .disabled(!can_write || thread.running)
+                    .handler(move |window, cx| {
+                        crate::bulk::delete_threads(
+                            vec![delete_id.clone()],
+                            focus.clone(),
+                            workspace.clone(),
+                            window,
+                            cx,
+                        );
+                    })
+            })
     })
 }
 

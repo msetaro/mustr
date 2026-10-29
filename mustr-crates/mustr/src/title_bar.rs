@@ -29,6 +29,7 @@ use crate::{
     navigation,
     t3_connection::{ConnectionStatus, EngineKind, EngineSetup, T3Connection},
     t3_engine::T3Mode,
+    thread_git::{MenuSlot, menu_position},
 };
 use gpui::{
     AnyElement, App, AppContext as _, Context, Decorations, Entity, Hsla, InteractiveElement as _,
@@ -148,6 +149,8 @@ pub struct MustrTitleBar {
     /// Scrolls the tabs' row to the active tab when it or the row's width changes.
     tabs_scroll: ScrollHandle,
     scrolled_to: Option<(usize, Option<Pixels>)>,
+    /// The connection chip's menu of servers (`crate::servers`).
+    server_menu: MenuSlot,
     _pane_subscriptions: [Subscription; 2],
     _subscriptions: Vec<Subscription>,
 }
@@ -195,6 +198,7 @@ impl MustrTitleBar {
             tabs_row: OverflowRow::new(),
             tabs_scroll: ScrollHandle::new(),
             scrolled_to: None,
+            server_menu: MenuSlot::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -388,7 +392,9 @@ impl MustrTitleBar {
     }
 
     /// The connection's chip, or in a narrow window just its dot, with the label in the tooltip.
-    fn render_connection_status(&self, compact: bool, cx: &App) -> impl IntoElement {
+    fn render_connection_status(&self, compact: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let this = cx.entity().downgrade();
+        let saved_name = crate::servers::saved_name(cx);
         let palette = mustr_ui::palette(cx);
         let status_colors = cx.theme().status();
         let connection = self.connection.read(cx);
@@ -418,7 +424,7 @@ impl MustrTitleBar {
                     ),
                     EngineKind::Installed | EngineKind::External => (
                         palette.ok.hsla(),
-                        format!("T3 · {environment}").into(),
+                        format!("T3 · {}", saved_name.as_deref().unwrap_or(environment)).into(),
                         format!("Connected to {version} at {server}").into(),
                     ),
                 }
@@ -464,15 +470,19 @@ impl MustrTitleBar {
         } else {
             (label, tooltip)
         };
+        // The servers to switch to, and the connection's details on Home.
         Chip::new("title-bar-connection", label)
             .dot(dot)
+            .menu_indicator(!compact)
             .tooltip(tooltip)
-            .on_click(move |_, window, cx| {
-                workspace
-                    .update(cx, |workspace, cx| {
-                        navigation::show_home(workspace, window, cx)
-                    })
-                    .ok();
+            .on_click(move |event, window, cx| {
+                let position = menu_position(event, window);
+                let menu = crate::servers::server_menu(workspace.clone(), window, cx);
+                this.update(cx, |this, cx| {
+                    this.server_menu
+                        .deploy(position, menu, window, cx, |this| &mut this.server_menu)
+                })
+                .ok();
             })
     }
 }
@@ -518,6 +528,7 @@ impl Render for MustrTitleBar {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(self.render_search_box(compact, window, cx))
                 .child(self.render_connection_status(compact, cx))
+                .children(self.server_menu.render())
                 .into_any_element(),
         ];
         let button_layout = ButtonLayoutSetting::get_global(cx).0;

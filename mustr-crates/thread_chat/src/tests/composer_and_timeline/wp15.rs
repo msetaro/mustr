@@ -755,3 +755,37 @@ async fn a_plan_saves_to_the_threads_folder(cx: &mut TestAppContext) {
     view.read_with(cx, |view, _| assert_eq!(view.error(), None));
     std::fs::remove_dir_all(folder).ok();
 }
+
+// The sidebar's message matches.
+
+#[gpui::test]
+async fn a_message_match_opens_its_thread_with_find_on_the_query(cx: &mut TestAppContext) {
+    use crate::creation_tests::{Recorder, shell_thread, workspace};
+    let backend = Recorder::new();
+    backend.set_threads(vec![shell_thread("a", "project-api", "Alpha")]);
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let weak = workspace.downgrade();
+    let sidebar = cx.new_window_entity(|window, cx| crate::ThreadsSidebar::new(weak, window, cx));
+    cx.run_until_parked();
+    sidebar.update_in(cx, |sidebar, window, cx| {
+        let thread = sidebar.thread_list().find("a").cloned().unwrap();
+        sidebar.click_row(
+            &thread,
+            Some("retries".into()),
+            gpui::Modifiers::none(),
+            window,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    let view = workspace
+        .read_with(cx, |workspace, cx| {
+            workspace.active_item(cx)?.downcast::<ThreadView>()
+        })
+        .expect("the thread opened");
+    view.read_with(cx, |view, _| {
+        assert_eq!(view.thread_id(), Some("a"));
+        // The find bar takes the query as it opens (this workspace has no bar to open).
+        assert_eq!(view.find_seed_for_test(), Some("retries"));
+    });
+}

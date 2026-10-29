@@ -389,6 +389,11 @@ impl ThreadView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // WP17: a draft can start in the background, or once for each of several models.
+        if crate::launch::launches_in_background(&form, cx) {
+            self.launch_in_background(form, text, window, cx);
+            return;
+        }
         let new_thread = match form.read(cx).new_thread(text.trim(), cx) {
             Ok(new_thread) => new_thread,
             Err(reason) => {
