@@ -307,9 +307,12 @@ impl TaskEditor {
     }
 }
 
+/// A labeled row of the editor. A control too wide to go beside its label (a big `ui_font_size`
+/// in a narrow window) goes below it.
 fn field(label: &'static str, control: impl IntoElement) -> impl IntoElement {
     h_flex()
         .w_full()
+        .flex_wrap()
         .gap_3()
         .items_start()
         .child(
@@ -321,7 +324,7 @@ fn field(label: &'static str, control: impl IntoElement) -> impl IntoElement {
         )
         .child(
             h_flex()
-                .flex_1()
+                .flex_auto()
                 .min_w_0()
                 .flex_wrap()
                 .gap_2()
