@@ -847,9 +847,26 @@ impl HomeView {
                     .gap_2()
                     .child(Indicator::dot().color(Color::Warning))
                     .child(
-                        Label::new(notice)
-                            .size(LabelSize::Small)
-                            .color(Color::Muted),
+                        div().flex_1().min_w_0().child(
+                            Label::new(notice)
+                                .size(LabelSize::Small)
+                                .color(Color::Muted),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .debug_selector(|| "home-set-up-agents".into())
+                            .child(
+                                mustr_ui::TextButton::new("home-set-up-agents", "Set up agents")
+                                    .tooltip("Install agents and sign in to them")
+                                    .on_click(|_, window, cx| {
+                                        window.dispatch_action(
+                                            Box::new(crate::agent_setup::OpenAgents),
+                                            cx,
+                                        )
+                                    }),
+                            ),
                     ),
             ),
         )
@@ -1505,8 +1522,7 @@ fn agents_notice(providers: &[types::ServerProvider]) -> Option<String> {
         })
         .collect::<Vec<_>>();
     Some(format!(
-        "No agent can run yet: {}. Install an agent's CLI on this computer and sign in to it, \
-         then choose Reconnect.",
+        "No agent can run yet: {}. Set up an agent to install it and sign in.",
         problems.join("; ")
     ))
 }
@@ -1901,9 +1917,10 @@ mod tests {
             "message": "Claude Code 1.0 is too old.",
         }))])
         .unwrap();
-        assert!(
-            notice.contains("yet: claudeAgent: Claude Code 1.0 is too old. Install"),
-            "{notice}"
+        assert_eq!(
+            notice,
+            "No agent can run yet: claudeAgent: Claude Code 1.0 is too old. Set up an agent to \
+             install it and sign in."
         );
     }
 
