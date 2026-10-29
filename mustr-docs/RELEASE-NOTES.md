@@ -50,11 +50,21 @@
     thread's Open in menu) and file links in agent messages open here. Clicking Edit again shows
     or hides the files.
   - **Review** lists what there is to review: pull requests in sections, each a GitHub-style
-    query (Review requested, Yours, and the other open ones in your projects, to start with), with
-    their checks and reviews, and the agent work waiting for review. A section's menu edits its
-    query, renames or removes it, and Add section adds one (Settings › Review lists them too). A
-    search box narrows everything. In a review, Review goes back to the list. This fixes the Pull
+    query (Review requested, Yours, and Involved, to start with), with their checks, reviews and
+    labels, and the agent work waiting for review. A section's menu edits its query, renames,
+    moves or removes it, and Add section adds one (Settings › Review lists them too). A search
+    box narrows everything. In a review, Review goes back to the list. This fixes the Pull
     requests button, which did nothing when no review was open.
+  - **Any pull request on GitHub, with your own queries.** Sections search all of GitHub the way
+    github.com/pulls does (`involves:@me`, `org:`, `repo:`, `label:`, `sort:` and the rest), not
+    just your projects, using the GitHub CLI's sign-in on your Mac (read-only; if `gh` isn't
+    signed in, the section says to run gh auth login in Terminal). Load more brings the next 25,
+    and the query editor has examples, a link to GitHub's search syntax, and GitHub's own error
+    when it refuses a query. A section can stay on T3's projects instead. Any of them opens in
+    mustr's review through T3 Code, and so does a pull request's link (or `owner/repo#123`)
+    pasted in Review's search box or in "mustr: open pull request" in the palette; if T3 can't
+    read it (a private repository its account can't see), Review says why and offers Open on
+    GitHub.
   - **Agents** is the threads, in a wider list (about T3's width), and the thread you pick.
     Scheduled tasks, worktrees, usage (⌘U) and agents setup moved from the rail to the row of
     buttons under the threads; the palette and their shortcuts still open them.

@@ -392,6 +392,31 @@ async fn the_search_finds_settings_in_every_section(cx: &mut TestAppContext) {
     assert!(page.shows("settings-row-terminal-cursor"));
 }
 
+/// Settings › Review reorders the Review page's sections, and keeps them in the settings file.
+#[gpui::test]
+async fn review_sections_are_reordered_here(cx: &mut TestAppContext) {
+    let mut page = open_page(cx).await;
+    page.open(Section::Review);
+    let names = |settings: Value| {
+        settings["review"]["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|section| section["name"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    page.click("settings-review-down-0");
+    assert_eq!(
+        names(page.settings().await),
+        vec!["Yours", "Review requested", "Involved"]
+    );
+    page.click("settings-review-up-2");
+    assert_eq!(
+        names(page.settings().await),
+        vec!["Yours", "Involved", "Review requested"]
+    );
+}
+
 #[gpui::test]
 async fn an_unreadable_settings_file_is_shown_on_the_page(cx: &mut TestAppContext) {
     let mut page = open_page(cx).await;

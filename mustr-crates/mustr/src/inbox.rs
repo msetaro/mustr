@@ -16,12 +16,22 @@ use util::{paths::PathStyle, rel_path::RelPath};
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestEntry {
+    /// The T3 project T3 listed it for; empty for one GitHub's search found
+    /// (`github_search.rs`), whose project is picked when it opens (`open_pull_request.rs`).
+    #[serde(default)]
     pub project_id: String,
     #[serde(default)]
     pub host: Option<String>,
     pub repository: String,
     pub number: i64,
     pub title: String,
+    /// Its page on the forge.
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub state: Option<PullRequestState>,
+    #[serde(default, deserialize_with = "lenient_labels")]
+    pub labels: Vec<PullRequestLabel>,
     #[serde(default)]
     pub author: Option<PullRequestActor>,
     #[serde(default)]
@@ -47,6 +57,23 @@ pub struct PullRequestEntry {
     pub checks_state: Option<ChecksState>,
     #[serde(default, deserialize_with = "lenient")]
     pub review_decision: Option<ReviewDecision>,
+}
+
+/// A pull request's state, as T3 lists them (`PullRequestState`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PullRequestState {
+    Open,
+    Closed,
+    Merged,
+}
+
+/// One of a pull request's labels (`PullRequestLabel`): its name, and its color as hex digits.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct PullRequestLabel {
+    pub name: String,
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 /// A pull request's checks, as T3 lists them (`PullRequestChecksState`).
@@ -75,6 +102,15 @@ where
 {
     let value = Option::<Value>::deserialize(deserializer)?;
     Ok(value.and_then(|value| serde_json::from_value(value).ok()))
+}
+
+/// Decodes labels one by one, leaving out the ones mustr can't read.
+fn lenient_labels<'de, D>(deserializer: D) -> Result<Vec<PullRequestLabel>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    Ok(decode_each(value.as_ref(), "pull request label"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
