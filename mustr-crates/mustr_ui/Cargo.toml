@@ -16,6 +16,8 @@ doctest = false
 [dependencies]
 anyhow.workspace = true
 gpui.workspace = true
+# Programs' icons for Open in, scaled to the pixels they cover (`src/app_icons.rs`).
+image.workspace = true
 log.workspace = true
 settings.workspace = true
 smallvec.workspace = true

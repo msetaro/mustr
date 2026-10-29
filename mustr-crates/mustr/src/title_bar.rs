@@ -1,5 +1,6 @@
-//! mustr's title bar: a tab per open item (home, pull requests), the command search box, the T3
-//! connection, and the window controls.
+//! mustr's title bar: a tab per open item (home, pull requests), the command search box, and the
+//! window controls. The T3 connection's state is in the status bar (`status_bar.rs`), and
+//! switching servers in Settings › Connection.
 //!
 //! Zed's `title_bar` crate is collab-centric (sign-in, calls, project and branch pickers), so
 //! mustr draws the bar the way Zed's `PlatformTitleBar`
@@ -24,20 +25,14 @@
 //! (`tab_bar.show: false`). They show the items of the workspace's active pane, and switch and
 //! close them through Zed's pane API.
 
-use crate::{
-    home::HomeView,
-    navigation,
-    t3_connection::{ConnectionStatus, EngineKind, EngineSetup, T3Connection},
-    t3_engine::T3Mode,
-    thread_git::{MenuSlot, menu_position},
-};
+use crate::{home::HomeView, navigation};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Decorations, Entity, Hsla, InteractiveElement as _,
+    AnyElement, App, AppContext as _, Context, Decorations, Entity, InteractiveElement as _,
     IntoElement, MouseButton, ParentElement as _, Pixels, Point, Render, ScrollHandle,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, TaskExt as _,
-    WeakEntity, Window, WindowButtonLayout, WindowControlArea, div, point, px,
+    StatefulInteractiveElement as _, Styled as _, Subscription, TaskExt as _, WeakEntity, Window,
+    WindowButtonLayout, WindowControlArea, div, point, px,
 };
-use mustr_ui::{Chip, OverflowRow, WindowTab, kbds_for_action, tokens, tokens::scaled};
+use mustr_ui::{OverflowRow, WindowTab, kbds_for_action, tokens, tokens::scaled};
 use platform_title_bar::{
     PlatformTitleBar, render_left_window_controls, render_right_window_controls,
 };
@@ -68,8 +63,8 @@ const SEARCH_BOX_SHARE: f32 = 0.2;
 const SEARCH_BOX_MIN_WIDTH: Pixels = px(160.);
 const SEARCH_BOX_MAX_WIDTH: Pixels = px(220.);
 
-/// A window narrower than this, at mustr's design size, shows the search box as a button and the
-/// connection as its dot, so the tabs keep room: a half-screen window at mustr's default size.
+/// A window narrower than this, at mustr's design size, shows the search box as a button, so the
+/// tabs keep room: a half-screen window at mustr's default size.
 const COMPACT_BELOW_WIDTH: Pixels = px(560.);
 
 /// Where Zed places the traffic lights in its 34px title bar (`build_window_options` in
@@ -140,7 +135,6 @@ pub struct MustrTitleBar {
     platform_title_bar: Entity<PlatformTitleBar>,
     /// Whether a press on the bar may start moving the window. Copied from `PlatformTitleBar`.
     should_move: bool,
-    connection: Entity<T3Connection>,
     workspace: WeakEntity<Workspace>,
     /// The pane whose items are shown as tabs: the workspace's active pane.
     pane: Entity<Pane>,
@@ -149,8 +143,6 @@ pub struct MustrTitleBar {
     /// Scrolls the tabs' row to the active tab when it or the row's width changes.
     tabs_scroll: ScrollHandle,
     scrolled_to: Option<(usize, Option<Pixels>)>,
-    /// The connection chip's menu of servers (`crate::servers`).
-    server_menu: MenuSlot,
     _pane_subscriptions: [Subscription; 2],
     _subscriptions: Vec<Subscription>,
 }
@@ -164,9 +156,7 @@ impl MustrTitleBar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let connection = T3Connection::global(cx);
         let subscriptions = vec![
-            cx.observe(&connection, |_, _, cx| cx.notify()),
             cx.observe_button_layout_changed(window, |_, _, cx| cx.notify()),
             cx.subscribe(workspace, |this, workspace, event, cx| {
                 if let workspace::Event::ActiveItemChanged
@@ -191,14 +181,12 @@ impl MustrTitleBar {
         Self {
             platform_title_bar: cx.new(|cx| PlatformTitleBar::new("mustr-title-bar", cx)),
             should_move: false,
-            connection,
             workspace: workspace.downgrade(),
             _pane_subscriptions: Self::watch_pane(&pane, cx),
             pane,
             tabs_row: OverflowRow::new(),
             tabs_scroll: ScrollHandle::new(),
             scrolled_to: None,
-            server_menu: MenuSlot::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -339,14 +327,21 @@ impl MustrTitleBar {
         let palette = mustr_ui::palette(cx);
         let action = zed_actions::command_palette::Toggle;
         if compact {
-            return IconButton::new("title-bar-search", IconName::MagnifyingGlass)
-                .icon_size(IconSize::Small)
-                .icon_color(Color::Muted)
-                .tooltip(Tooltip::for_action_title("Search commands", &action))
-                .on_click(|_, window, cx| {
-                    cx.stop_propagation();
-                    window.dispatch_action(Box::new(zed_actions::command_palette::Toggle), cx);
-                })
+            return div()
+                .debug_selector(|| "title-bar-search".into())
+                .child(
+                    IconButton::new("title-bar-search", IconName::MagnifyingGlass)
+                        .icon_size(IconSize::Small)
+                        .icon_color(Color::Muted)
+                        .tooltip(Tooltip::for_action_title("Search commands", &action))
+                        .on_click(|_, window, cx| {
+                            cx.stop_propagation();
+                            window.dispatch_action(
+                                Box::new(zed_actions::command_palette::Toggle),
+                                cx,
+                            );
+                        }),
+                )
                 .into_any_element();
         }
         let rem_size = window.rem_size();
@@ -356,6 +351,7 @@ impl MustrTitleBar {
         );
         h_flex()
             .id("title-bar-search")
+            .debug_selector(|| "title-bar-search".into())
             .flex_none()
             .w(width)
             .gap(scaled(px(8.)))
@@ -389,102 +385,6 @@ impl MustrTitleBar {
                 window.dispatch_action(Box::new(zed_actions::command_palette::Toggle), cx);
             })
             .into_any_element()
-    }
-
-    /// The connection's chip, or in a narrow window just its dot, with the label in the tooltip.
-    fn render_connection_status(&self, compact: bool, cx: &mut Context<Self>) -> impl IntoElement {
-        let this = cx.entity().downgrade();
-        let saved_name = crate::servers::saved_name(cx);
-        let palette = mustr_ui::palette(cx);
-        let status_colors = cx.theme().status();
-        let connection = self.connection.read(cx);
-        let embedded = connection.effective_mode() == T3Mode::Embedded;
-        let server = connection
-            .server_url()
-            .map(|url| url.as_str().trim_end_matches('/').to_string())
-            .unwrap_or_default();
-        let (dot, label, tooltip): (Hsla, SharedString, SharedString) = match connection.status() {
-            ConnectionStatus::Connected {
-                environment,
-                server_version,
-                engine,
-            } => {
-                let version = server_version.as_ref().map_or_else(
-                    || "T3 Code".to_string(),
-                    |version| format!("T3 Code {version}"),
-                );
-                match engine {
-                    EngineKind::Embedded => (
-                        palette.ok.hsla(),
-                        match server_version {
-                            Some(version) => format!("Agents · {version}").into(),
-                            None => "Agents".into(),
-                        },
-                        format!("mustr's agents engine ({version}) at {server}").into(),
-                    ),
-                    EngineKind::Installed | EngineKind::External => (
-                        palette.ok.hsla(),
-                        format!("T3 · {}", saved_name.as_deref().unwrap_or(environment)).into(),
-                        format!("Connected to {version} at {server}").into(),
-                    ),
-                }
-            }
-            ConnectionStatus::Connecting(step) => (
-                palette.text_muted.hsla(),
-                if embedded {
-                    "Starting agents engine…".into()
-                } else {
-                    "Connecting…".into()
-                },
-                step.clone(),
-            ),
-            ConnectionStatus::NeedsPairing(reason) => {
-                (palette.warning.hsla(), "Not paired".into(), reason.clone())
-            }
-            ConnectionStatus::NeedsSetup(setup) => (
-                palette.warning.hsla(),
-                "Set up agents".into(),
-                match setup {
-                    EngineSetup::NotInstalled { .. } => {
-                        "The agents engine isn't installed. Open Home to set it up.".into()
-                    }
-                    EngineSetup::NotRunning { .. } => {
-                        "T3 Code isn't running. Open Home to start it.".into()
-                    }
-                    EngineSetup::Incompatible { message, .. } => message.clone(),
-                },
-            ),
-            ConnectionStatus::Failed(error) => (
-                status_colors.error,
-                if embedded {
-                    "Engine stopped".into()
-                } else {
-                    "T3 offline".into()
-                },
-                format!("{error} Open Home to try again.").into(),
-            ),
-        };
-        let workspace = self.workspace.clone();
-        let (label, tooltip): (SharedString, SharedString) = if compact {
-            ("".into(), format!("{label}: {tooltip}").into())
-        } else {
-            (label, tooltip)
-        };
-        // The servers to switch to, and the connection's details on Home.
-        Chip::new("title-bar-connection", label)
-            .dot(dot)
-            .menu_indicator(!compact)
-            .tooltip(tooltip)
-            .menu_open(self.server_menu.is_open())
-            .on_click(move |event, window, cx| {
-                let position = menu_position(event, window);
-                let menu = crate::servers::server_menu(workspace.clone(), window, cx);
-                this.update(cx, |this, cx| {
-                    this.server_menu
-                        .deploy(position, menu, window, cx, |this| &mut this.server_menu)
-                })
-                .ok();
-            })
     }
 }
 
@@ -521,15 +421,16 @@ impl Render for MustrTitleBar {
                 .flex_1()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .into_any_element(),
+            // The search box is all there is at the right end: no machine name, no connection
+            // chip (the status bar shows the connection).
             h_flex()
+                .debug_selector(|| "title-bar-end".into())
                 .flex_none()
                 .pl_2()
                 .pr_1()
                 .gap(scaled(px(8.)))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(self.render_search_box(compact, window, cx))
-                .child(self.render_connection_status(compact, cx))
-                .children(self.server_menu.render())
                 .into_any_element(),
         ];
         let button_layout = ButtonLayoutSetting::get_global(cx).0;
@@ -687,6 +588,50 @@ mod tests {
     use super::*;
     use gpui::{TestAppContext, UpdateGlobal as _};
     use settings::SettingsStore;
+
+    /// The title bar's right end is the search box alone, at every window size: the connection
+    /// chip (`T3 · <machine>`, `Agents · <version>`) is gone, and the status bar has its jobs.
+    #[gpui::test]
+    async fn the_title_bar_ends_with_the_search_box(cx: &mut TestAppContext) {
+        let backend = crate::thread_git::tests::RecordingBackend::with_shell(
+            crate::thread_git::tests::shell(vec![]),
+        );
+        crate::thread_git::tests::init_test(backend, cx);
+        cx.update(|cx| {
+            PlatformTitleBar::init(cx);
+        });
+        let fs = project::FakeFs::new(cx.executor());
+        let project = project::Project::test(fs, [], cx).await;
+        let (multi_workspace, cx) = cx.add_window_view(|window, cx| {
+            workspace::MultiWorkspace::test_new(project.clone(), window, cx)
+        });
+        let workspace =
+            multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+        let (_, cx) = cx
+            .add_window_view(|window, cx| MustrTitleBar::new(&workspace, pane.clone(), window, cx));
+        for (width, rem_size) in [(1512., 13.), (1512., 26.), (600., 26.), (400., 13.)] {
+            cx.simulate_resize(gpui::size(px(width), px(200.)));
+            cx.update(|window, _| {
+                window.set_rem_size(px(rem_size));
+                window.refresh();
+            });
+            cx.run_until_parked();
+            let end = cx
+                .debug_bounds("title-bar-end")
+                .expect("the right end draws");
+            let search = cx
+                .debug_bounds("title-bar-search")
+                .expect("the search box draws");
+            // Only the end's padding (`pl_2`, `pr_1`) is around the search box.
+            let padding = end.size.width - search.size.width;
+            assert!(
+                (padding - px(0.75 * rem_size)).abs() < px(0.5),
+                "{padding:?} besides the search box at {width}px, {rem_size}"
+            );
+            assert!(end.right() <= px(width), "{end:?} at {width}px");
+        }
+    }
 
     fn set_settings(ui_font_size: f32, system_window_tabs: bool, cx: &mut App) {
         SettingsStore::update_global(cx, |store, cx| {

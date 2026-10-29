@@ -1,12 +1,14 @@
 //! mustr's look: the mustr theme family, the design tokens behind it, and mustr's own
 //! components (`mustr-docs/PLAN.md` §6).
 
+pub mod app_icons;
 pub mod components;
 pub mod corners;
 pub mod icons;
 pub mod overflow;
 pub mod tokens;
 
+pub use app_icons::{AppIcon, AppIconSource, BrandIcon};
 pub use components::*;
 pub use corners::{ChildPosition, RoundedCorners};
 pub use icons::{MustrAssets, MustrIcon};
