@@ -2,11 +2,13 @@
 //! components (`mustr-docs/PLAN.md` §6).
 
 pub mod components;
+pub mod corners;
 pub mod icons;
 pub mod overflow;
 pub mod tokens;
 
 pub use components::*;
+pub use corners::{ChildPosition, RoundedCorners};
 pub use icons::{MustrAssets, MustrIcon};
 pub use overflow::{OverflowItem, OverflowRow};
 
