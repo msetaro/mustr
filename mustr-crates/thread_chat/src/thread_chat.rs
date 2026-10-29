@@ -69,6 +69,7 @@ pub use snooze::SnoozeThread;
 // WP15, timeline and composer:
 mod file_links;
 pub use find_bar::open_thread_with_find;
+mod quote;
 
 #[cfg(test)]
 mod tests;

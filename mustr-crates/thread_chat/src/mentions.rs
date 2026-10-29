@@ -1179,6 +1179,11 @@ impl ComposerMenu {
         self.server = Some((server, Instant::now()));
     }
 
+    /// The server's environment id, once its config is read.
+    pub(crate) fn environment_id(&self) -> Option<&str> {
+        self.server.as_ref()?.0.environment_id.as_deref()
+    }
+
     /// Whether the server has `queued-run.start` (T3 0.1.3), once its config is read.
     pub(crate) fn server_has_queued_start(&self) -> bool {
         self.server
@@ -1290,7 +1295,7 @@ fn thread_folder(worktree_path: Option<&str>, project_root: Option<&str>, local:
 
 /// What a chip shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum ChipKind {
+pub(crate) enum ChipKind {
     File,
     Folder,
     Thread,
@@ -1300,6 +1305,8 @@ enum ChipKind {
     Terminal,
     /// A comment on a diff.
     ReviewComment,
+    /// A quote of an agent's message (`quote.rs`).
+    Quote,
     Other,
 }
 
@@ -1411,10 +1418,10 @@ pub(crate) fn init(cx: &mut App) {
 }
 
 /// What a chip in the composer shows: its kind, its label, and its tooltip.
-struct Chip {
-    kind: ChipKind,
-    label: String,
-    tooltip: String,
+pub(crate) struct Chip {
+    pub(crate) kind: ChipKind,
+    pub(crate) label: String,
+    pub(crate) tooltip: String,
 }
 
 /// A mention in the composer, drawn over its text the way T3's `ContextChip` draws it.
@@ -1436,6 +1443,7 @@ impl RenderOnce for MentionChip {
             ChipKind::PullRequest(state) => (IconName::PullRequest, pull_request_tint(state, cx)),
             ChipKind::Terminal => (IconName::Terminal, palette.text_muted.hsla()),
             ChipKind::ReviewComment => (IconName::Chat, palette.warning.hsla()),
+            ChipKind::Quote => (IconName::Quote, palette.agent.hsla()),
             ChipKind::Other => (IconName::Paperclip, palette.text_muted.hsla()),
         };
         let height = window.line_height() - scaled(px(2.)).to_pixels(window.rem_size());
@@ -1514,7 +1522,7 @@ impl ThreadView {
     }
 
     /// The text and the cursor, when nothing's selected.
-    fn composer_cursor(&self, cx: &App) -> Option<(String, usize)> {
+    pub(crate) fn composer_cursor(&self, cx: &App) -> Option<(String, usize)> {
         let editor = self.composer.read(cx);
         let snapshot = editor.buffer().read(cx).snapshot(cx);
         let selection = editor.selections.newest_anchor();
@@ -2130,7 +2138,7 @@ impl ThreadView {
     }
 
     /// Folds `range` of the composer's text into a chip.
-    fn add_chip(
+    pub(crate) fn add_chip(
         &mut self,
         range: Range<usize>,
         chip: Chip,
@@ -2215,6 +2223,9 @@ impl ThreadView {
                 tooltip,
             };
             self.add_chip(reference.range, chip, window, cx);
+        }
+        for quote in crate::quote::quote_references(&text) {
+            self.add_chip(quote.range, quote.chip, window, cx);
         }
     }
 

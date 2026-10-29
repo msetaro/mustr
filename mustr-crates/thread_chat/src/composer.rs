@@ -109,6 +109,8 @@ pub struct ComposerState {
     feedback_placeholder: bool,
     /// Where the timeline's "new since your last visit" line goes (`timeline.rs`).
     pub(crate) visit: crate::timeline::VisitLine,
+    /// What's selected to quote in the composer (`quote.rs`).
+    pub(crate) quote: crate::quote::QuoteState,
     _save_draft: Option<gpui::Task<()>>,
 }
 

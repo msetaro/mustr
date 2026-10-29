@@ -814,6 +814,12 @@ impl ThreadView {
                 let copy = (!*streaming)
                     .then(|| self.render_copy_message(item, text, cx))
                     .flatten();
+                let quote = if *streaming {
+                    None
+                } else {
+                    self.note_quote_selection(&item.id, cx);
+                    self.render_quote_button(&item.id, text, cx)
+                };
                 let fork = self.render_fork(item, cx);
                 h_flex()
                     .group(SharedString::from(format!("message-{}", item.id)))
@@ -835,7 +841,13 @@ impl ThreadView {
                                 )
                             }),
                     )
-                    .child(v_flex().flex_none().children(copy).children(fork))
+                    .child(
+                        v_flex()
+                            .flex_none()
+                            .children(copy)
+                            .children(quote)
+                            .children(fork),
+                    )
                     .into_any_element()
             }
             ItemKind::Plan {
