@@ -558,8 +558,13 @@ async fn with_several_stashed_mod_s_shows_the_stash(cx: &mut TestAppContext) {
     }
     cx.dispatch_action(crate::StashPrompt);
     cx.run_until_parked();
-    // Newest first.
+    // Escape closes the list; mod-s shows it again, newest first.
     assert!(cx.debug_bounds("thread-stash-list").is_some());
+    cx.dispatch_action(editor::actions::Cancel);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("thread-stash-list").is_none());
+    cx.dispatch_action(crate::StashPrompt);
+    cx.run_until_parked();
     let older = cx
         .debug_bounds("thread-stashed-1")
         .expect("both are listed");

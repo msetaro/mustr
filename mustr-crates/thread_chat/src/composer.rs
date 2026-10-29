@@ -48,8 +48,10 @@ const FEEDBACK_PLACEHOLDER: &str = "Send feedback to decline this request";
 const IMAGE_TILE_SIZE: f32 = 64.;
 /// A file's tile is as tall, and wide enough for its name.
 const FILE_TILE_WIDTH: f32 = 200.;
-/// The most of the window the agent's requests take above the composer before they scroll.
-const PENDING_MAX_FRACTION: f32 = 0.3;
+/// What the thread's header, toolbar, composer and a few lines of its timeline take, at the
+/// designs' size: the agent's requests take the rest of the window, between a fifth and
+/// nearly half of it, and scroll beyond that.
+const PENDING_RESERVED_HEIGHT: f32 = 360.;
 
 /// A queued message being dragged to another place in the queue.
 #[derive(Clone)]
@@ -408,11 +410,16 @@ impl ThreadView {
         }
     }
 
-    /// Escape closes the menu until the word that opened it changes.
+    /// Escape closes the menu until the word that opened it changes, or the prompt stash's
+    /// list.
     fn on_cancel(&mut self, _: &editor::actions::Cancel, _: &mut Window, cx: &mut Context<Self>) {
         if self.composer_state.menu.is_open() {
             cx.stop_propagation();
             self.dismiss_menu(cx);
+        } else if self.composer_state.stash.open {
+            cx.stop_propagation();
+            self.composer_state.stash.open = false;
+            cx.notify();
         }
     }
 }
@@ -2116,6 +2123,11 @@ impl ThreadView {
     ) -> impl IntoElement {
         self.deploy_pending_find(window, cx);
         self.highlight_composer_markdown(cx);
+        let window_height = window.viewport_size().height;
+        let reserved = scaled(px(PENDING_RESERVED_HEIGHT)).to_pixels(window.rem_size());
+        let pending_max_height = (window_height - reserved)
+            .min(window_height * 0.45)
+            .max(window_height * 0.2);
         self.sync_placeholder(window, cx);
         let declines = self.feedback_target().is_some();
         let palette = palette(cx);
@@ -2377,13 +2389,13 @@ impl ThreadView {
                     .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                     .gap_2()
                     // The agent's requests scroll rather than push the timeline and the
-                    // composer out of a small window.
+                    // composer out of a small window, or a big zoom.
                     .when(!pending.is_empty(), |this| {
                         this.child(
                             div()
                                 .id("thread-pending-requests")
                                 .w_full()
-                                .max_h(window.viewport_size().height * PENDING_MAX_FRACTION)
+                                .max_h(pending_max_height)
                                 .overflow_y_scroll()
                                 .child(
                                     v_flex().w_full().gap_2().children(

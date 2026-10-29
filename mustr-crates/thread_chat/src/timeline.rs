@@ -965,8 +965,11 @@ impl ThreadView {
                 title,
                 prompt,
                 request_kind,
+                app_name,
                 ..
             } => {
+                // An MCP server's question reads as prose, a command or a path as code.
+                let elicitation = request_kind == "mcp-elicitation";
                 let outcome = match item.status {
                     status if status.is_in_progress() => "waiting for you".to_string(),
                     ItemStatus::Completed => "answered".to_string(),
@@ -984,14 +987,19 @@ impl ThreadView {
                                     .color(Color::Warning),
                             )
                             .child(
-                                Label::new(
-                                    title
-                                        .clone()
-                                        .unwrap_or_else(|| format!("Approval: {request_kind}")),
-                                )
+                                Label::new(title.clone().unwrap_or_else(|| {
+                                    crate::answers::approval_label(request_kind).to_string()
+                                }))
                                 .size(LabelSize::Small)
                                 .weight(FontWeight::SEMIBOLD),
                             )
+                            .when_some(app_name.clone(), |this, app_name| {
+                                this.child(
+                                    Label::new(app_name)
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted),
+                                )
+                            })
                             .child(div().flex_1())
                             .child(
                                 Label::new(outcome)
@@ -1006,7 +1014,11 @@ impl ThreadView {
                                 .py_1()
                                 .rounded(scaled(tokens::CONTROL_RADIUS))
                                 .bg(palette.background.hsla())
-                                .child(Label::new(prompt).size(LabelSize::Small).buffer_font(cx)),
+                                .child(if elicitation {
+                                    Label::new(prompt).size(LabelSize::Small)
+                                } else {
+                                    Label::new(prompt).size(LabelSize::Small).buffer_font(cx)
+                                }),
                         )
                     })
                     .into_any_element()
