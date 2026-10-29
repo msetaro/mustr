@@ -289,6 +289,10 @@ impl ThreadBackend for T3ThreadBackend {
         .boxed()
     }
 
+    fn server_url(&self) -> Option<String> {
+        self.server_url.lock().as_ref().map(|url| url.to_string())
+    }
+
     fn write_blocked_reason(&self) -> Option<String> {
         self.session.get()?.operate_blocked_reason()
     }

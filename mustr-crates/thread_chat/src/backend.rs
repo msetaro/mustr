@@ -196,6 +196,13 @@ pub trait ThreadBackend: Send + Sync + 'static {
         futures::future::ready(Err(error)).boxed()
     }
 
+    /// The address of the T3 server, as mustr reaches it, such as `http://127.0.0.1:3773/`, for
+    /// what T3 serves to other clients (its MCP server for outside agents). Backends that aren't
+    /// a server's have none.
+    fn server_url(&self) -> Option<String> {
+        None
+    }
+
     /// Why writes are refused before they're sent, if they are: the pairing lacks
     /// `orchestration:operate`, or writes are switched off for a dry run.
     fn write_blocked_reason(&self) -> Option<String> {
@@ -439,6 +446,10 @@ impl ThreadBackend for ReadOnlyBackend {
 
     fn fetch_asset(&self, relative_url: &str) -> BoxFuture<'static, Result<Vec<u8>>> {
         self.inner.fetch_asset(relative_url)
+    }
+
+    fn server_url(&self) -> Option<String> {
+        self.inner.server_url()
     }
 
     fn write_blocked_reason(&self) -> Option<String> {
