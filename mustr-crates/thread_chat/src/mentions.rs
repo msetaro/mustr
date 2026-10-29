@@ -1209,6 +1209,13 @@ impl ComposerMenu {
         }
     }
 
+    /// Whether the server takes context records inline, once its config is read.
+    pub(crate) fn inline_message_context(&self) -> bool {
+        self.server
+            .as_ref()
+            .is_some_and(|(server, _)| server.inline_message_context)
+    }
+
     /// Whether the server takes attachments in answers, once its config is read.
     pub(crate) fn question_attachments(&self) -> bool {
         self.server
@@ -1509,6 +1516,47 @@ impl RenderOnce for MentionChip {
 }
 
 impl ThreadView {
+    /// The server's environment as the app follows it (`usage.rs`), when it does.
+    fn followed_environment<'a>(
+        &self,
+        cx: &'a App,
+    ) -> Option<&'a t3_api::types::ExecutionEnvironmentDescriptor> {
+        crate::usage::ServerConfigs::try_global(cx)?
+            .read(cx)
+            .environment()
+    }
+
+    /// The server's environment id: from the config the composer read, or the one the app
+    /// follows.
+    pub(crate) fn server_environment_id(&self, cx: &App) -> Option<String> {
+        self.composer_state
+            .menu
+            .environment_id()
+            .map(str::to_string)
+            .or_else(|| {
+                self.followed_environment(cx)
+                    .map(|environment| environment.environment_id.clone())
+                    .filter(|id| !id.trim().is_empty())
+            })
+    }
+
+    /// Whether the server takes images and files in answers (`questionAttachments`, T3 0.1.3).
+    pub(crate) fn server_takes_question_attachments(&self, cx: &App) -> bool {
+        self.composer_state.menu.question_attachments()
+            || self.followed_environment(cx).is_some_and(|environment| {
+                environment.capabilities.question_attachments == Some(true)
+            })
+    }
+
+    /// Whether the server takes context records inline in messages (`inlineMessageContext`),
+    /// which image and file records need.
+    pub(crate) fn server_takes_inline_context(&self, cx: &App) -> bool {
+        self.composer_state.menu.inline_message_context()
+            || self.followed_environment(cx).is_some_and(|environment| {
+                environment.capabilities.inline_message_context == Some(true)
+            })
+    }
+
     /// The folder `@` searches: the thread's, or a draft's project's.
     pub(crate) fn mention_folder(&self, cx: &mut Context<Self>) -> Folder {
         let local = folders_are_local(cx);

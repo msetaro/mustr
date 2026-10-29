@@ -352,7 +352,7 @@ impl ThreadView {
             .or_else(|| self.composer_state.quote.selection.clone())
             .filter(|selection| selection.item_id == item_id);
         // The quote names the server's environment, from its config: read it first.
-        if !self.composer_state.menu.has_server_info() {
+        if self.server_environment_id(cx).is_none() && !self.composer_state.menu.has_server_info() {
             let config = self.backend.call_raw(
                 <t3_api::rpc::ServerGetConfig as t3_api::RpcMethod>::TAG,
                 serde_json::json!({}),
@@ -383,11 +383,7 @@ impl ThreadView {
             Some(selection) => (selection.start, selection.text.as_str()),
             None => (0, text.as_str()),
         };
-        let environment_id = self
-            .composer_state
-            .menu
-            .environment_id()
-            .map(str::to_string);
+        let environment_id = self.server_environment_id(cx);
         let ids = (
             environment_id.as_deref().unwrap_or_default(),
             state.thread_id(),

@@ -838,7 +838,67 @@ impl Images {
     }
 }
 
+/// The context records of a message's images and files, as T3 0.1.3 sends them besides its
+/// attachments (`attachmentContextRecord` in T3's `lib/composerContextRecords.ts`): each names
+/// its attachment by id, never its bytes.
+pub(crate) fn attachment_records(attachments: &[ChatAttachment]) -> Vec<serde_json::Value> {
+    attachments
+        .iter()
+        .filter_map(|attachment| {
+            let (kind, id, name, mime_type, size_bytes) = match attachment {
+                ChatAttachment::Image(image) => (
+                    "image",
+                    &image.id,
+                    &image.name,
+                    &image.mime_type,
+                    image.size_bytes,
+                ),
+                ChatAttachment::File(file) => (
+                    "file",
+                    &file.id,
+                    &file.name,
+                    &file.mime_type,
+                    file.size_bytes,
+                ),
+                ChatAttachment::Unrecognized(_) => return None,
+            };
+            Some(serde_json::json!({
+                "version": 1,
+                "contextId": crate::mentions::kind_scoped_context_id(kind, id),
+                "label": crate::mentions::sanitize_label(name, kind),
+                "kind": kind,
+                "attachmentId": id,
+                "name": name,
+                "mimeType": mime_type,
+                "sizeBytes": size_bytes,
+            }))
+        })
+        .collect()
+}
+
 impl ThreadView {
+    /// A message's `context` with the records of its images and files after the others, as
+    /// T3's `buildMessageContext` orders them, on servers that take records inline
+    /// (`inlineMessageContext`); older ones get the attachments alone, as before.
+    pub(crate) fn with_attachment_records(
+        &self,
+        context: Option<t3_api::types::OrchestrationMessageContext>,
+        attachments: &[ChatAttachment],
+        cx: &App,
+    ) -> Option<t3_api::types::OrchestrationMessageContext> {
+        let records = attachment_records(attachments);
+        if records.is_empty() || !self.server_takes_inline_context(cx) {
+            return context;
+        }
+        match context {
+            Some(mut context) => {
+                context.records.extend(records);
+                Some(context)
+            }
+            None => crate::mentions::message_context_of(records),
+        }
+    }
+
     /// The composer's images, for tests.
     pub fn composer_images(&self) -> &[ComposerImage] {
         &self.images.composer
@@ -854,11 +914,14 @@ impl ThreadView {
     pub(crate) fn attach_composer_images(
         &self,
         input: &mut OrchestrationV2ThreadLaunchInput,
+        cx: &App,
     ) -> Vec<u64> {
         let Some(message) = input.initial_message.as_mut() else {
             return Vec::new();
         };
         message.attachments = self.images.attachments();
+        message.context =
+            self.with_attachment_records(message.context.take(), &message.attachments, cx);
         self.images.uploaded_keys()
     }
 

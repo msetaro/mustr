@@ -228,7 +228,7 @@ impl ThreadView {
             && (!text.trim().is_empty() || has_attachments)
         {
             if has_attachments {
-                let reason = if !self.composer_state.menu.question_attachments() {
+                let reason = if !self.server_takes_question_attachments(cx) {
                     Some(NO_ATTACHMENTS)
                 } else if self.images.uploading() || self.images.any_failed() {
                     Some(STILL_UPLOADING)
@@ -306,10 +306,10 @@ impl ThreadView {
     }
 
     /// What the composer's placeholder says while it answers a question.
-    pub(crate) fn answer_placeholder(&self) -> Option<String> {
+    pub(crate) fn answer_placeholder(&self, cx: &gpui::App) -> Option<String> {
         let (request_id, questions) = self.answer_target()?;
         let question = &questions[self.active_question(&request_id, &questions)?];
-        let attachments = if self.composer_state.menu.question_attachments() {
+        let attachments = if self.server_takes_question_attachments(cx) {
             ", or attach files"
         } else {
             ""

@@ -520,8 +520,10 @@ impl ThreadView {
         };
         let thread_id = state.thread_id().to_string();
         let sent_images = self.images.uploaded_keys();
+        let attachments = self.images.attachments();
+        let context = self.with_attachment_records(context, &attachments, cx);
         let message = Message {
-            attachments: self.images.attachments(),
+            attachments,
             context,
             ..Message::text(text.trim())
         };
@@ -612,7 +614,7 @@ impl ThreadView {
         let placeholder = if self.feedback_target().is_some() {
             Some(FEEDBACK_PLACEHOLDER.to_string())
         } else {
-            self.answer_placeholder()
+            self.answer_placeholder(cx)
         };
         if placeholder == self.composer_state.placeholder {
             return;

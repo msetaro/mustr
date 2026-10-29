@@ -419,3 +419,81 @@ async fn an_mcp_servers_question_is_an_app_access_approval(cx: &mut TestAppConte
         })]
     );
 }
+
+// Image and file context records.
+
+async fn send_an_image_and_a_file(
+    capabilities: Value,
+    cx: &mut TestAppContext,
+) -> (Arc<FakeBackend>, Value) {
+    use crate::attachments::{NewAttachment, NewFile, NewImage};
+    let inner = FakeBackend::with_thread(finished_thread(), 10);
+    inner
+        .raw_responses
+        .lock()
+        .extend([minted("attachment-1"), minted("attachment-2")]);
+    let (view, cx) = open_view(
+        with_config(&inner, server_config("0.1.3", capabilities)),
+        Some(THREAD),
+        cx,
+    );
+    load_config(&view, cx);
+    view.update_in(cx, |view, window, cx| {
+        view.add_attachments(
+            vec![
+                NewImage::prepare(Some("screen [1].png".into()), None, super::png(4, 4))
+                    .map(NewAttachment::Image),
+                NewFile::pasted_text("notes.txt".into(), "notes").map(NewAttachment::File),
+            ],
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    type_message(&view, "Here", cx);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+    let command = sent(&inner).remove(0);
+    (inner, command)
+}
+
+#[gpui::test]
+async fn images_and_files_go_with_their_context_records(cx: &mut TestAppContext) {
+    let capabilities = json!({
+        "inlineMessageContext": true,
+        "attachmentUploads": true,
+        "fileAttachments": { "maxUploadBytes": 1048576 }
+    });
+    let (_, command) = send_an_image_and_a_file(capabilities, cx).await;
+    let image_size = command["attachments"][0]["sizeBytes"].clone();
+    assert_eq!(
+        command["context"],
+        json!({
+            "version": 1.0,
+            "records": [
+                {
+                    "version": 1, "contextId": "image_attachment-1", "label": "screen 1 .png",
+                    "kind": "image", "attachmentId": "attachment-1", "name": "screen [1].png",
+                    "mimeType": "image/png", "sizeBytes": image_size
+                },
+                {
+                    "version": 1, "contextId": "file_attachment-2", "label": "notes.txt",
+                    "kind": "file", "attachmentId": "attachment-2", "name": "notes.txt",
+                    "mimeType": "text/plain;charset=utf-8", "sizeBytes": 5
+                }
+            ]
+        })
+    );
+    assert_eq!(command["attachments"].as_array().map(Vec::len), Some(2));
+}
+
+#[gpui::test]
+async fn servers_without_inline_context_get_the_attachments_alone(cx: &mut TestAppContext) {
+    let capabilities = json!({
+        "attachmentUploads": true,
+        "fileAttachments": { "maxUploadBytes": 1048576 }
+    });
+    let (_, command) = send_an_image_and_a_file(capabilities, cx).await;
+    assert_eq!(command.get("context"), None);
+    assert_eq!(command["attachments"].as_array().map(Vec::len), Some(2));
+}

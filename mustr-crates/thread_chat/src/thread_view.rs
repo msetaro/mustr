@@ -400,7 +400,7 @@ impl ThreadView {
         let title = commands::title_from_message(&new_thread.text);
         let mut input = commands::launch(new_thread, LaunchIds::new());
         self.attach_mention_context(&mut input);
-        let sent_images = self.attach_composer_images(&mut input);
+        let sent_images = self.attach_composer_images(&mut input, cx);
         let launch = self.backend.launch_thread(input);
         self.sending = true;
         self.error = None;
