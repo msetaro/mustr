@@ -22,7 +22,9 @@ use t3_client::t3_api::{
         OrchestrationV2ThreadLaunchResult, ServerProvider,
     },
 };
-use thread_chat::{AttachmentUpload, OpenThreadTerminal, ReadOnlyBackend};
+use thread_chat::{
+    AddComposerContext, AttachmentUpload, ComposerContext, OpenThreadTerminal, ReadOnlyBackend,
+};
 
 #[test]
 fn keys_send_what_a_local_terminal_would() {
@@ -536,5 +538,105 @@ async fn dry_runs_open_no_terminal_on_t3(cx: &mut TestAppContext) {
     assert_eq!(
         error.as_deref(),
         Some("Couldn't start a terminal on T3's machine: MUSTR_DRY_RUN_WRITES is set")
+    );
+}
+
+#[test]
+fn a_selection_becomes_t3s_terminal_chip() {
+    use crate::terminal_panel::terminal_context;
+    let context = terminal_context(
+        "term-1".into(),
+        "Terminal 1".into(),
+        "\r\n$ cargo test\r\nok\r\n\r\n",
+        (-2, 0),
+        40,
+        "abc",
+    )
+    .unwrap();
+    assert_eq!(
+        ComposerContext::Terminal(context).to_record().unwrap(),
+        json!({
+            "version": 1, "kind": "terminal", "contextId": "terminal_abc",
+            "label": "Terminal 1 lines 39-41", "terminalId": "term-1",
+            "terminalLabel": "Terminal 1", "lineStart": 39, "lineEnd": 41,
+            "text": "$ cargo test\nok"
+        })
+    );
+    let one = terminal_context("t".into(), "zsh".into(), "x", (3, 3), 0, "id").unwrap();
+    assert_eq!((one.label.as_str(), one.line_start), ("zsh line 4", 4));
+    assert_eq!(
+        terminal_context("t".into(), "zsh".into(), "\n\n", (0, 1), 0, "id"),
+        None
+    );
+}
+
+#[gpui::test]
+async fn add_to_chat_sends_the_selection_to_the_threads_composer(cx: &mut TestAppContext) {
+    let backend = TerminalBackend::new(json!([]));
+    let (workspace, panel, cx) = panel_for(backend.clone(), cx).await;
+    let added = Arc::new(Mutex::new(Vec::new()));
+    workspace.update(cx, |workspace, _| {
+        let added = added.clone();
+        workspace.register_action(move |_, action: &AddComposerContext, _, _| {
+            added.lock().push(action.clone())
+        });
+    });
+    cx.dispatch_action(OpenThreadTerminal {
+        thread_id: "a".into(),
+    });
+    cx.run_until_parked();
+    backend.send(
+        0,
+        snapshot("term-1", "$ cargo test\r\nok\r\n$ ", "Terminal 1"),
+    );
+    cx.run_until_parked();
+    // Nothing selected, nothing added.
+    cx.dispatch_action(crate::terminal_panel::AddTerminalSelectionToChat);
+    cx.run_until_parked();
+    assert!(added.lock().is_empty());
+
+    let remote = remote_terminals(&panel, cx).pop().unwrap();
+    remote.update(cx, |remote, cx| {
+        remote
+            .terminal
+            .update(cx, |terminal, _| terminal.select_all());
+        // The terminal takes its selection in when it's drawn next.
+        remote.view.update(cx, |_, cx| cx.notify());
+    });
+    cx.run_until_parked();
+    remote.read_with(cx, |remote, cx| {
+        let content = remote.terminal.read(cx).last_content();
+        assert!(
+            content.selection.is_some(),
+            "the terminal took the selection"
+        );
+    });
+    cx.dispatch_action(crate::terminal_panel::AddTerminalSelectionToChat);
+    cx.run_until_parked();
+    let added = added.lock().clone();
+    assert_eq!(added.len(), 1);
+    let AddComposerContext { thread_id, context } = &added[0];
+    assert_eq!(thread_id, "a");
+    let ComposerContext::Terminal(context) = context else {
+        panic!("a terminal chip: {context:?}");
+    };
+    assert!(context.context_id.starts_with("terminal_"));
+    assert_eq!(
+        (
+            context.terminal_id.as_str(),
+            context.terminal_label.as_str(),
+            context.line_start,
+        ),
+        ("term-1", "Terminal 1", 1)
+    );
+    assert!(
+        context.text.starts_with("$ cargo test\nok\n$"),
+        "{:?}",
+        context.text
+    );
+    assert!(
+        context.label.starts_with("Terminal 1 lines 1-"),
+        "{}",
+        context.label
     );
 }

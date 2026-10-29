@@ -17,7 +17,9 @@
 //!
 //! [`OpenThreadTerminal`] (the thread toolbar's Terminal button) opens a thread's terminals,
 //! [`ToggleThreadTerminal`] (`secondary-j`, as in T3, and Zed's `ctrl-\``) shows or hides the
-//! active thread's, and [`NewThreadTerminal`] adds one.
+//! active thread's, and [`NewThreadTerminal`] adds one. [`AddTerminalSelectionToChat`] (the
+//! header's Add to chat, or `secondary->`) puts the selected lines in the thread's composer as a
+//! terminal chip (`thread_chat::AddComposerContext`), as T3's terminal does.
 
 use crate::{
     remote_terminal::{self, Launch, RemoteTerminal, RemoteTerminalEvent},
@@ -38,7 +40,10 @@ use t3_client::t3_api::types::{
     OrchestrationV2ThreadShell, TerminalSessionStatus, TerminalSummary,
 };
 use terminal_view::TerminalView;
-use thread_chat::{OpenThreadTerminal, ThreadShells, ThreadView};
+use thread_chat::{
+    AddComposerContext, ComposerContext, OpenThreadTerminal, ThreadShells, ThreadView,
+    actions::TerminalContext,
+};
 use ui::{Tooltip, prelude::*};
 use workspace::{
     ItemHandle, Workspace,
@@ -57,6 +62,9 @@ actions!(
         NewThreadTerminal,
         /// Closes the terminal the terminal panel shows.
         CloseThreadTerminal,
+        /// Adds the lines selected in the thread's terminal to its composer, for the next
+        /// message.
+        AddTerminalSelectionToChat,
     ]
 );
 
@@ -93,6 +101,8 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         // In the terminal, Linux's `ctrl-w` still goes to the shell: Zed's `Terminal` context
         // binds it, and it's nested deeper than the panel's.
         KeyBinding::new("secondary-w", CloseThreadTerminal, Some(KEY_CONTEXT)),
+        // Zed's key for adding a selection to its agent, which mustr leaves out.
+        KeyBinding::new("secondary->", AddTerminalSelectionToChat, Some(KEY_CONTEXT)),
     ]
 }
 
@@ -675,16 +685,25 @@ impl ThreadTerminalPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut subscriptions = vec![cx.subscribe_in(
-            &view,
-            window,
-            |this, view, event: &ItemEvent, window, cx| match event {
-                // The shell exited.
-                ItemEvent::CloseItem => this.remove_terminal(view.entity_id(), window, cx),
-                ItemEvent::UpdateTab => this.update_title(view, cx),
-                _ => {}
-            },
-        )];
+        let terminal = view.read(cx).terminal().clone();
+        let mut subscriptions = vec![
+            cx.subscribe_in(
+                &view,
+                window,
+                |this, view, event: &ItemEvent, window, cx| match event {
+                    // The shell exited.
+                    ItemEvent::CloseItem => this.remove_terminal(view.entity_id(), window, cx),
+                    ItemEvent::UpdateTab => this.update_title(view, cx),
+                    _ => {}
+                },
+            ),
+            // The header's Add to chat follows the selection.
+            cx.subscribe(&terminal, |_, _, event: &terminal::Event, cx| {
+                if let terminal::Event::SelectionsChanged = event {
+                    cx.notify();
+                }
+            }),
+        ];
         if let Some(remote) = &remote {
             let view = view.clone();
             subscriptions.push(cx.subscribe_in(
@@ -811,6 +830,45 @@ impl ThreadTerminalPanel {
         cx.notify();
     }
 
+    /// The shown terminal's selection as a composer chip for its thread.
+    fn selection_context(&self, cx: &App) -> Option<(String, TerminalContext)> {
+        let thread_id = self.thread_id.clone()?;
+        let terminals = self.shown()?;
+        let hosted = terminals.active()?;
+        let content = hosted.view.read(cx).terminal().read(cx).last_content();
+        let selection = content.selection?;
+        let terminal_id = match hosted.remote_id(cx) {
+            Some(terminal_id) => terminal_id.to_string(),
+            None => format!("local-{}", terminals.active + 1),
+        };
+        let context = terminal_context(
+            terminal_id,
+            hosted.title.to_string(),
+            content.selection_text.as_deref()?,
+            (selection.start.line, selection.end.line),
+            content.total_lines.saturating_sub(content.screen_lines),
+            &uuid::Uuid::new_v4().simple().to_string(),
+        )?;
+        Some((thread_id, context))
+    }
+
+    /// Puts the selection in the thread's composer, which `AddComposerContext`'s handler owns,
+    /// and keeps the terminal's focus, as T3's Add to chat does. (Zed's terminal can't clear a
+    /// selection without copying it, so it stays.)
+    fn add_selection_to_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((thread_id, context)) = self.selection_context(cx) else {
+            return;
+        };
+        window.dispatch_action(
+            Box::new(AddComposerContext {
+                thread_id,
+                context: ComposerContext::Terminal(context),
+            }),
+            cx,
+        );
+        cx.notify();
+    }
+
     /// Starts terminals in the project's checkout instead of the thread's folder, which is gone.
     fn use_checkout(&mut self, checkout: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let Some(thread_id) = self.thread_id.clone() else {
@@ -883,6 +941,7 @@ impl ThreadTerminalPanel {
             .unwrap_or_default();
         let can_add = self.thread_id.is_some()
             && terminals.is_some_and(|terminals| !terminals.terminals.is_empty());
+        let has_selection = self.selection_context(cx).is_some();
         let focus_handle = self.focus_handle.clone();
         h_flex()
             .flex_none()
@@ -930,6 +989,15 @@ impl ThreadTerminalPanel {
                         .truncate(),
                 ),
             )
+            .when(has_selection, |this| {
+                this.child(
+                    TextButton::new("add-terminal-selection-to-chat", "Add to chat")
+                        .tooltip("Add the selected lines to the thread's next message")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.add_selection_to_chat(window, cx)
+                        })),
+                )
+            })
             .child(
                 IconButton::new("hide-thread-terminals", IconName::Close)
                     .icon_size(IconSize::Small)
@@ -1125,6 +1193,47 @@ fn remote_launches(
     vec![folder.launch(thread_id, remote_terminal::next_terminal_id(ids, None))]
 }
 
+/// A terminal selection as T3's composer chip (`terminalContextRecord`): its text without
+/// leading and trailing blank lines, and its lines counted from the top of the scrollback, from
+/// 1. `lines` are the selection's grid lines, which count from the screen's top, negative in the
+/// scrollback above it (`history` lines).
+pub(crate) fn terminal_context(
+    terminal_id: String,
+    terminal_label: String,
+    selection_text: &str,
+    lines: (i32, i32),
+    history: usize,
+    producer_id: &str,
+) -> Option<TerminalContext> {
+    const MAX_TEXT: usize = 64_000;
+    let normalized = selection_text.replace("\r\n", "\n");
+    let text = normalized.trim_matches('\n');
+    if text.trim().is_empty() {
+        return None;
+    }
+    let text = match text.char_indices().nth(MAX_TEXT) {
+        Some((end, _)) => &text[..end],
+        None => text,
+    };
+    let row = |line: i32| (i64::from(line) + history as i64 + 1).max(1) as u32;
+    let line_start = row(lines.0.min(lines.1));
+    let line_end = row(lines.0.max(lines.1)).max(line_start);
+    let range = if line_start == line_end {
+        format!("line {line_start}")
+    } else {
+        format!("lines {line_start}-{line_end}")
+    };
+    Some(TerminalContext {
+        context_id: format!("terminal_{producer_id}"),
+        label: format!("{terminal_label} {range}"),
+        terminal_id,
+        terminal_label,
+        line_start,
+        line_end,
+        text: text.to_string(),
+    })
+}
+
 type MessageAction =
     Box<dyn Fn(&mut ThreadTerminalPanel, &mut Window, &mut Context<ThreadTerminalPanel>)>;
 
@@ -1243,6 +1352,11 @@ impl Render for ThreadTerminalPanel {
             .on_action(cx.listener(|this, _: &CloseThreadTerminal, window, cx| {
                 this.close_active_terminal(window, cx)
             }))
+            .on_action(
+                cx.listener(|this, _: &AddTerminalSelectionToChat, window, cx| {
+                    this.add_selection_to_chat(window, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &CloseActiveItem, window, cx| {
                 this.close_active_terminal(window, cx)
             }))
