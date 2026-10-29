@@ -26,6 +26,21 @@
 - **Clean rounded corners.** Hovering a button, a split button's ▾, or a review comment's title,
   and the selected option of a control like Unified | Split, no longer draws square edges over the
   rounded corners. The shortcut you're changing in Keyboard shortcuts is highlighted the same way.
+- **A calmer thread toolbar.** One row, one height: at the left the branch (`● main 3 ▾`, the
+  count is its changed files) and the pull request (`● #80 ✗ ▾`, its state as a dot and its
+  checks as an icon, the details in the tooltip); at the right Review changes, Commit ▾, then
+  Terminal and Open in as icon buttons, and "…" for what doesn't fit. The pull request's menu has
+  everything in one place: review it, open it on GitHub, mark a draft ready, merge or close it,
+  watch it for CI and comments, unlink it, and the thread's other linked pull requests (0.1.0's
+  `+2`).
+- **Open in shows the programs' icons.** The button shows the icon of the editor it opens (the
+  name is in its tooltip, with ⌘O), and its menu lists each editor with its icon. On a Mac
+  running T3 Code, they're the apps' own icons; otherwise T3's.
+- **Terminal is an icon button,** with its shortcut (⌘J) in the tooltip.
+- **No machine name in the title bar.** The connection chip at the top right is gone. The status
+  bar shows the connection (Synced, T3 offline, …); click it to reconnect, switch servers
+  (Settings › Connection), or see what's wrong on Home.
+- **Hand off to another agent is gone** from the thread toolbar.
 
 ## 0.1.0
 
