@@ -312,7 +312,7 @@ Everything in the Later list (§15).
 
 - **From Zed:** every hunk in the review is a live editor, with hover, cmd+click, find references, vim motions, and search. Code view tabs open the full file from the worktree.
 - **Worktrees:** a thread's worktree comes with the thread. For a PR, mustr asks T3 for a worktree (`vcs.createWorktree`) when you open code view or IntelliSense, or on PR open if a setting says so.
-- **Trust:** Zed's Restricted Mode, as-is. Untrusted worktrees run no language servers and ignore `.zed/settings.json` until you trust them through Zed's own prompt. The sandboxed "review" trust level is Later (Appendix A).
+- **Trust:** Zed's Restricted Mode. Untrusted worktrees run no language servers and ignore `.zed/settings.json` until you trust them. A T3 worktree inherits its project's trust: once the project's checkout is trusted, its agent worktrees are too (`mustr/src/worktree_trust.rs`). The sandboxed "review" trust level is Later (Appendix A).
 - **mustr's wiring in v0.1:**
   - cmd+click in the review jumps within the review when the target is in a changed file.
   - Back returns to your exact spot.

@@ -351,9 +351,15 @@ From the integrated smoke test on 2026-10-29 (mustr's engine, and the user's T3 
 - **Zoom:** Zed's own command palette is 34 rems wide, so at 26 it's wider than a half-screen
   window and clipped at both sides (Zed's file). Setting `ui_font_size` alone in the settings file
   leaves code and terminals at `buffer_font_size`; the zoom keys change both.
-- **Restricted Mode in reviews:** Zed's worktree trust keeps language servers off in T3's
-  worktrees until they're trusted (the review header's warning button opens the dialog). Whether
-  mustr should trust T3's worktrees by default is open.
+- **Restricted Mode in reviews** (done; the user's call: trust a worktree if its project is
+  trusted): a T3 worktree on this machine inherits Zed's trust from its project's checkout
+  (`mustr/src/worktree_trust.rs`). When Zed trusts the checkout (or a folder holding it), the
+  project's worktrees open trusted, and those already open follow when it's trusted later. The
+  review's Restricted Mode button asks to trust the project, which covers its agent worktrees, or
+  only the worktree. Untrusted projects still ask, and a folder that isn't the `worktreePath` of
+  one of the project's threads, or isn't a linked git worktree, never inherits. As with any
+  folder Zed trusts, Zed keeps an inherited worktree's path in its trusted list after T3 removes
+  the worktree.
 - **Zed's name:** what's left is in Zed's crates and rarely seen, and mustr can't change it
   without patching them: the Node.js download error for language servers ("restart Zed to
   retry", which goes to the log), the trust dialog's `.zed/settings.json` (where project settings

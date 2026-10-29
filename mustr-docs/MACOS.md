@@ -79,13 +79,20 @@ A checklist for the first launch of a release, such as on a work laptop.
    palette, ⌘⇧P): Claude and Codex should say **Ready**, with "2 ready" in the heading. If one is
    signed out, sign in there, or in Terminal with `claude auth login` or `codex login`, then choose
    Check again. The agents' logins are their own CLIs', shared with T3 Code.
-6. **Zoom:** ⌘= and ⌘- make everything bigger or smaller, and ⌘0 goes back to the default size.
+6. **Restricted Mode:** the first review of an agent's worktree may show **Restricted Mode** (a
+   warning icon in a narrow window): Zed keeps language servers and project settings off in
+   folders you haven't trusted. Click it and choose **Trust Project**. That trusts the project's
+   checkout, and its agent worktrees follow: the ones open now, and the others whenever they
+   open, with no more asking. A project you trusted before covers its worktrees from the start.
+   Untrusted projects still ask, and only the worktrees T3 lists for the project's threads on this
+   Mac inherit; **Trust Only This Worktree** trusts just the one.
+7. **Zoom:** ⌘= and ⌘- make everything bigger or smaller, and ⌘0 goes back to the default size.
    mustr starts at twice the size its designs are drawn at; try ⌘- once or twice on a laptop.
-7. **Settings and logs** are in `~/Library/Application Support/mustr/`: `config/settings.json`
+8. **Settings and logs** are in `~/Library/Application Support/mustr/`: `config/settings.json`
    (⌘, opens it), `logs/mustr.log` (with `logs/mustr.log.old` before it), and
    `logs/t3-engine.log` for mustr's own engine. T3 Code's own log is where `t3 service status`
    says.
-8. **Reporting a problem:** say what you did and what you saw (a screenshot helps), and send:
+9. **Reporting a problem:** say what you did and what you saw (a screenshot helps), and send:
    - the version and server line: the `starting mustr` line and the `Connected to T3
      environment …` line from `mustr.log`;
    - the warnings and errors around the time it happened:
