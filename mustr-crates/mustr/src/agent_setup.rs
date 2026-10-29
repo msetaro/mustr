@@ -1837,16 +1837,16 @@ impl AgentSetupView {
             }
         } else if can_authenticate {
             let installed = is_installed(provider, install);
-            // T3 offers sign-in once the agent is on and installed and it has the sign-in state.
-            let blocked = blocked.clone().or_else(|| {
+            // T3 offers sign-in once the agent is on and installed and it has the sign-in state,
+            // and sign-out once it has the sign-in state.
+            let checking = auth.is_none().then(|| "Checking the sign-in".to_string());
+            let sign_in_blocked = blocked.clone().or_else(|| {
                 if !provider.enabled {
                     Some("Turn the agent on first".to_string())
                 } else if !installed {
                     Some("Install the agent first".to_string())
-                } else if auth.is_none() {
-                    Some("Checking the sign-in".to_string())
                 } else {
-                    None
+                    checking.clone()
                 }
             });
             controls.push(self.button(
@@ -1857,7 +1857,7 @@ impl AgentSetupView {
                 } else {
                     ButtonStyle::Primary
                 },
-                blocked.clone(),
+                sign_in_blocked,
                 cx,
                 {
                     let id = id.clone();
@@ -1866,25 +1866,21 @@ impl AgentSetupView {
             ));
             let can_sign_out = provider.auth.can_logout.unwrap_or(can_authenticate);
             if signed_in && can_sign_out {
-                controls.push(
-                    self.button(
-                        format!("agent-sign-out-{id}"),
-                        "Sign out",
-                        ButtonStyle::Default,
-                        blocked
-                            .filter(|_| auth.is_none())
-                            .or(self.blocked(Access::ProvidersManage)),
-                        cx,
-                        {
-                            let id = id.clone();
-                            move |this, _, cx| {
-                                this.agents.entry(id.clone()).or_default().confirming =
-                                    Some(Confirm::SignOut);
-                                cx.notify();
-                            }
-                        },
-                    ),
-                );
+                controls.push(self.button(
+                    format!("agent-sign-out-{id}"),
+                    "Sign out",
+                    ButtonStyle::Default,
+                    blocked.clone().or(checking),
+                    cx,
+                    {
+                        let id = id.clone();
+                        move |this, _, cx| {
+                            this.agents.entry(id.clone()).or_default().confirming =
+                                Some(Confirm::SignOut);
+                            cx.notify();
+                        }
+                    },
+                ));
             }
         } else if let Some(docs) = provider
             .setup
