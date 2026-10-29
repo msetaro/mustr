@@ -31,7 +31,7 @@ use crate::{
     nav_panel::NavPanel,
     review_backend::{self, DryRunRpc, PullRequestRpc, write_error},
     t3_connection::{CurrentRpc, T3Connection, T3Session},
-    thread_git::{Checkout, ControlsPlacement, ThreadGit, ThreadGitControls},
+    thread_git::{ControlsPlacement, ThreadGit, ThreadGitControls},
     worktree_git::{ChangeKind, Comparison, FileText, LocalGit},
 };
 use anyhow::{Context as _, Result, anyhow};
@@ -60,7 +60,6 @@ use t3_client::{
         },
     },
 };
-use thread_chat::ThreadShells;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use util::{paths::PathStyle, rel_path::RelPath};
 use workspace::{Toast, Workspace, notifications::NotificationId};
@@ -875,11 +874,7 @@ pub fn open_agent_review(
     if let Some(completed_at) = target.thread.latest_run_completed_at.clone() {
         ReviewedMarks::new(&agent_reviews_dir()).mark(target.thread.id.clone(), completed_at, cx);
     }
-    let project_root = ThreadShells::global(cx)
-        .read(cx)
-        .shell()
-        .and_then(|shell| Checkout::of_thread(shell, &target.thread.id))
-        .and_then(|checkout| checkout.project_root);
+    let project_root = target.thread.project_root.clone();
     cx.spawn_in(window, async move |workspace, cx| {
         let loading = cx.background_spawn({
             let target = target.clone();

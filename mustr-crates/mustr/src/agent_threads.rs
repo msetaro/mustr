@@ -20,6 +20,8 @@ pub struct AgentThread {
     pub project: Option<String>,
     pub branch: Option<String>,
     pub worktree_path: Option<String>,
+    /// The project's checkout, where a thread without a worktree works.
+    pub project_root: Option<String>,
     pub status: ThreadStatus,
     /// The agent and its model, for example "Claude · claude-opus-5-5".
     pub agent: Option<String>,
@@ -96,15 +98,18 @@ pub fn agent_threads(snapshot: &Value) -> Vec<AgentThread> {
     }
 
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
     struct Project {
         id: String,
         title: String,
+        #[serde(default)]
+        workspace_root: Option<String>,
     }
 
-    let projects: HashMap<String, String> =
+    let projects: HashMap<String, (String, Option<String>)> =
         decode_each::<Project>(snapshot.get("projects"), "project")
             .into_iter()
-            .map(|project| (project.id, project.title))
+            .map(|project| (project.id, (project.title, project.workspace_root)))
             .collect();
     let mut threads = decode_each::<Thread>(snapshot.get("threads"), "thread");
     threads.retain(|thread| thread.deleted_at.is_none() && thread.archived_at.is_none());
@@ -141,7 +146,13 @@ pub fn agent_threads(snapshot: &Value) -> Vec<AgentThread> {
                     thread.status,
                     thread.pending_runtime_request.is_some(),
                 ),
-                project: projects.get(&thread.project_id).cloned(),
+                project: projects
+                    .get(&thread.project_id)
+                    .map(|(title, _)| title.clone()),
+                project_root: projects
+                    .get(&thread.project_id)
+                    .and_then(|(_, root)| root.clone())
+                    .filter(|root| !root.trim().is_empty()),
                 branch: thread.branch,
                 worktree_path: thread.worktree_path.filter(|path| !path.is_empty()),
                 agent,
@@ -344,7 +355,7 @@ mod tests {
         let mut archived = thread("archived", "idle", Some("2026-10-27T10:00:00.000Z"), None);
         archived["archivedAt"] = json!("2026-10-27T10:05:00.000Z");
         json!({
-            "projects": [{ "id": "p1", "title": "hello" }],
+            "projects": [{ "id": "p1", "title": "hello", "workspaceRoot": "/src/hello" }],
             "threads": [
                 thread("fresh", "completed", Some("2026-10-27T09:00:00.000Z"), Some("2026-10-27T08:00:00.000Z")),
                 thread("seen", "idle", Some("2026-10-26T09:00:00.000Z"), Some("2026-10-26T10:00:00.000Z")),
@@ -370,6 +381,7 @@ mod tests {
                 project: Some("hello".to_string()),
                 branch: Some("t3/fresh".to_string()),
                 worktree_path: Some("/worktrees/fresh".to_string()),
+                project_root: Some("/src/hello".to_string()),
                 status: ThreadStatus::Settled("completed".to_string()),
                 agent: Some("Claude · claude-opus-5-5".to_string()),
                 latest_run_completed_at: Some("2026-10-27T09:00:00.000Z".to_string()),
