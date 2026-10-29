@@ -1972,15 +1972,22 @@ impl Render for ReviewView {
         let unshown_threads = self.render_unshown_threads(cx);
         let actions = match (self.header_actions.clone(), self.render_review_actions(cx)) {
             (None, actions) => actions,
+            // The app's actions go to the next line when there's no room for them next to the
+            // title, at the right, and shrink there, putting what doesn't fit in a menu.
             (Some(header_actions), actions) => Some(
                 h_flex()
-                    .flex_none()
+                    .flex_shrink_1()
+                    .min_w_0()
+                    .ml_auto()
+                    .justify_end()
                     .gap_2()
                     .child(header_actions)
                     .children(actions)
                     .into_any_element(),
             ),
         };
+        let compact_header = window.viewport_size().width
+            < tokens::scaled(header::COMPACT_BELOW_WIDTH).to_pixels(window.rem_size());
         let submit_form = self.render_submit_form(cx);
         let extra = (unshown_threads.is_some() || submit_form.is_some()).then(|| {
             v_flex()
@@ -2033,6 +2040,7 @@ impl Render for ReviewView {
                     header,
                     cx.entity().downgrade(),
                     self.is_worktree_restricted(cx),
+                    compact_header,
                     actions,
                     extra,
                     cx,

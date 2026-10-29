@@ -29,7 +29,9 @@ use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Entity, IntoElement, ParentElement as _,
     Render, SharedString, Styled as _, Task, WeakEntity, Window,
 };
-use mustr_ui::{ButtonStyle, SplitButton, TextButton, tokens::scaled};
+use mustr_ui::{
+    ButtonStyle, OverflowItem, OverflowRow, SplitButton, TextButton, overflow, tokens::scaled,
+};
 use review::{
     ChecksState, ChecksSummary, DiffSide, FileViewedState, PullRequestHeader, PullRequestState,
     ReviewContents, ReviewHeader, ReviewPermissions, ReviewThread, ReviewVerdict, ReviewView,
@@ -55,7 +57,7 @@ use thread_chat::{
     is_unsupported_rpc,
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
-use ui::{Color, ContextMenu, Label, LabelCommon as _, LabelSize, prelude::*};
+use ui::{Color, ContextMenu, ContextMenuEntry, Label, LabelCommon as _, LabelSize, prelude::*};
 use workspace::{Toast, Workspace, notifications::NotificationId};
 
 /// Pages of `pullRequests.threadComments` to follow per thread, as a guard against a cursor
@@ -900,6 +902,10 @@ pub struct PullRequestActions {
     is_draft: Option<bool>,
     /// The agent threads linked to the pull request, once T3 lists them.
     linked_threads: LinkedThreads,
+    /// Measures the actions, to decide which fit in the header.
+    overflow: OverflowRow,
+    /// The actions that didn't fit when last drawn, which the "…" menu offers.
+    hidden: Vec<PullRequestItem>,
     menu: MenuSlot,
     _task: Option<Task<()>>,
     _linked_threads: Task<()>,
@@ -950,6 +956,8 @@ impl PullRequestActions {
             running: None,
             state: None,
             is_draft: None,
+            overflow: OverflowRow::new(),
+            hidden: Vec::new(),
             menu: MenuSlot::default(),
             _task: None,
         }
@@ -1276,7 +1284,7 @@ impl PullRequestActions {
 }
 
 impl Render for PullRequestActions {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let blocked = thread_chat::backend(cx)
             .and_then(|backend| backend.blocked_reason(Access::SourceControlWrite));
         if let Some(armed) = self.armed.clone() {
@@ -1301,112 +1309,313 @@ impl Render for PullRequestActions {
         let work_menu = weak.clone();
         let merge_menu = weak.clone();
 
-        h_flex()
-            .id("pull-request-actions")
-            .flex_none()
-            .gap(scaled(px(6.)))
-            .when_some(self.running.clone(), |this, running| {
-                this.child(
-                    Label::new(running)
-                        .size(LabelSize::Small)
-                        .color(Color::Muted),
-                )
-            })
-            .children(self.render_linked_threads(cx))
-            .when(is_open, |this| {
-                this.child(
-                    SplitButton::new("pull-request-work-on", "Work on PR")
-                        .disabled(write_disabled)
-                        .tooltip(tooltip(
-                            "Check the pull request out in a new worktree, for a new agent thread",
-                        ))
-                        .menu_tooltip("Where to check it out")
-                        .on_click(move |_, window, cx| {
-                            weak.update(cx, |this, cx| {
-                                this.work_on(CheckoutMode::Worktree, window, cx)
-                            })
-                            .ok();
+        let mut children: Vec<(PullRequestItem, AnyElement)> = Vec::new();
+        if let Some(running) = self.running.clone() {
+            children.push((
+                PullRequestItem::Running,
+                Label::new(running)
+                    .size(LabelSize::Small)
+                    .color(Color::Muted)
+                    .into_any_element(),
+            ));
+        }
+        if let Some(threads) = self.render_linked_threads(cx) {
+            children.push((PullRequestItem::Threads, threads));
+        }
+        if is_open {
+            children.push((
+                PullRequestItem::WorkOn,
+                SplitButton::new("pull-request-work-on", "Work on PR")
+                    .disabled(write_disabled)
+                    .tooltip(tooltip(
+                        "Check the pull request out in a new worktree, for a new agent thread",
+                    ))
+                    .menu_tooltip("Where to check it out")
+                    .on_click(move |_, window, cx| {
+                        weak.update(cx, |this, cx| {
+                            this.work_on(CheckoutMode::Worktree, window, cx)
                         })
-                        .on_menu_click(move |event, window, cx| {
-                            work_menu
-                                .update(cx, |this, cx| this.deploy_work_menu(event, window, cx))
-                                .ok();
-                        }),
-                )
+                        .ok();
+                    })
+                    .on_menu_click(move |event, window, cx| {
+                        work_menu
+                            .update(cx, |this, cx| this.deploy_work_menu(event, window, cx))
+                            .ok();
+                    })
+                    .into_any_element(),
+            ));
+        }
+        if can_ready {
+            children.push((
+                PullRequestItem::Ready,
+                TextButton::new("pull-request-ready", "Ready for review")
+                    .disabled(write_disabled)
+                    .tooltip(tooltip("Take the pull request out of draft"))
+                    .on_click(
+                        cx.listener(|this, _, _, cx| this.run(PullRequestAction::Ready, None, cx)),
+                    )
+                    .into_any_element(),
+            ));
+        }
+        if can_close {
+            children.push((
+                PullRequestItem::Close,
+                TextButton::new("pull-request-close", "Close")
+                    .disabled(write_disabled)
+                    .tooltip(tooltip("Close the pull request without merging"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.armed = Some(Armed::Close);
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            ));
+        }
+        if let Some(method) = merge_method {
+            let label = merge_method_label(&method).to_string();
+            let tooltip = if conflicting {
+                "The pull request conflicts with its base; resolve the conflicts first".to_string()
+            } else {
+                tooltip("Merge the pull request")
+            };
+            let disabled = write_disabled || conflicting;
+            let arm = cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
+                this.armed = Some(Armed::Merge(method.clone()));
+                cx.notify();
+            });
+            // The ▾ only shows when there's a choice of merge methods.
+            let merge = if several_methods {
+                SplitButton::new("pull-request-merge", label)
+                    .style(ButtonStyle::Primary)
+                    .disabled(disabled)
+                    .tooltip(tooltip)
+                    .on_click(arm)
+                    .menu_tooltip("Choose how to merge")
+                    .on_menu_click(move |event, window, cx| {
+                        merge_menu
+                            .update(cx, |this, cx| this.deploy_merge_menu(event, window, cx))
+                            .ok();
+                    })
+                    .into_any_element()
+            } else {
+                TextButton::new("pull-request-merge", label)
+                    .style(ButtonStyle::Primary)
+                    .disabled(disabled)
+                    .tooltip(tooltip)
+                    .on_click(arm)
+                    .into_any_element()
+            };
+            children.push((PullRequestItem::Merge, merge));
+        }
+        if !is_open {
+            children.push((
+                PullRequestItem::State,
+                Label::new(match state {
+                    PullRequestState::Merged => "Merged",
+                    _ => "Closed",
+                })
+                .size(LabelSize::Small)
+                .color(Color::Muted)
+                .into_any_element(),
+            ));
+        }
+
+        // What doesn't fit in the header goes into a "…" menu, Close first, then the threads,
+        // Work on PR, and Ready for review; Merge always shows.
+        let gap = scaled(px(6.));
+        let rem_size = window.rem_size();
+        let items = children
+            .iter()
+            .map(|(item, _)| OverflowItem::new(item.key(), item.priority()))
+            .collect::<Vec<_>>();
+        let visible = self.overflow.visible(
+            &items,
+            gap.to_pixels(rem_size),
+            overflow::more_button_width(rem_size),
+        );
+        let natural = self.overflow.natural_width(&items, gap.to_pixels(rem_size));
+        let min = self.overflow.min_width(
+            &items,
+            gap.to_pixels(rem_size),
+            overflow::more_button_width(rem_size),
+        );
+        self.hidden = children
+            .iter()
+            .zip(&visible)
+            .filter(|(_, visible)| !**visible)
+            .map(|((item, _), _)| *item)
+            .collect();
+        let more = (!self.hidden.is_empty()).then(|| {
+            (
+                Some(SharedString::from(overflow::MORE_KEY)),
+                overflow::more_button("pull-request-more", "More of the pull request's actions")
+                    .on_click(cx.listener(|this, event, window, cx| {
+                        this.deploy_overflow_menu(event, window, cx)
+                    }))
+                    .into_any_element(),
+            )
+        });
+        let children = children
+            .into_iter()
+            .zip(visible)
+            .filter(|(_, visible)| *visible)
+            .map(|((item, child), _)| (Some(SharedString::from(item.key())), child))
+            .chain(more)
+            .chain(self.menu.render().map(|menu| (None, menu)));
+        self.overflow
+            .render(children, window)
+            .id("pull-request-actions")
+            .gap(gap)
+            .map(|row| match natural {
+                Some(natural) => row.w(natural),
+                None => row.w_auto(),
             })
-            .when(can_ready, |this| {
-                this.child(
-                    TextButton::new("pull-request-ready", "Ready for review")
-                        .disabled(write_disabled)
-                        .tooltip(tooltip("Take the pull request out of draft"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.run(PullRequestAction::Ready, None, cx)
-                        })),
-                )
-            })
-            .when(can_close, |this| {
-                this.child(
-                    TextButton::new("pull-request-close", "Close")
-                        .disabled(write_disabled)
-                        .tooltip(tooltip("Close the pull request without merging"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.armed = Some(Armed::Close);
-                            cx.notify();
-                        })),
-                )
-            })
-            .when_some(merge_method, |this, method| {
-                let label = merge_method_label(&method).to_string();
-                let tooltip = if conflicting {
-                    "The pull request conflicts with its base; resolve the conflicts first"
-                        .to_string()
-                } else {
-                    tooltip("Merge the pull request")
-                };
-                let disabled = write_disabled || conflicting;
-                let arm = cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| {
-                    this.armed = Some(Armed::Merge(method.clone()));
-                    cx.notify();
-                });
-                // The ▾ only shows when there's a choice of merge methods.
-                if several_methods {
-                    this.child(
-                        SplitButton::new("pull-request-merge", label)
-                            .style(ButtonStyle::Primary)
-                            .disabled(disabled)
-                            .tooltip(tooltip)
-                            .on_click(arm)
-                            .menu_tooltip("Choose how to merge")
-                            .on_menu_click(move |event, window, cx| {
-                                merge_menu
-                                    .update(cx, |this, cx| {
-                                        this.deploy_merge_menu(event, window, cx)
+            .when_some(min, |row, min| row.min_w(min))
+            .flex_shrink_1()
+            .into_any_element()
+    }
+}
+
+/// The pull request header's actions, each of which shows only when there's room.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PullRequestItem {
+    /// What's running, such as "Merging…".
+    Running,
+    Threads,
+    WorkOn,
+    Ready,
+    Close,
+    Merge,
+    /// "Merged" or "Closed".
+    State,
+}
+
+impl PullRequestItem {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Running => "pull-request-running",
+            Self::Threads => "pull-request-threads",
+            Self::WorkOn => "pull-request-work-on",
+            Self::Ready => "pull-request-ready",
+            Self::Close => "pull-request-close",
+            Self::Merge => "pull-request-merge",
+            Self::State => "pull-request-state",
+        }
+    }
+
+    fn priority(self) -> u32 {
+        match self {
+            Self::Running | Self::Merge | Self::State => overflow::ALWAYS,
+            Self::Ready => 50,
+            Self::WorkOn => 40,
+            Self::Threads => 30,
+            Self::Close => 20,
+        }
+    }
+}
+
+impl PullRequestActions {
+    /// The "…" menu: the actions that didn't fit, in their order.
+    fn deploy_overflow_menu(
+        &mut self,
+        event: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let hidden = self.hidden.clone();
+        let disabled = self.running.is_some()
+            || thread_chat::backend(cx)
+                .and_then(|backend| backend.blocked_reason(Access::SourceControlWrite))
+                .is_some();
+        let threads = match &self.linked_threads {
+            LinkedThreads::Loaded(threads) => threads.clone(),
+            _ => Vec::new(),
+        };
+        let workspace = self.workspace.clone();
+        let this = cx.weak_entity();
+        let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            for item in hidden {
+                match item {
+                    PullRequestItem::Threads => {
+                        menu = menu.header("Agent threads linked to this pull request");
+                        for thread in &threads {
+                            let workspace = workspace.clone();
+                            let title = SharedString::from(thread.title.trim().to_string());
+                            let id = thread.id.clone();
+                            menu =
+                                menu.entry(linked_thread_label(thread), None, move |window, cx| {
+                                    thread_chat::open_thread(
+                                        id.clone(),
+                                        title.clone(),
+                                        workspace.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                });
+                        }
+                        menu = menu.separator();
+                    }
+                    PullRequestItem::WorkOn => {
+                        let worktree = this.clone();
+                        let local = this.clone();
+                        menu = menu
+                            .item(
+                                ContextMenuEntry::new("Work on PR in a new worktree")
+                                    .disabled(disabled)
+                                    .handler(move |window, cx| {
+                                        worktree
+                                            .update(cx, |this, cx| {
+                                                this.work_on(CheckoutMode::Worktree, window, cx)
+                                            })
+                                            .ok();
+                                    }),
+                            )
+                            .item(
+                                ContextMenuEntry::new("Work on PR in the project's checkout")
+                                    .disabled(disabled)
+                                    .handler(move |window, cx| {
+                                        local
+                                            .update(cx, |this, cx| {
+                                                this.work_on(CheckoutMode::Local, window, cx)
+                                            })
+                                            .ok();
+                                    }),
+                            );
+                    }
+                    PullRequestItem::Ready => {
+                        let this = this.clone();
+                        menu = menu.item(
+                            ContextMenuEntry::new("Ready for review")
+                                .disabled(disabled)
+                                .handler(move |_, cx| {
+                                    this.update(cx, |this, cx| {
+                                        this.run(PullRequestAction::Ready, None, cx)
                                     })
                                     .ok();
-                            }),
-                    )
-                } else {
-                    this.child(
-                        TextButton::new("pull-request-merge", label)
-                            .style(ButtonStyle::Primary)
-                            .disabled(disabled)
-                            .tooltip(tooltip)
-                            .on_click(arm),
-                    )
+                                }),
+                        );
+                    }
+                    PullRequestItem::Close => {
+                        let this = this.clone();
+                        menu =
+                            menu.item(ContextMenuEntry::new("Close…").disabled(disabled).handler(
+                                move |_, cx| {
+                                    this.update(cx, |this, cx| {
+                                        this.armed = Some(Armed::Close);
+                                        cx.notify();
+                                    })
+                                    .ok();
+                                },
+                            ));
+                    }
+                    PullRequestItem::Running | PullRequestItem::Merge | PullRequestItem::State => {}
                 }
-            })
-            .when(!is_open, |this| {
-                this.child(
-                    Label::new(match state {
-                        PullRequestState::Merged => "Merged",
-                        _ => "Closed",
-                    })
-                    .size(LabelSize::Small)
-                    .color(Color::Muted),
-                )
-            })
-            .children(self.menu.render())
-            .into_any_element()
+            }
+            menu
+        });
+        self.menu
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
+                &mut this.menu
+            });
     }
 }
 

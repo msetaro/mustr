@@ -1,7 +1,9 @@
 //! The pull request header at the top of a review: title, reference, author, branches, state,
 //! and checks.
 
-use gpui::{AnyElement, App, Hsla, IntoElement, ParentElement as _, SharedString, Styled as _};
+use gpui::{
+    AnyElement, App, Hsla, IntoElement, ParentElement as _, Pixels, SharedString, Styled as _, px,
+};
 use mustr_ui::{tokens, tokens::scaled_pixels};
 
 use crate::AgentThreadHeader;
@@ -180,6 +182,21 @@ pub(crate) fn pill(label: impl Into<SharedString>, color: Hsla, cx: &App) -> imp
         .child(label.into())
 }
 
+/// The narrowest a header's title gets, at mustr's design size, before the actions after it
+/// shrink.
+pub(crate) const TITLE_MIN_WIDTH: Pixels = px(140.);
+
+/// A window narrower than this, at mustr's design size, shows the agent header's secondary
+/// buttons as icons, with their labels in tooltips: any MacBook-sized window at mustr's default
+/// size (26).
+pub(crate) const COMPACT_BELOW_WIDTH: Pixels = px(900.);
+
+/// One part of a header's details line, which wraps to the next line whole rather than breaking
+/// inside.
+pub(crate) fn detail(part: impl IntoElement) -> impl IntoElement {
+    div().flex_none().child(part)
+}
+
 /// The header card. `actions` go at the end of the title row, and `extra` below the details
 /// (for example, threads on files the review can't show).
 pub(crate) fn render_header(
@@ -191,20 +208,21 @@ pub(crate) fn render_header(
     let colors = cx.theme().colors();
     let status = cx.theme().status();
 
-    let mut details = h_flex().gap_1p5().flex_wrap().child(
+    let mut details = h_flex().gap_1p5().flex_wrap().child(detail(
         Label::new(header.reference())
             .size(LabelSize::Small)
             .color(Color::Muted),
-    );
+    ));
     if let Some(author) = &header.author {
-        details = details.child(separator()).child(
+        details = details.child(separator()).child(detail(
             Label::new(format!("@{author}"))
                 .size(LabelSize::Small)
                 .color(Color::Muted),
-        );
+        ));
     }
     details = details.child(separator()).child(
         h_flex()
+            .flex_none()
             .gap_1()
             .child(
                 Icon::new(IconName::GitBranch)
@@ -226,6 +244,7 @@ pub(crate) fn render_header(
         };
         details = details.child(separator()).child(
             h_flex()
+                .flex_none()
                 .gap_1()
                 .text_color(color)
                 .child(
@@ -253,15 +272,19 @@ pub(crate) fn render_header(
         .border_color(colors.border)
         .child(
             h_flex()
+                .flex_wrap()
                 .gap_2()
                 .child(pill(header.state_label(), header.state_color(cx), cx))
                 .child(
-                    div().flex_1().min_w_0().child(
-                        Label::new(header.title.clone())
-                            .size(LabelSize::Large)
-                            .weight(gpui::FontWeight::SEMIBOLD)
-                            .truncate(),
-                    ),
+                    div()
+                        .flex_1()
+                        .min_w(scaled_pixels(TITLE_MIN_WIDTH, cx))
+                        .child(
+                            Label::new(header.title.clone())
+                                .size(LabelSize::Large)
+                                .weight(gpui::FontWeight::SEMIBOLD)
+                                .truncate(),
+                        ),
                 )
                 .when(header.additions > 0 || header.deletions > 0, |this| {
                     this.child(DiffStat::new(
@@ -276,8 +299,8 @@ pub(crate) fn render_header(
         .children(extra)
 }
 
-fn separator() -> impl IntoElement {
-    Label::new("·").size(LabelSize::Small).color(Color::Muted)
+pub(crate) fn separator() -> impl IntoElement {
+    detail(Label::new("·").size(LabelSize::Small).color(Color::Muted))
 }
 
 #[cfg(test)]
