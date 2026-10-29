@@ -13,6 +13,11 @@
 //! The pull request a thread shows is chosen as T3's `useLinkedThreadPullRequest` does: from the
 //! thread's linked pull requests when T3 sends them, then its `linkedPullRequest`, then the pull
 //! request of its branch.
+//!
+//! The toolbar's actions work on the thread in focus from the keyboard and the command palette
+//! too, which offers them only while a thread is open: [`ReviewChanges`] (`secondary-d`, T3's
+//! `mod+d`), [`OpenThreadInEditor`] (`secondary-o`), [`SwitchThreadBranch`] (`secondary-shift-g`),
+//! [`CommitPushAndPr`], and [`LinkThreadPullRequest`].
 
 use crate::{
     agent_review,
@@ -27,8 +32,9 @@ use anyhow::{Context as _, Result, anyhow};
 use editor::Editor;
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, DismissEvent, Entity, EventEmitter,
-    FocusHandle, Focusable, Hsla, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Task, TaskExt as _, WeakEntity, Window, div, px, rems,
+    FocusHandle, Focusable, Hsla, IntoElement, KeyBinding, ParentElement as _, Render,
+    SharedString, Styled as _, Subscription, Task, TaskExt as _, WeakEntity, Window, actions, div,
+    px, rems,
 };
 use mustr_ui::{ButtonStyle, Chip, TextButton, palette, tokens, tokens::scaled};
 use serde_json::json;
@@ -63,6 +69,23 @@ use workspace::{
     Workspace, notifications::NotificationId,
 };
 
+actions!(
+    thread_chat,
+    [
+        /// Reviews the changes of the agent thread in focus: its branch, or its latest turn.
+        ReviewChanges,
+        /// Opens the agent thread's folder in your editor, the one Open in last used.
+        OpenThreadInEditor,
+        /// Switches the agent thread's checkout to another branch, or creates one.
+        SwitchThreadBranch,
+        /// Commits the agent thread's changes, pushes them, and creates the pull request, as far
+        /// as its branch needs: the thread toolbar's Commit button.
+        CommitPushAndPr,
+        /// Links a pull request to the agent thread in focus.
+        LinkThreadPullRequest,
+    ]
+);
+
 /// Handles the thread actions this toolbar owns on every workspace. Call once at startup.
 pub fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| {
@@ -73,8 +96,78 @@ pub fn init(cx: &mut App) {
             let git = ThreadGit::for_thread(&action.thread_id, cx);
             git.update(cx, |git, cx| git.open_in_editor(None, cx));
         });
+        // Offered only while a thread is open, so the palette lists them only then.
+        workspace.register_action_renderer(|div, workspace, _, cx| {
+            match focused_thread(workspace, cx) {
+                Some(thread_id) => thread_actions(div, thread_id, cx),
+                None => div,
+            }
+        });
     })
     .detach();
+}
+
+/// The toolbar's keys, as T3 binds them (`packages/shared/src/keybindings.ts`). The composer's
+/// own editor binds `secondary-d` (select next), so they're bound for editors in a thread view
+/// too, which mustr binds after Zed's.
+pub fn key_bindings() -> Vec<KeyBinding> {
+    ["ThreadView", "ThreadView > Editor"]
+        .into_iter()
+        .flat_map(|context| {
+            [
+                KeyBinding::new("secondary-d", ReviewChanges, Some(context)),
+                KeyBinding::new("secondary-o", OpenThreadInEditor, Some(context)),
+                KeyBinding::new("secondary-shift-g", SwitchThreadBranch, Some(context)),
+            ]
+        })
+        .collect()
+}
+
+/// The thread of the agent thread view in focus, once it isn't a draft.
+fn focused_thread(workspace: &Workspace, cx: &App) -> Option<String> {
+    let view = workspace.active_item(cx)?.downcast::<ThreadView>()?;
+    view.read(cx).thread_id().map(str::to_string)
+}
+
+fn thread_actions(div: gpui::Div, thread_id: String, cx: &mut Context<Workspace>) -> gpui::Div {
+    let review = thread_id.clone();
+    let editor = thread_id.clone();
+    let branch = thread_id.clone();
+    let commit = thread_id.clone();
+    div.on_action(
+        cx.listener(move |workspace, _: &ReviewChanges, window, cx| {
+            review_thread_changes(workspace, &review, window, cx);
+        }),
+    )
+    .on_action(cx.listener(move |_, _: &OpenThreadInEditor, _, cx| {
+        let git = ThreadGit::for_thread(&editor, cx);
+        git.update(cx, |git, cx| git.open_in_editor(None, cx));
+    }))
+    .on_action(
+        cx.listener(move |workspace, _: &SwitchThreadBranch, window, cx| {
+            let git = ThreadGit::for_thread(&branch, cx);
+            BranchPickerDelegate::open(git, workspace, window, cx);
+        }),
+    )
+    .on_action(cx.listener(move |_, _: &CommitPushAndPr, window, cx| {
+        let git = ThreadGit::for_thread(&commit, cx);
+        let workspace = cx.weak_entity();
+        let controls =
+            cx.new(|cx| ThreadGitControls::new(git, workspace, ControlsPlacement::Toolbar, cx));
+        // Its dialog opens on the workspace, which this handler is updating.
+        window.defer(cx, move |window, cx| {
+            controls.update(cx, |controls, cx| controls.run_quick_action(window, cx));
+        });
+    }))
+    .on_action(
+        cx.listener(move |workspace, _: &LinkThreadPullRequest, window, cx| {
+            let git = ThreadGit::for_thread(&thread_id, cx);
+            let thread_id = thread_id.clone();
+            workspace.toggle_modal(window, cx, |window, cx| {
+                LinkPullRequestDialog::new(thread_id, git, window, cx)
+            });
+        }),
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
