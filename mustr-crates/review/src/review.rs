@@ -81,7 +81,7 @@ use gpui::{
     SharedString, Styled as _, Subscription, Task, WeakEntity, Window, px,
 };
 use language::{
-    Buffer, BufferEvent, Capability, DiskState, File, HighlightedText, LanguageRegistry,
+    Buffer, BufferEvent, Capability, DiskState, File, HighlightedText, Language, LanguageRegistry,
     LineEnding, OffsetRangeExt as _, Point, ReplicaId, Rope, TextBuffer,
 };
 use multi_buffer::PathKey;
@@ -1773,7 +1773,25 @@ async fn load_entry(
             .await?
         }
     };
-    let diff = build_buffer_diff(contents.base_text, &buffer, language_registry, cx).await?;
+    // The base text is highlighted in the head's language. A real file gets its language from
+    // the project only once the registry has loaded it, which is usually after this point, and the
+    // diff keeps the base text it's built with, so its language is looked up here as
+    // `build_buffer` looks it up, instead of being read from the buffer.
+    let (file, text, language) = cx.update(|_, cx| {
+        let buffer = buffer.read(cx);
+        (
+            buffer.file().cloned(),
+            buffer.as_rope().clone(),
+            buffer.language().cloned(),
+        )
+    })?;
+    let language = match (language, file) {
+        (Some(language), _) => Some(language),
+        (None, Some(file)) => load_language_for_file(&file, &text, language_registry, cx).await?,
+        (None, None) => None,
+    };
+    let diff =
+        build_buffer_diff(contents.base_text, &buffer, language, language_registry, cx).await?;
     Ok(ReviewEntry {
         path: contents.path,
         old_path: contents.old_path,
@@ -1795,16 +1813,7 @@ async fn build_buffer(
     let line_ending = LineEnding::detect(&text);
     LineEnding::normalize(&mut text);
     let text = Rope::from(text);
-    let language_id =
-        cx.update(|_, cx| language_registry.language_for_file(&file, Some(&text), cx))?;
-    let language = match language_id {
-        Some(language_id) => language_registry
-            .load_language(language_id)
-            .await
-            .ok()
-            .and_then(|language| language.log_err()),
-        None => None,
-    };
+    let language = load_language_for_file(&file, &text, language_registry, cx).await?;
     let buffer = cx.new(|cx| {
         let text_buffer = TextBuffer::new_normalized(
             ReplicaId::LOCAL,
@@ -1820,11 +1829,32 @@ async fn build_buffer(
     Ok(buffer)
 }
 
+/// The language the registry picks for `file`, loaded. As in `build_buffer` in
+/// `crates/git_ui/src/commit_view.rs`.
+async fn load_language_for_file(
+    file: &Arc<dyn File>,
+    text: &Rope,
+    language_registry: &Arc<LanguageRegistry>,
+    cx: &mut AsyncWindowContext,
+) -> Result<Option<Arc<Language>>> {
+    let language_id =
+        cx.update(|_, cx| language_registry.language_for_file(file, Some(text), cx))?;
+    Ok(match language_id {
+        Some(language_id) => language_registry
+            .load_language(language_id)
+            .await
+            .ok()
+            .and_then(|language| language.log_err()),
+        None => None,
+    })
+}
+
 // Copied from `build_buffer_diff` in `crates/git_ui/src/commit_view.rs`. `BufferDiff::new` gives
-// the base text buffer the head buffer's language, so deleted lines are highlighted too.
+// the base text buffer `language`, the head's, so deleted lines are highlighted too.
 async fn build_buffer_diff(
     mut base_text: Option<String>,
     buffer: &Entity<Buffer>,
+    language: Option<Arc<Language>>,
     language_registry: &Arc<LanguageRegistry>,
     cx: &mut AsyncWindowContext,
 ) -> Result<Entity<BufferDiff>> {
@@ -1832,7 +1862,6 @@ async fn build_buffer_diff(
         LineEnding::normalize(base_text);
     }
 
-    let language = cx.update(|_, cx| buffer.read(cx).language().cloned())?;
     let snapshot = cx.update(|_, cx| buffer.read(cx).snapshot())?;
 
     let diff = cx.new(|cx| {
@@ -2218,6 +2247,34 @@ pub(crate) mod tests {
         Entity<Workspace>,
         &mut VisualTestContext,
     ) {
+        let (workspace, cx) = test_workspace(
+            diff_view_style,
+            fs,
+            |languages| {
+                languages.add(rust_lang());
+                languages.add(markdown_lang());
+            },
+            cx,
+        )
+        .await;
+        let review_view = workspace
+            .update_in(cx, |workspace, window, cx| {
+                ReviewView::open(contents, workspace, window, cx)
+            })
+            .await
+            .expect("review view should open");
+        cx.run_until_parked();
+
+        (review_view, workspace, cx)
+    }
+
+    /// A workspace to open reviews in, with the project's languages set up by `add_languages`.
+    pub(crate) async fn test_workspace(
+        diff_view_style: DiffViewStyle,
+        fs: Arc<FakeFs>,
+        add_languages: impl FnOnce(&Arc<LanguageRegistry>),
+        cx: &mut TestAppContext,
+    ) -> (Entity<Workspace>, &mut VisualTestContext) {
         cx.update(|cx| {
             let settings_store = SettingsStore::test(cx);
             cx.set_global(settings_store);
@@ -2231,26 +2288,13 @@ pub(crate) mod tests {
         });
 
         let project = Project::test(fs, [], cx).await;
-        project.read_with(cx, |project, _| {
-            let languages = project.languages();
-            languages.add(rust_lang());
-            languages.add(markdown_lang());
-        });
+        project.read_with(cx, |project, _| add_languages(project.languages()));
 
         let (multi_workspace, cx) =
             cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
         let workspace =
             multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
-
-        let review_view = workspace
-            .update_in(cx, |workspace, window, cx| {
-                ReviewView::open(contents, workspace, window, cx)
-            })
-            .await
-            .expect("review view should open");
-        cx.run_until_parked();
-
-        (review_view, workspace, cx)
+        (workspace, cx)
     }
 
     pub(crate) fn rhs_editor(

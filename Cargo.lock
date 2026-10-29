@@ -15332,6 +15332,7 @@ dependencies = [
  "buffer_diff",
  "collections",
  "editor",
+ "futures 0.3.34",
  "gpui",
  "language",
  "log",

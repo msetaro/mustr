@@ -38,6 +38,7 @@ workspace.workspace = true
 
 [dev-dependencies]
 editor = { workspace = true, features = ["test-support"] }
+futures.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 language = { workspace = true, features = ["test-support"] }
 parking_lot.workspace = true

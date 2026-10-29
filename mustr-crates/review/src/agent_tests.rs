@@ -3,9 +3,10 @@
 
 use super::tests::{
     Call, FakeBackend, RUST_HEAD, buffer_for_path, build_review_view, build_review_view_with_fs,
-    drafts, rel_path, review_files, rhs_editor, select_lines,
+    drafts, rel_path, review_files, rhs_editor, select_lines, test_workspace,
 };
 use super::*;
+use futures::FutureExt as _;
 use gpui::{TestAppContext, VisualTestContext};
 use parking_lot::Mutex;
 use pretty_assertions::assert_eq;
@@ -13,6 +14,7 @@ use project::{FakeFs, Fs as _};
 use serde_json::json;
 use settings::DiffViewStyle;
 use std::path::Path;
+use theme::Theme;
 
 fn agent_header(scope: ReviewScope) -> ReviewHeader {
     ReviewHeader::AgentThread(AgentThreadHeader {
@@ -361,5 +363,137 @@ async fn test_a_scope_with_changes_shows_them(cx: &mut TestAppContext) {
         build_review_view(agent_contents(&backend), DiffViewStyle::Unified, cx).await;
     review_view.read_with(cx, |review_view, _| {
         assert_eq!(review_view.empty_label(), None);
+    });
+}
+
+/// The color `word`'s first occurrence is highlighted with, if any.
+fn highlight_color(
+    snapshot: &language::BufferSnapshot,
+    word: &str,
+    theme: &Theme,
+) -> Option<gpui::Hsla> {
+    let start = snapshot
+        .text()
+        .find(word)
+        .unwrap_or_else(|| panic!("{word:?} should be in the text"));
+    snapshot
+        .chunks(
+            start..start + word.len(),
+            language::LanguageAwareStyling {
+                tree_sitter: true,
+                diagnostics: false,
+            },
+        )
+        .find_map(|chunk| chunk.syntax_highlight_id)
+        .and_then(|id| theme.syntax().get(id))
+        .and_then(|style| style.color)
+}
+
+/// Deleted lines are highlighted as the rest of the file is. A real file gets its language from
+/// the project once the registry has loaded the language, which can be after the review builds
+/// the file's diff, and the diff used to take the base text's language from the buffer then: the
+/// base text had none, so the split diff's left side and unified deleted lines were plain text.
+#[gpui::test]
+async fn test_a_real_files_deleted_lines_are_highlighted(cx: &mut TestAppContext) {
+    const BASE: &str = "fn retry() -> u32 {\n    1\n}\n";
+    const HEAD: &str = "pub fn retry() -> u32 {\n    2\n}\n";
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree("/worktree", json!({ "x.rs": HEAD })).await;
+    let backend = Arc::new(FakeBackend::default());
+    let contents = ReviewContents {
+        worktree: Some(PathBuf::from("/worktree")),
+        files: vec![ReviewFileContents {
+            path: rel_path("x.rs"),
+            old_path: None,
+            base_text: Some(BASE.to_string()),
+            head_text: Some(HEAD.to_string()),
+            commentable: None,
+        }],
+        ..agent_contents(&backend)
+    };
+    let family = theme_settings::refine_theme_family(mustr_ui::theme_family_content().unwrap());
+    let theme = Arc::new(
+        family
+            .themes
+            .into_iter()
+            .find(|theme| theme.name == mustr_ui::DARK_THEME_NAME)
+            .unwrap(),
+    );
+    let keyword = theme.syntax().style_for_name("keyword").unwrap().color;
+    assert!(keyword.is_some(), "mustr's theme colors keywords");
+
+    // Rust is registered to load on first use, as the app's languages are, and its loading
+    // finishes only when the test says so.
+    let (finish_loading, loading) = futures::channel::oneshot::channel::<()>();
+    let loading = loading.shared();
+    let registry_theme = theme.clone();
+    let (workspace, cx) = test_workspace(
+        DiffViewStyle::Split,
+        fs,
+        move |languages| {
+            languages.set_theme(registry_theme);
+            let rust = language::rust_lang();
+            let grammar = rust.grammar().unwrap().ts_language.clone();
+            languages.register_native_grammars([("rust", grammar)]);
+            let config = rust.config().clone();
+            languages.register_language(
+                config.name.clone(),
+                config.grammar.clone(),
+                config.matcher.clone(),
+                false,
+                None,
+                Arc::new(move || {
+                    let config = config.clone();
+                    let loading = loading.clone();
+                    Box::pin(async move {
+                        loading.await.ok();
+                        Ok(language::LoadedLanguage {
+                            config,
+                            queries: language::LanguageQueries {
+                                highlights: Some(r#"["fn" "pub"] @keyword"#.into()),
+                                ..Default::default()
+                            },
+                            context_provider: None,
+                            toolchain_provider: None,
+                            manifest_name: None,
+                        })
+                    })
+                }),
+            );
+        },
+        cx,
+    )
+    .await;
+    let opening = workspace.update_in(cx, |workspace, window, cx| {
+        ReviewView::open(contents, workspace, window, cx)
+    });
+    cx.run_until_parked();
+    finish_loading.send(()).unwrap();
+    cx.run_until_parked();
+    let review_view = opening.await.expect("review view should open");
+    cx.run_until_parked();
+
+    let buffer = buffer_for_path(&review_view, "x.rs", cx);
+    buffer.read_with(cx, |buffer, _| {
+        assert!(buffer.file().is_some_and(|file| file.as_local().is_some()));
+        assert_eq!(
+            buffer.language().map(|language| language.name()),
+            Some("Rust".into())
+        );
+        assert_eq!(highlight_color(&buffer.snapshot(), "pub", &theme), keyword);
+    });
+    review_view.read_with(cx, |review_view, cx| {
+        let diff = review_view.files[0].diff.read(cx);
+        // What the unified diff shows for deleted lines.
+        let base = diff.snapshot(cx).base_text().clone();
+        assert_eq!(
+            base.language().map(|language| language.name()),
+            Some("Rust".into()),
+            "the base text has the file's language"
+        );
+        assert_eq!(highlight_color(&base, "fn", &theme), keyword);
+        // What the split diff's left side shows.
+        let base = diff.base_text_buffer().read(cx).snapshot();
+        assert_eq!(highlight_color(&base, "fn", &theme), keyword);
     });
 }
