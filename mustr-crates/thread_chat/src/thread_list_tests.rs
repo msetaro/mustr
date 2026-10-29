@@ -14,15 +14,16 @@ use crate::{
     thread_view::ThreadView,
 };
 use anyhow::{Result, anyhow};
+use collections::{HashMap, HashSet};
 use futures::{
     FutureExt as _, StreamExt as _, channel::mpsc, future::BoxFuture, stream::BoxStream,
 };
-use gpui::{Entity, TestAppContext, VisualContext as _, VisualTestContext};
+use gpui::{Entity, Focusable as _, TestAppContext, VisualContext as _, VisualTestContext};
 use parking_lot::Mutex;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 use settings::SettingsStore;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use t3_api::{
     tagged::{
         OrchestrationV2Command, OrchestrationV2ShellStreamItem, OrchestrationV2ThreadStreamItem,
@@ -353,6 +354,12 @@ struct Recorder {
     /// What happened, in order: commands by type, and other events the tests log.
     log: Arc<Mutex<Vec<String>>>,
     read_only: bool,
+    /// Answers to RPCs, by tag: a result, or an error message. Other calls fail.
+    answers: Mutex<HashMap<String, Result<Value, String>>>,
+    /// RPCs this server doesn't have.
+    unsupported: Mutex<HashSet<String>>,
+    /// Every RPC called: its tag, payload and access level.
+    calls: Mutex<Vec<(String, Value, Access)>>,
 }
 
 impl Recorder {
@@ -459,8 +466,26 @@ impl ThreadBackend for Recorder {
         ready(Err(anyhow!("these tests don't launch threads")))
     }
 
-    fn call_raw(&self, tag: &str, _: Value, _: Access) -> BoxFuture<'static, Result<Value>> {
-        ready(Err(anyhow!("unexpected call to {tag}")))
+    fn call_raw(
+        &self,
+        tag: &str,
+        payload: Value,
+        access: Access,
+    ) -> BoxFuture<'static, Result<Value>> {
+        self.calls.lock().push((tag.to_string(), payload, access));
+        if self.unsupported.lock().contains(tag) {
+            return ready(Err(anyhow::Error::new(crate::UnsupportedRpc {
+                tag: tag.to_string(),
+            })));
+        }
+        if self.read_only && access.is_write() {
+            return ready(Err(anyhow!("Not sent: read only.")));
+        }
+        match self.answers.lock().get(tag) {
+            Some(Ok(answer)) => ready(Ok(answer.clone())),
+            Some(Err(error)) => ready(Err(anyhow!("{error}"))),
+            None => ready(Err(anyhow!("unexpected call to {tag}"))),
+        }
     }
 
     fn subscribe_raw(
@@ -486,6 +511,8 @@ fn init(backend: Arc<Recorder>, cx: &mut TestAppContext) {
         let settings_store = SettingsStore::test(cx);
         cx.set_global(settings_store);
         theme_settings::init(theme::LoadThemes::JustBase, cx);
+        // For the pickers' query editors.
+        editor::init(cx);
         crate::init(cx);
         cx.bind_keys(crate::key_bindings());
         crate::set_backend(backend, cx);
@@ -899,4 +926,834 @@ async fn the_sidebar_folds_settled_threads_and_pages_them(cx: &mut TestAppContex
     cx.update(|_, cx| ThreadListFilter::set_project(Some("project-2".into()), cx));
     cx.run_until_parked();
     assert_eq!(rows(cx), 0);
+}
+
+// Ordering, searching, moving between threads, snoozing, undo and the archived list (WP13).
+
+impl Recorder {
+    fn answer(&self, tag: &str, answer: Value) {
+        self.answers.lock().insert(tag.to_string(), Ok(answer));
+    }
+
+    fn calls_to(&self, tag: &str) -> Vec<(Value, Access)> {
+        self.calls
+            .lock()
+            .iter()
+            .filter(|(called, _, _)| called == tag)
+            .map(|(_, payload, access)| (payload.clone(), *access))
+            .collect()
+    }
+}
+
+fn rows(sidebar: &Entity<ThreadsSidebar>, cx: &mut VisualTestContext) -> Vec<String> {
+    sidebar.read_with(cx, |sidebar, _| sidebar.rows())
+}
+
+/// Drops `thread_id` on the row described as `row`, as a drag and drop would.
+fn drop_on(
+    sidebar: &Entity<ThreadsSidebar>,
+    thread_id: &str,
+    row: &str,
+    cx: &mut VisualTestContext,
+) {
+    sidebar.update_in(cx, |sidebar, window, cx| {
+        let row = sidebar.row(row);
+        sidebar.drop_thread(thread_id, row, window, cx)
+    });
+    cx.run_until_parked();
+}
+
+/// Two pinned threads with T3's keys, two active ones without, and a settled one.
+fn ordered_threads() -> Vec<Value> {
+    vec![
+        thread(
+            "p1",
+            "Pinned first",
+            json!({ "pinnedAt": NOW_ISO, "pinOrderKey": "h" }),
+        ),
+        thread(
+            "p2",
+            "Pinned second",
+            json!({ "pinnedAt": NOW_ISO, "pinOrderKey": "p" }),
+        ),
+        thread(
+            "a1",
+            "Newest",
+            json!({ "createdAt": "2026-10-27T11:00:00.000Z" }),
+        ),
+        thread(
+            "a2",
+            "Older",
+            json!({ "createdAt": "2026-10-27T10:00:00.000Z" }),
+        ),
+        thread(
+            "s1",
+            "Settled",
+            json!({ "settledOverride": "settled", "settledAt": "2026-10-27T08:00:00.000Z" }),
+        ),
+    ]
+}
+
+#[gpui::test]
+async fn dragging_reorders_pinned_threads(cx: &mut TestAppContext) {
+    let backend = Recorder::new(ordered_threads());
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let sidebar = sidebar(&workspace, cx);
+    assert_eq!(
+        rows(&sidebar, cx),
+        [
+            "Pinned", "t:p1", "t:p2", "Active", "t:a1", "t:a2", "Settled"
+        ]
+    );
+    // Onto the thread above it: it goes before, with one key between the top and `h`.
+    drop_on(&sidebar, "p2", "t:p1", cx);
+    assert_eq!(
+        backend.commands_without_ids(),
+        [json!({ "type": "thread.pin.reorder", "threadId": "p2", "orderKey": "e" })]
+    );
+    // The new order shows before T3's shell has it…
+    assert_eq!(rows(&sidebar, cx)[1..3], ["t:p2", "t:p1"]);
+    // …and stays once it does.
+    backend.push(json!({
+        "kind": "thread.updated", "sequence": 100, "location": "active",
+        "thread": thread("p2", "Pinned second", json!({ "pinnedAt": NOW_ISO, "pinOrderKey": "e" }))
+    }));
+    cx.run_until_parked();
+    assert_eq!(rows(&sidebar, cx)[1..3], ["t:p2", "t:p1"]);
+
+    // Dropping where it already is does nothing.
+    sidebar.read_with(cx, |sidebar, _| {
+        assert!(!sidebar.can_drop_on("p1", sidebar.row("t:p1")));
+        assert!(sidebar.can_drop_on("a1", sidebar.row("t:p1")));
+    });
+}
+
+#[gpui::test]
+async fn dragging_pins_unpins_and_settles(cx: &mut TestAppContext) {
+    let backend = Recorder::new(ordered_threads());
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let sidebar = sidebar(&workspace, cx);
+
+    // An active thread onto Pinned's header: pinned at the top.
+    drop_on(&sidebar, "a2", "Pinned", cx);
+    assert_eq!(
+        backend.commands_without_ids(),
+        [json!({ "type": "thread.pin", "threadId": "a2", "orderKey": "e" })]
+    );
+    assert_eq!(
+        rows(&sidebar, cx),
+        [
+            "Pinned", "t:a2", "t:p1", "t:p2", "Active", "t:a1", "Settled"
+        ]
+    );
+    cx.executor().advance_clock(Duration::from_secs(3));
+    cx.run_until_parked();
+
+    // A pinned thread onto Active's header, from above: unpinned, at the top of Active. The
+    // active threads have no keys yet, so they all get one, as in T3.
+    drop_on(&sidebar, "p2", "Active", cx);
+    assert_eq!(
+        backend.commands_without_ids()[1..],
+        [
+            json!({ "type": "thread.unpin", "threadId": "p2" }),
+            json!({ "type": "thread.active.reorder", "threadId": "p2", "orderKey": "gn" }),
+            json!({ "type": "thread.active.reorder", "threadId": "a1", "orderKey": "nb" }),
+            json!({ "type": "thread.active.reorder", "threadId": "a2", "orderKey": "tn" }),
+        ]
+    );
+    cx.executor().advance_clock(Duration::from_secs(3));
+    cx.run_until_parked();
+
+    // Onto Settled's header: settled, with Undo.
+    drop_on(&sidebar, "a1", "Settled", cx);
+    assert_eq!(
+        backend.commands_without_ids().last().unwrap(),
+        &json!({ "type": "thread.settle", "threadId": "a1" })
+    );
+    cx.dispatch_action(crate::UndoThreadAction);
+    cx.run_until_parked();
+    assert_eq!(
+        backend.commands_without_ids().last().unwrap(),
+        &json!({ "type": "thread.unsettle", "threadId": "a1", "reason": "user" })
+    );
+    // A settled thread can't go among the settled ones again.
+    sidebar.read_with(cx, |sidebar, _| {
+        assert!(!sidebar.can_drop_on("s1", sidebar.row("Settled")));
+    });
+}
+
+#[gpui::test]
+async fn dragging_wakes_and_pins_into_an_empty_section(cx: &mut TestAppContext) {
+    let backend = Recorder::new(vec![
+        thread(
+            "a1",
+            "Active",
+            json!({ "createdAt": "2026-10-27T11:00:00.000Z" }),
+        ),
+        thread(
+            "z1",
+            "Snoozed",
+            json!({
+                "snoozedAt": "2026-10-27T10:00:00.000Z",
+                // Far off, so the test's clock can't wake it.
+                "snoozedUntil": "2099-01-01T00:00:00.000Z"
+            }),
+        ),
+    ]);
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let sidebar = sidebar(&workspace, cx);
+    sidebar.update(cx, |sidebar, cx| sidebar.toggle_fold(Section::Snoozed, cx));
+    assert_eq!(rows(&sidebar, cx), ["Active", "t:a1", "Snoozed", "t:z1"]);
+    // Snoozed threads need a wake time, so nothing drops among them.
+    sidebar.read_with(cx, |sidebar, _| {
+        assert!(!sidebar.can_drop_on("a1", sidebar.row("t:z1")));
+    });
+
+    // A snoozed thread onto an active one: woken, and ordered.
+    drop_on(&sidebar, "z1", "t:a1", cx);
+    assert_eq!(
+        backend.commands_without_ids(),
+        [
+            json!({ "type": "thread.unsnooze", "threadId": "z1", "reason": "user" }),
+            json!({ "type": "thread.active.reorder", "threadId": "z1", "orderKey": "ir" }),
+            json!({ "type": "thread.active.reorder", "threadId": "a1", "orderKey": "rj" }),
+        ]
+    );
+    cx.executor().advance_clock(Duration::from_secs(3));
+    cx.run_until_parked();
+
+    // With nothing pinned, a drag shows where to pin.
+    sidebar.update(cx, |sidebar, cx| sidebar.begin_drag("a1", cx));
+    assert_eq!(
+        rows(&sidebar, cx),
+        [
+            "Pinned",
+            "empty:Pinned",
+            "Active",
+            "t:a1",
+            "Snoozed",
+            "t:z1"
+        ]
+    );
+    drop_on(&sidebar, "a1", "empty:Pinned", cx);
+    assert_eq!(
+        backend.commands_without_ids().last().unwrap(),
+        &json!({ "type": "thread.pin", "threadId": "a1", "orderKey": "n" })
+    );
+}
+
+#[gpui::test]
+async fn a_refused_drop_puts_the_order_back(cx: &mut TestAppContext) {
+    let backend = Arc::new(Recorder {
+        shell: Mutex::new(snapshot(ordered_threads())),
+        read_only: true,
+        ..Default::default()
+    });
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let sidebar = sidebar(&workspace, cx);
+    let before = rows(&sidebar, cx);
+    drop_on(&sidebar, "p2", "t:p1", cx);
+    assert!(backend.commands().is_empty());
+    assert_eq!(rows(&sidebar, cx), before);
+}
+
+/// Threads for searching, and T3's answer for "webhook retry".
+fn search_fixture() -> Arc<Recorder> {
+    let backend = Recorder::new(vec![
+        thread("a", "Fix the webhook retry", json!({})),
+        thread("b", "Billing export", json!({})),
+        thread(
+            "c",
+            "Release notes",
+            json!({ "settledOverride": "settled", "settledAt": "2026-10-27T08:00:00.000Z" }),
+        ),
+    ]);
+    let found = |thread_id: &str, snippet: &str, quality: f64, hits: i64, at: &str| {
+        json!({
+            "threadId": thread_id, "projectId": "project-1", "source": "assistant",
+            "snippet": snippet, "messageCreatedAt": at, "quality": quality, "hits": hits
+        })
+    };
+    backend.answer(
+        "orchestration.searchThreads",
+        json!({ "matches": [
+            found("b", "…the  webhook retry loop backs off…", 0.8, 2, "2026-10-27T10:00:00.000Z"),
+            found("a", "already found by its title", 1.0, 1, "2026-10-27T10:00:00.000Z"),
+            found("c", "retry the webhook once", 1.0, 1, "2026-10-27T09:00:00.000Z"),
+            found("gone", "an archived thread", 1.0, 1, "2026-10-27T09:00:00.000Z"),
+            found("b", "a weaker match of the same thread", 0.3, 1, "2026-10-27T11:00:00.000Z"),
+        ]}),
+    );
+    backend
+}
+
+fn search(sidebar: &Entity<ThreadsSidebar>, query: &str, cx: &mut VisualTestContext) {
+    let editor = sidebar.read_with(cx, |sidebar, _| sidebar.search_editor().clone());
+    editor.update_in(cx, |editor, window, cx| editor.set_text(query, window, cx));
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+async fn search_lists_message_matches_after_title_matches(cx: &mut TestAppContext) {
+    let backend = search_fixture();
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let sidebar = sidebar(&workspace, cx);
+    search(&sidebar, "webhook retry", cx);
+    // Title matches at once; messages once the typing stops.
+    assert_eq!(rows(&sidebar, cx), ["found:a", "searching"]);
+    assert!(backend.calls_to("orchestration.searchThreads").is_empty());
+    cx.executor().advance_clock(Duration::from_millis(150));
+    cx.run_until_parked();
+    assert_eq!(
+        backend.calls_to("orchestration.searchThreads"),
+        [(json!({ "query": "webhook retry" }), Access::Read)]
+    );
+    // Best first, each thread once, and none the title search found or the list doesn't have.
+    assert_eq!(
+        rows(&sidebar, cx),
+        ["found:a", "In messages", "message:c", "message:b"]
+    );
+
+    // Words under three letters can't match messages, so T3 isn't asked.
+    search(&sidebar, "fi  x", cx);
+    cx.executor().advance_clock(Duration::from_millis(150));
+    cx.run_until_parked();
+    assert_eq!(backend.calls_to("orchestration.searchThreads").len(), 1);
+    assert_eq!(rows(&sidebar, cx), ["found:a"]);
+}
+
+#[gpui::test]
+async fn search_without_message_search_finds_titles(cx: &mut TestAppContext) {
+    let backend = search_fixture();
+    backend
+        .unsupported
+        .lock()
+        .insert("orchestration.searchThreads".into());
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let sidebar = sidebar(&workspace, cx);
+    search(&sidebar, "webhook", cx);
+    cx.executor().advance_clock(Duration::from_millis(150));
+    cx.run_until_parked();
+    // An older T3 without it: just the title matches, no error.
+    assert_eq!(rows(&sidebar, cx), ["found:a"]);
+
+    // A failure says so.
+    backend.unsupported.lock().clear();
+    backend.answers.lock().insert(
+        "orchestration.searchThreads".into(),
+        Err("the database is busy".into()),
+    );
+    search(&sidebar, "billing", cx);
+    cx.executor().advance_clock(Duration::from_millis(150));
+    cx.run_until_parked();
+    assert_eq!(rows(&sidebar, cx), ["found:b", "search failed"]);
+}
+
+#[test]
+fn snippets_highlight_the_searched_words() {
+    let text = "Retry the WEBHOOK once, then retry";
+    let marked = crate::sidebar::highlights(text, "webhook retry");
+    let highlighted = marked
+        .iter()
+        .map(|index| &text[*index..*index + 1])
+        .collect::<String>();
+    assert_eq!(highlighted, "RetryWEBHOOKretry");
+}
+
+#[gpui::test]
+async fn previous_and_next_follow_the_sidebar(cx: &mut TestAppContext) {
+    let backend = Recorder::new(ordered_threads());
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let _sidebar = sidebar(&workspace, cx);
+    open(&workspace, "a1", cx);
+    assert_eq!(tab_count(&workspace, cx), 1);
+    let next = |cx: &mut VisualTestContext| step(&workspace, crate::NextThread, cx);
+    let previous = |cx: &mut VisualTestContext| step(&workspace, crate::PreviousThread, cx);
+    assert_eq!(next(cx).as_deref(), Some("a2"));
+    // Settled is folded, so a2 is the last.
+    assert_eq!(next(cx).as_deref(), Some("a2"));
+    assert_eq!(previous(cx).as_deref(), Some("a1"));
+    assert_eq!(previous(cx).as_deref(), Some("p2"));
+    assert_eq!(previous(cx).as_deref(), Some("p1"));
+    assert_eq!(previous(cx).as_deref(), Some("p1"));
+    // Each step replaced the thread's tab.
+    assert_eq!(tab_count(&workspace, cx), 1);
+    // From a draft, the first.
+    workspace.update_in(cx, |workspace, window, cx| {
+        ThreadView::open_new(workspace, window, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(next(cx).as_deref(), Some("p1"));
+}
+
+/// Dispatches `action`, and returns the thread the workspace then shows.
+fn step<A: gpui::Action>(
+    workspace: &Entity<Workspace>,
+    action: A,
+    cx: &mut VisualTestContext,
+) -> Option<String> {
+    cx.dispatch_action(action);
+    cx.run_until_parked();
+    active_thread(workspace, cx).flatten()
+}
+
+/// Binds Zed's default keymap, then mustr's, as the app does.
+fn bind_zed_then_mustr_keys(cx: &mut VisualTestContext) {
+    cx.update(|_, cx| {
+        let content = util::asset_str::<settings::SettingsAssets>(settings::DEFAULT_KEYMAP_PATH);
+        let bindings = match settings::KeymapFile::load(&content, cx) {
+            settings::KeymapFileLoadResult::Success { key_bindings }
+            | settings::KeymapFileLoadResult::SomeFailedToLoad { key_bindings, .. } => key_bindings,
+            settings::KeymapFileLoadResult::JsonParseFailure { error } => {
+                panic!("Zed's keymap doesn't parse: {error}")
+            }
+        };
+        cx.clear_key_bindings();
+        cx.bind_keys(bindings);
+        cx.bind_keys(crate::key_bindings());
+    });
+}
+
+#[gpui::test]
+async fn the_list_keys_win_in_a_thread(cx: &mut TestAppContext) {
+    let backend = Recorder::new(vec![
+        thread(
+            "a",
+            "First",
+            json!({ "createdAt": "2026-10-27T11:00:00.000Z" }),
+        ),
+        thread(
+            "b",
+            "Second",
+            json!({
+                "createdAt": "2026-10-27T10:00:00.000Z",
+                "updatedAt": "2026-10-27T10:30:00.000Z",
+                "worktreePath": "/wt/second", "branch": "t3/second"
+            }),
+        ),
+    ]);
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let _sidebar = sidebar(&workspace, cx);
+    bind_zed_then_mustr_keys(cx);
+    let view = open(&workspace, "a", cx);
+    // In the composer, over the editor's Fold and Unfold.
+    let composer = view.read_with(cx, |view, _| view.composer().clone());
+    cx.update(|window, cx| window.focus(&composer.focus_handle(cx), cx));
+    cx.simulate_keystrokes("ctrl-}");
+    cx.run_until_parked();
+    assert_eq!(active_thread(&workspace, cx), Some(Some("b".into())));
+    let view = workspace.read_with(cx, |workspace, cx| {
+        workspace
+            .active_item(cx)
+            .unwrap()
+            .downcast::<ThreadView>()
+            .unwrap()
+    });
+    cx.update(|window, cx| window.focus(&view.focus_handle(cx), cx));
+    cx.simulate_keystrokes("ctrl-{");
+    cx.run_until_parked();
+    assert_eq!(active_thread(&workspace, cx), Some(Some("a".into())));
+
+    // On a draft, ctrl-shift-l takes the previous worktree, and ctrl-shift-x opens the menu.
+    let draft = workspace
+        .update_in(cx, |workspace, window, cx| {
+            ThreadView::open_new(workspace, window, cx)
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let form = draft
+        .read_with(cx, |view, _| view.new_thread.clone())
+        .unwrap();
+    let composer = draft.read_with(cx, |view, _| view.composer().clone());
+    cx.update(|window, cx| window.focus(&composer.focus_handle(cx), cx));
+    cx.simulate_keystrokes("ctrl-shift-l");
+    cx.run_until_parked();
+    assert_eq!(
+        form.read_with(cx, |form, _| form.picked_worktree()),
+        Some((
+            crate::new_thread::WorkspaceKind::ExistingWorktree,
+            Some(("/wt/second".into(), Some("t3/second".into())))
+        ))
+    );
+    cx.simulate_keystrokes("ctrl-shift-x");
+    cx.run_until_parked();
+    assert!(form.read_with(cx, |form, _| form.workspace_menu_is_open()));
+}
+
+#[gpui::test]
+async fn snoozing_the_open_thread_moves_on_and_undoes(cx: &mut TestAppContext) {
+    let backend = Recorder::new(ordered_threads());
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    open(&workspace, "a1", cx);
+    let weak = workspace.downgrade();
+    cx.update(|window, cx| {
+        crate::snooze::snooze_thread(
+            "a1".into(),
+            "Newest".into(),
+            "2099-01-01T09:00:00.000Z".into(),
+            weak,
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        backend.commands_without_ids(),
+        [json!({
+            "type": "thread.snooze",
+            "threadId": "a1",
+            "snoozedUntil": "2099-01-01T09:00:00.000Z"
+        })]
+    );
+    // The next thread that isn't snoozed or settled takes its place.
+    assert_eq!(active_thread(&workspace, cx), Some(Some("a2".into())));
+    // mod+z undoes it, once.
+    cx.dispatch_action(crate::UndoThreadAction);
+    cx.dispatch_action(crate::UndoThreadAction);
+    cx.run_until_parked();
+    assert_eq!(
+        backend.commands_without_ids()[1..],
+        [json!({ "type": "thread.unsnooze", "threadId": "a1", "reason": "user" })]
+    );
+}
+
+#[gpui::test]
+async fn the_custom_snooze_dialog_checks_its_time(cx: &mut TestAppContext) {
+    use chrono::TimeZone as _;
+    let backend = Recorder::new(ordered_threads());
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    open(&workspace, "a1", cx);
+    cx.dispatch_action(crate::SnoozeThread);
+    cx.run_until_parked();
+    let dialog = workspace
+        .read_with(cx, |workspace, cx| {
+            workspace.active_modal::<crate::snooze::SnoozeDialog>(cx)
+        })
+        .expect("the snooze dialog is open");
+    let [date, time, _] = dialog.read_with(cx, |dialog, _| dialog.editors().map(Entity::clone));
+    let set = |editor: &Entity<editor::Editor>, text: &str, cx: &mut VisualTestContext| {
+        editor.update_in(cx, |editor, window, cx| editor.set_text(text, window, cx))
+    };
+    // In the past: refused, with a reason.
+    set(&date, "2020-01-01", cx);
+    cx.dispatch_action(menu::Confirm);
+    cx.run_until_parked();
+    assert!(backend.commands().is_empty());
+    assert_eq!(
+        dialog.read_with(cx, |dialog, _| dialog.error().cloned()),
+        Some("Choose a valid date and time in the future.".into())
+    );
+    set(&date, "2099-03-04", cx);
+    set(&time, "08:30", cx);
+    cx.dispatch_action(menu::Confirm);
+    cx.run_until_parked();
+    let expected = chrono::Local
+        .with_ymd_and_hms(2099, 3, 4, 8, 30, 0)
+        .earliest()
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
+    assert_eq!(
+        backend.commands_without_ids(),
+        [json!({ "type": "thread.snooze", "threadId": "a1", "snoozedUntil": expected })]
+    );
+    assert!(
+        workspace
+            .read_with(cx, |workspace, cx| workspace
+                .active_modal::<crate::snooze::SnoozeDialog>(cx))
+            .is_none()
+    );
+
+    // A duration.
+    open(&workspace, "a1", cx);
+    cx.dispatch_action(crate::SnoozeThread);
+    cx.run_until_parked();
+    let dialog = workspace
+        .read_with(cx, |workspace, cx| {
+            workspace.active_modal::<crate::snooze::SnoozeDialog>(cx)
+        })
+        .unwrap();
+    let [_, _, amount] = dialog.read_with(cx, |dialog, _| dialog.editors().map(Entity::clone));
+    dialog.update_in(cx, |dialog, window, cx| {
+        dialog.set_mode(
+            crate::snooze::CustomMode::Duration,
+            crate::snooze::DurationUnit::Minutes,
+            window,
+            cx,
+        )
+    });
+    set(&amount, "90", cx);
+    let before = chrono::Utc::now();
+    cx.dispatch_action(menu::Confirm);
+    cx.run_until_parked();
+    let until = backend.commands()[1]["snoozedUntil"]
+        .as_str()
+        .unwrap()
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap();
+    let minutes = (until - before).num_minutes();
+    assert!((89..=91).contains(&minutes), "{minutes} minutes");
+}
+
+#[gpui::test]
+async fn settling_and_unpinning_offer_undo_for_five_seconds(cx: &mut TestAppContext) {
+    let backend = Recorder::new(vec![
+        thread(
+            "p",
+            "Pinned and snoozed",
+            json!({
+                "pinnedAt": NOW_ISO, "pinOrderKey": "h",
+                "createdAt": "2026-10-27T11:00:00.000Z"
+            }),
+        ),
+        thread(
+            "b",
+            "Other",
+            json!({ "createdAt": "2026-10-27T10:00:00.000Z" }),
+        ),
+    ]);
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    open(&workspace, "p", cx);
+    cx.dispatch_action(SettleThread);
+    cx.run_until_parked();
+    cx.dispatch_action(crate::UndoThreadAction);
+    cx.run_until_parked();
+    // Un-settled, and pinned back in its place.
+    assert_eq!(
+        backend.commands_without_ids(),
+        [
+            json!({ "type": "thread.settle", "threadId": "p" }),
+            json!({ "type": "thread.unsettle", "threadId": "p", "reason": "user" }),
+            json!({ "type": "thread.pin", "threadId": "p", "orderKey": "h" }),
+        ]
+    );
+
+    open(&workspace, "p", cx);
+    cx.dispatch_action(crate::UnpinThread);
+    cx.run_until_parked();
+    cx.dispatch_action(crate::UndoThreadAction);
+    cx.run_until_parked();
+    assert_eq!(
+        backend.commands_without_ids()[3..],
+        [
+            json!({ "type": "thread.unpin", "threadId": "p" }),
+            json!({ "type": "thread.pin", "threadId": "p", "orderKey": "h" }),
+        ]
+    );
+
+    // After five seconds, there's nothing to undo.
+    cx.dispatch_action(crate::UnpinThread);
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_secs(6));
+    cx.run_until_parked();
+    cx.dispatch_action(crate::UndoThreadAction);
+    cx.run_until_parked();
+    assert_eq!(backend.commands().len(), 6);
+}
+
+#[gpui::test]
+async fn auto_settle_and_the_pull_request_link(cx: &mut TestAppContext) {
+    let link = |number: i64, state: &str, updated: &str| {
+        json!({
+            "host": "github.com", "repository": "acme/api", "number": number,
+            "url": format!("https://github.com/acme/api/pull/{number}"),
+            "linkedAt": "2026-10-20T00:00:00.000Z", "source": "manual", "stack": null,
+            "snapshot": {
+                "baseBranch": "main", "headBranch": "t3/x", "isDraft": false, "state": state,
+                "title": format!("PR {number}"), "syncedAt": updated, "updatedAt": updated
+            }
+        })
+    };
+    let backend = Recorder::new(vec![thread(
+        "a",
+        "With pull requests",
+        json!({
+            "pullRequests": [
+                link(41, "merged", "2026-10-27T11:00:00.000Z"),
+                link(42, "open", "2026-10-26T11:00:00.000Z")
+            ]
+        }),
+    )]);
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let sidebar = sidebar(&workspace, cx);
+    // The open one, though the merged one is newer.
+    let pull_request = sidebar.read_with(cx, |sidebar, _| {
+        sidebar
+            .thread_list()
+            .find("a")
+            .unwrap()
+            .pull_request
+            .clone()
+    });
+    assert_eq!(
+        pull_request.map(|pull_request| (pull_request.number, pull_request.state)),
+        Some((42, Some(t3_api::types::PullRequestState::Open)))
+    );
+    open(&workspace, "a", cx);
+    cx.dispatch_action(crate::CopyPullRequestLink);
+    cx.run_until_parked();
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("https://github.com/acme/api/pull/42".into())
+    );
+    cx.dispatch_action(crate::ToggleThreadAutoSettle);
+    cx.run_until_parked();
+    assert_eq!(
+        backend.commands_without_ids(),
+        [json!({ "type": "thread.auto-settle.set", "threadId": "a", "enabled": false })]
+    );
+}
+
+#[gpui::test]
+async fn the_archived_list_brings_threads_back(cx: &mut TestAppContext) {
+    let backend = Recorder::new(vec![thread("a", "Active", json!({}))]);
+    backend.answer(
+        "orchestration.getArchivedShellSnapshot",
+        json!({
+            "schemaVersion": 1, "snapshotSequence": 9, "projects": [],
+            "threads": [
+                thread("old", "Archived last week", json!({ "archivedAt": "2026-10-20T12:00:00.000Z" })),
+                thread("new", "Archived today", json!({ "archivedAt": "2026-10-27T11:00:00.000Z" })),
+                thread("child", "A subagent", json!({
+                    "archivedAt": "2026-10-27T11:00:00.000Z",
+                    "lineage": {
+                        "rootThreadId": "new", "parentThreadId": "new",
+                        "relationshipToParent": "subagent"
+                    }
+                })),
+            ]
+        }),
+    );
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    cx.dispatch_action(crate::ShowArchivedThreads);
+    cx.run_until_parked();
+    assert_eq!(
+        backend.calls_to("orchestration.getArchivedShellSnapshot"),
+        [(json!({}), Access::Read)]
+    );
+    let picker = workspace
+        .read_with(cx, |workspace, cx| {
+            workspace.active_modal::<picker::Picker<crate::organize::ArchivedThreadsDelegate>>(cx)
+        })
+        .expect("the archived list is open");
+    let listed = |cx: &mut VisualTestContext| {
+        picker.read_with(cx, |picker, _| {
+            picker
+                .delegate
+                .listed()
+                .into_iter()
+                .map(|thread| (thread.title.clone(), thread.project.clone()))
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(
+        listed(cx),
+        [
+            ("Archived today".to_string(), Some("api".to_string())),
+            ("Archived last week".to_string(), Some("api".to_string()))
+        ]
+    );
+    cx.dispatch_action(menu::Confirm);
+    cx.run_until_parked();
+    assert_eq!(
+        backend.commands_without_ids(),
+        [json!({ "type": "thread.unarchive", "threadId": "new" })]
+    );
+    assert_eq!(listed(cx).len(), 1);
+}
+
+#[gpui::test]
+async fn a_read_only_archived_list_unarchives_nothing(cx: &mut TestAppContext) {
+    let backend = Arc::new(Recorder {
+        shell: Mutex::new(snapshot(vec![])),
+        read_only: true,
+        ..Default::default()
+    });
+    backend.answer(
+        "orchestration.getArchivedShellSnapshot",
+        json!({
+            "schemaVersion": 1, "snapshotSequence": 9, "projects": [],
+            "threads": [thread("old", "Archived", json!({ "archivedAt": NOW_ISO }))]
+        }),
+    );
+    let (_workspace, cx) = workspace(backend.clone(), cx).await;
+    cx.dispatch_action(crate::ShowArchivedThreads);
+    cx.run_until_parked();
+    cx.dispatch_action(menu::Confirm);
+    cx.run_until_parked();
+    assert!(backend.commands().is_empty());
+}
+
+#[gpui::test]
+async fn new_threads_reuse_the_previous_worktree(cx: &mut TestAppContext) {
+    let backend = Recorder::new(vec![
+        thread(
+            "one",
+            "One",
+            json!({
+                "updatedAt": "2026-10-27T10:00:00.000Z",
+                "worktreePath": "/wt/one", "branch": "t3/one"
+            }),
+        ),
+        thread(
+            "two",
+            "Two",
+            json!({
+                "updatedAt": "2026-10-27T11:00:00.000Z",
+                "worktreePath": "/wt/two", "branch": "t3/two"
+            }),
+        ),
+        // Newer, but in another project.
+        thread(
+            "elsewhere",
+            "Elsewhere",
+            json!({
+                "projectId": "project-2", "updatedAt": "2026-10-27T11:30:00.000Z",
+                "worktreePath": "/wt/web", "branch": "t3/web"
+            }),
+        ),
+    ]);
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    // On a thread that isn't a draft, nothing changes.
+    open(&workspace, "one", cx);
+    cx.dispatch_action(crate::UsePreviousWorktree);
+    cx.run_until_parked();
+    let draft = workspace
+        .update_in(cx, |workspace, window, cx| {
+            ThreadView::open_new(workspace, window, cx)
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let form = draft
+        .read_with(cx, |view, _| view.new_thread.clone())
+        .unwrap();
+    cx.dispatch_action(crate::UsePreviousWorktree);
+    cx.run_until_parked();
+    let picked = |cx: &mut VisualTestContext| form.read_with(cx, |form, _| form.picked_worktree());
+    use crate::new_thread::WorkspaceKind;
+    assert_eq!(
+        picked(cx),
+        Some((
+            WorkspaceKind::ExistingWorktree,
+            Some(("/wt/two".into(), Some("t3/two".into())))
+        ))
+    );
+    // Again: the one before it, since that one's now picked.
+    cx.dispatch_action(crate::UsePreviousWorktree);
+    cx.run_until_parked();
+    assert_eq!(
+        picked(cx),
+        Some((
+            WorkspaceKind::ExistingWorktree,
+            Some(("/wt/one".into(), Some("t3/one".into())))
+        ))
+    );
+    // The menu picks where it works.
+    cx.dispatch_action(crate::ToggleWorkspacePicker);
+    cx.run_until_parked();
+    assert!(form.read_with(cx, |form, _| form.workspace_menu_is_open()));
+    cx.dispatch_action(crate::ToggleWorkspacePicker);
+    cx.run_until_parked();
+    assert!(!form.read_with(cx, |form, _| form.workspace_menu_is_open()));
 }

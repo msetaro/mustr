@@ -6,15 +6,23 @@
 //! Snoozed and Settled start collapsed, and Settled lists its newest threads a page at a time
 //! (T3 0.1.1 sends every settled thread in the shell; 0.1.3's `getOlderSettledThreads` isn't
 //! there to page from). Subagents have no rows of their own, as in T3: their parents' family
-//! bars list them. A row's context menu settles, archives, pins and renames it (`organize.rs`),
-//! and the header adds projects, starts threads, filters by project, and searches.
+//! bars list them. A row's context menu settles, archives, pins, snoozes and renames it
+//! (`organize.rs`, `snooze.rs`), and the header adds projects, starts threads, filters by
+//! project, lists archived threads, and searches.
+//!
+//! Rows drag to reorder Pinned and Active, or to pin, unpin, settle, un-settle or wake a thread
+//! (`Sidebar.drag.ts` and `planSidebarThreadDrop` in T3's sidebar), with the moved order shown
+//! until T3's shell catches up. The search finds threads by title, branch, project or pull
+//! request at once, then threads whose messages match, from `orchestration.searchThreads`.
+//! [`PreviousThread`] and [`NextThread`] move through the threads in the order they show.
 
 use crate::{
+    backend::{Access, ThreadBackendExt as _},
     commands::new_id,
-    organize::{self, SettleThread},
+    organize::{self, DropPlan, DropSource, DropTarget, SettleThread, ShowArchivedThreads},
     projects::AddProject,
     shell::{Shell, ThreadShells},
-    thread_view::NewThread,
+    thread_view::{NewThread, ThreadView},
 };
 use collections::{HashMap, HashSet};
 use editor::{Editor, EditorEvent};
@@ -25,15 +33,16 @@ use gpui::{
     Subscription, Task, WeakEntity, Window, actions, anchored, deferred, div, list, px,
 };
 use mustr_ui::{Chip, Pill, palette, tokens, tokens::scaled};
-use std::{cmp::Reverse, time::Duration};
+use std::{cell::RefCell, cmp::Reverse, time::Duration};
 use t3_api::types::{
-    OrchestrationV2AppThreadLineageRelationshipToParent, OrchestrationV2ThreadShell,
-    OrchestrationV2ThreadShellSettledOverride, ProviderInteractionMode,
+    OrchestrationV2AppThreadLineageRelationshipToParent, OrchestrationV2SearchThreadsInput,
+    OrchestrationV2ThreadShell, OrchestrationV2ThreadShellSettledOverride, ProviderInteractionMode,
+    PullRequestState, ThreadPullRequestLinkSource,
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use ui::{
-    Color, ContextMenu, Icon, IconButton, IconName, IconPosition, IconSize, Indicator, Label,
-    LabelCommon as _, LabelSize, PopoverMenu, Tooltip, prelude::*,
+    Color, ContextMenu, HighlightedLabel, Icon, IconButton, IconName, IconPosition, IconSize,
+    Indicator, Label, LabelCommon as _, LabelSize, PopoverMenu, Tooltip, prelude::*,
 };
 use workspace::Workspace;
 
@@ -42,8 +51,27 @@ actions!(
     [
         /// Shows the threads sidebar and focuses its search.
         SearchThreads,
+        /// Opens the thread above the open one in the threads sidebar.
+        PreviousThread,
+        /// Opens the thread below the open one in the threads sidebar.
+        NextThread,
     ]
 );
+
+/// How long the search waits for more typing before it asks T3 for message matches
+/// (`THREAD_SEARCH_DEBOUNCE_MS`).
+const MESSAGE_SEARCH_DEBOUNCE: Duration = Duration::from_millis(120);
+/// T3 takes queries this long at most (`THREAD_SEARCH_QUERY_MAX_LENGTH`).
+const MESSAGE_SEARCH_MAX_CHARS: usize = 200;
+/// How many threads whose messages match the search lists.
+const MESSAGE_MATCH_LIMIT: usize = 20;
+/// T3 matches messages by words of three letters or more (`MESSAGE_TOKEN_MIN_LENGTH`).
+const MESSAGE_WORD_MIN_CHARS: usize = 3;
+/// A match's quality when a word only starts one of the message's (`MESSAGE_PREFIX`): matches
+/// at least this good rank first.
+const MESSAGE_PREFIX_QUALITY: f64 = 0.8;
+/// How long a drop's order shows if T3's shell doesn't confirm it.
+const PENDING_DROP_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// How many settled threads show when Settled opens, and how many more each "Show more" adds
 /// (`SETTLED_TAIL_INITIAL_COUNT` and `SETTLED_TAIL_PAGE_COUNT` in T3's sidebar).
@@ -272,6 +300,96 @@ pub struct ThreadEntry {
     pub snoozed_until: Option<String>,
     /// Its pull requests' numbers.
     pub pull_requests: Vec<i64>,
+    /// The pull request its row shows, if it has one.
+    pub pull_request: Option<RowPullRequest>,
+    /// Pinned, even when it shows elsewhere (snoozed or settled).
+    pub pinned: bool,
+    /// Settled, even when it shows elsewhere (snoozed).
+    pub settled: bool,
+    /// T3's auto-settle rules may settle it (the user didn't turn them off for it).
+    pub auto_settle: bool,
+    /// T3 would take a snooze now.
+    pub can_snooze: bool,
+}
+
+/// The pull request a row shows: one that's open if there is one, else the latest, as T3's
+/// `useLinkedThreadPullRequest` picks it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RowPullRequest {
+    pub number: i64,
+    pub url: String,
+    /// `None` until T3 has read it from the host.
+    pub state: Option<PullRequestState>,
+    pub is_draft: bool,
+    pub title: Option<String>,
+}
+
+impl RowPullRequest {
+    pub fn of(thread: &OrchestrationV2ThreadShell) -> Option<Self> {
+        let links = thread
+            .pull_requests
+            .iter()
+            .flatten()
+            .filter(|link| link.source != ThreadPullRequestLinkSource::StackDismissed)
+            .collect::<Vec<_>>();
+        let updated = |link: &&&t3_api::types::ThreadPullRequestLink| {
+            link.snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.updated_at.clone())
+                .unwrap_or_else(|| link.linked_at.clone())
+        };
+        let open = links
+            .iter()
+            .filter(|link| {
+                link.snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.state == PullRequestState::Open)
+            })
+            .max_by_key(updated);
+        if let Some(link) = open.or_else(|| links.iter().max_by_key(updated)) {
+            let snapshot = link.snapshot.as_ref();
+            return Some(Self {
+                number: link.number,
+                url: link.url.clone(),
+                state: snapshot.map(|snapshot| snapshot.state.clone()),
+                is_draft: snapshot.is_some_and(|snapshot| snapshot.is_draft),
+                title: snapshot.map(|snapshot| snapshot.title.clone()),
+            });
+        }
+        let link = thread
+            .linked_pull_request
+            .as_ref()
+            .or(thread.branch_pull_request.as_ref())?;
+        Some(Self {
+            number: link.number,
+            url: link.url.clone(),
+            state: None,
+            is_draft: false,
+            title: None,
+        })
+    }
+
+    fn state_label(&self) -> &'static str {
+        match &self.state {
+            None => "Linked",
+            Some(PullRequestState::Open) if self.is_draft => "Draft",
+            Some(PullRequestState::Closed) => "Closed",
+            Some(PullRequestState::Merged) => "Merged",
+            Some(_) => "Open",
+        }
+    }
+
+    /// The colors of the thread toolbar's chip (`mustr/src/thread_toolbar.rs`).
+    fn color(&self, cx: &App) -> Hsla {
+        let palette = palette(cx);
+        match &self.state {
+            None => palette.text_muted.hsla(),
+            Some(PullRequestState::Open) if self.is_draft => palette.text_muted.hsla(),
+            Some(PullRequestState::Closed) => cx.theme().status().error,
+            Some(PullRequestState::Merged) => palette.pending.hsla(),
+            Some(_) => palette.ok.hsla(),
+        }
+    }
 }
 
 impl ThreadEntry {
@@ -302,6 +420,11 @@ impl ThreadEntry {
             has_finished_run: thread.latest_run_completed_at.is_some(),
             snoozed_until: thread.snoozed_until.clone(),
             pull_requests,
+            pull_request: RowPullRequest::of(thread),
+            pinned: thread.pinned_at.is_some(),
+            settled: is_settled(thread),
+            auto_settle: thread.auto_settle_disabled_at.is_none(),
+            can_snooze: crate::snooze::can_snooze(thread),
         }
     }
 
@@ -532,11 +655,19 @@ fn sort_settled(threads: &mut Vec<&OrchestrationV2ThreadShell>) {
 enum Item {
     Header(Section),
     Thread(Section, usize),
-    /// A section with nothing in it.
+    /// A section with nothing in it: Active, or Pinned while a thread is dragged.
     Empty(Section),
     MoreSettled,
-    /// A search result.
+    /// A search result, by title, branch, project or pull request.
     Found(Section, usize),
+    /// Over the threads whose messages match.
+    MessagesHeader,
+    /// A thread whose messages match the search: an index into the search's matches.
+    Message(usize),
+    /// Asking T3 for message matches.
+    SearchingMessages,
+    /// T3 couldn't search messages.
+    MessageSearchFailed,
     NoMatches,
 }
 
@@ -547,7 +678,276 @@ enum ItemKey {
     Thread(String),
     Empty(Section),
     MoreSettled,
+    MessagesHeader,
+    Message(String),
+    SearchingMessages,
+    MessageSearchFailed,
     NoMatches,
+}
+
+/// A thread whose messages match the search, with the best match's snippet.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MessageMatch {
+    pub thread: ThreadEntry,
+    pub snippet: String,
+    /// Whether the agent wrote the message (else the user did).
+    pub from_agent: bool,
+}
+
+/// The search's message matches, for one query.
+#[derive(Default)]
+struct MessageSearch {
+    /// The query as sent to T3.
+    query: String,
+    matches: Vec<MessageMatch>,
+    /// What T3 sent, kept so the matches follow the shell's changes.
+    raw: Vec<t3_api::types::OrchestrationThreadSearchMatch>,
+    pending: bool,
+    failed: bool,
+    _task: Option<Task<()>>,
+}
+
+/// The search as T3 sends it (`useThreadSearch`): trimmed and cut to T3's limit, or `None` when
+/// it has no word of three letters or more, so T3 couldn't match messages.
+pub(crate) fn message_query(query: &str) -> Option<String> {
+    let query = query
+        .trim()
+        .chars()
+        .take(MESSAGE_SEARCH_MAX_CHARS)
+        .collect::<String>();
+    let query = query.trim();
+    let searchable = query
+        .split_whitespace()
+        .map(|word| word.trim_matches(|c| matches!(c, '"' | '\'' | '“' | '”')))
+        .any(|word| word.chars().count() >= MESSAGE_WORD_MIN_CHARS);
+    searchable.then(|| query.to_string())
+}
+
+/// The threads whose messages match, best first (`rankMessageMatches`): matches of whole words
+/// or word starts first, then by quality, by how many messages match, and by how new the
+/// message is. A thread found by title already isn't repeated, nor is any thread twice, and
+/// threads the list doesn't have (archived ones, subagents, other projects when filtered) are
+/// left out.
+pub(crate) fn rank_message_matches(
+    matches: &[t3_api::types::OrchestrationThreadSearchMatch],
+    list: &ThreadList,
+    found_by_title: &HashSet<&str>,
+) -> Vec<MessageMatch> {
+    let mut ranked = matches
+        .iter()
+        .filter(|found| !found_by_title.contains(found.thread_id.as_str()))
+        .filter_map(|found| Some((found, list.find(&found.thread_id)?)))
+        .collect::<Vec<_>>();
+    ranked.sort_by(|(left, _), (right, _)| {
+        let quality =
+            |found: &t3_api::types::OrchestrationThreadSearchMatch| found.quality.unwrap_or(1.);
+        let word = |found| quality(found) >= MESSAGE_PREFIX_QUALITY;
+        word(right)
+            .cmp(&word(left))
+            .then(quality(right).total_cmp(&quality(left)))
+            .then(right.hits.unwrap_or(1).cmp(&left.hits.unwrap_or(1)))
+            .then(right.message_created_at.cmp(&left.message_created_at))
+    });
+    let mut seen = HashSet::default();
+    ranked
+        .into_iter()
+        .filter(|(found, _)| seen.insert(found.thread_id.clone()))
+        .take(MESSAGE_MATCH_LIMIT)
+        .map(|(found, thread)| MessageMatch {
+            thread: thread.clone(),
+            snippet: found
+                .snippet
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" "),
+            from_agent: crate::model::wire_string(&found.source) == "assistant",
+        })
+        .collect()
+}
+
+/// The byte offsets of the characters of `text` that the search's words match, ignoring case,
+/// for highlighting them.
+pub(crate) fn highlights(text: &str, query: &str) -> Vec<usize> {
+    let lower = |c: char| c.to_lowercase().next().unwrap_or(c);
+    let chars = text.char_indices().collect::<Vec<_>>();
+    let mut marked = vec![false; chars.len()];
+    for word in query.split_whitespace() {
+        let word = word.chars().map(lower).collect::<Vec<_>>();
+        if word.is_empty() || word.len() > chars.len() {
+            continue;
+        }
+        for start in 0..=chars.len() - word.len() {
+            let found = word
+                .iter()
+                .enumerate()
+                .all(|(offset, c)| lower(chars[start + offset].1) == *c);
+            if found {
+                marked[start..start + word.len()].fill(true);
+            }
+        }
+    }
+    chars
+        .iter()
+        .zip(marked)
+        .filter(|(_, marked)| *marked)
+        .map(|((index, _), _)| *index)
+        .collect()
+}
+
+// Dragging threads.
+
+/// A thread being dragged, and what the drag shows under the pointer.
+#[derive(Clone, Debug)]
+pub(crate) struct DraggedThread {
+    pub id: String,
+    pub title: SharedString,
+}
+
+impl Render for DraggedThread {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = palette(cx);
+        h_flex()
+            .max_w(scaled(px(260.)))
+            .px_2()
+            .py_1()
+            .gap_1p5()
+            .rounded(scaled(tokens::CONTROL_RADIUS))
+            .border(tokens::BORDER_WIDTH)
+            .border_color(palette.accent.hsla())
+            .bg(palette.surface_2.hsla())
+            .shadow_md()
+            .child(
+                Icon::new(IconName::Chat)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .child(
+                Label::new(self.title.clone())
+                    .size(LabelSize::Small)
+                    .truncate(),
+            )
+    }
+}
+
+/// One place in the list, as a drop sees it: a thread, or a header or note between them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DropSlot<'a> {
+    Thread(&'a str),
+    Header(Section),
+    Note,
+}
+
+/// The section a slot at `index` of `slots` is in (`sectionAtSidebarSlot`): Pinned until
+/// Active's header, and so on.
+fn section_at(slots: &[DropSlot], index: usize) -> Section {
+    slots[..index.min(slots.len())]
+        .iter()
+        .fold(Section::Pinned, |section, slot| match slot {
+            DropSlot::Header(header) if *header != Section::Pinned => *header,
+            _ => section,
+        })
+}
+
+/// Where the thread at `from` lands when dropped on the slot at `over`
+/// (`resolveSidebarDropTarget`): it takes `over`'s place, going after it when it came from
+/// above and before it when it came from below. `None` in Snoozed, which needs a wake time.
+pub(crate) fn resolve_drop(slots: &[DropSlot], from: usize, over: usize) -> Option<DropTarget> {
+    let DropSlot::Thread(_) = slots.get(from)? else {
+        return None;
+    };
+    if over >= slots.len() {
+        return None;
+    }
+    let mut moved = slots.to_vec();
+    let dragged = moved.remove(from);
+    moved.insert(over, dragged);
+    let section = section_at(&moved, over);
+    if section == Section::Snoozed {
+        return None;
+    }
+    let (mut pinned_order, mut active_order) = (Vec::new(), Vec::new());
+    let mut current = Section::Pinned;
+    for slot in &moved {
+        match slot {
+            DropSlot::Header(Section::Active) => current = Section::Active,
+            DropSlot::Header(Section::Snoozed | Section::Settled) => break,
+            DropSlot::Thread(id) if current == Section::Pinned => pinned_order.push(id.to_string()),
+            DropSlot::Thread(id) => active_order.push(id.to_string()),
+            _ => {}
+        }
+    }
+    Some(DropTarget {
+        section,
+        pinned_order,
+        active_order,
+    })
+}
+
+/// A drop's order, shown until T3's shell has it.
+struct PendingDrop {
+    thread_id: String,
+    section: Section,
+    /// The section's threads in their new order (none for Settled, where it goes on top).
+    order: Vec<String>,
+    /// The shell sequence of the drop's last command, once they're all sent.
+    sequence: Option<i64>,
+    sent: bool,
+    _timeout: Option<Task<()>>,
+}
+
+/// Shows `pending` in `list`: its thread in the section it was dropped in, in its new order
+/// (`orderItemsByPreferredIds` in T3's sidebar).
+fn apply_pending_drop(list: &mut ThreadList, pending: &PendingDrop) {
+    let sections = [
+        &mut list.pinned,
+        &mut list.active,
+        &mut list.snoozed,
+        &mut list.settled,
+    ];
+    let mut entry = None;
+    for threads in sections {
+        if let Some(index) = threads
+            .iter()
+            .position(|thread| thread.id == pending.thread_id)
+        {
+            entry = Some(threads.remove(index));
+            break;
+        }
+    }
+    let Some(mut entry) = entry else {
+        return;
+    };
+    entry.section = pending.section;
+    entry.pinned = pending.section == Section::Pinned;
+    entry.settled = pending.section == Section::Settled;
+    match pending.section {
+        Section::Settled => list.settled.insert(0, entry),
+        Section::Snoozed => list.snoozed.push(entry),
+        Section::Pinned | Section::Active => {
+            let threads = if pending.section == Section::Pinned {
+                &mut list.pinned
+            } else {
+                &mut list.active
+            };
+            threads.push(entry);
+            let rank = |id: &str| {
+                pending
+                    .order
+                    .iter()
+                    .position(|ordered| ordered == id)
+                    .unwrap_or(usize::MAX)
+            };
+            // Stable, so the ones the order doesn't name keep their places after it.
+            threads.sort_by_key(|thread| rank(&thread.id));
+        }
+    }
+}
+
+/// Which way [`PreviousThread`] and [`NextThread`] go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Direction {
+    Previous,
+    Next,
 }
 
 /// What the sidebar asks of the panel that holds it.
@@ -562,23 +962,97 @@ struct Sidebars(Vec<WeakEntity<ThreadsSidebar>>);
 
 impl Global for Sidebars {}
 
+/// The sidebar of `workspace`, if it has one.
+fn sidebar_of(workspace: &Workspace, cx: &App) -> Option<Entity<ThreadsSidebar>> {
+    let workspace_id = workspace.weak_handle().entity_id();
+    cx.try_global::<Sidebars>()?.0.iter().find_map(|sidebar| {
+        let sidebar = sidebar.upgrade()?;
+        (sidebar.read(cx).workspace.entity_id() == workspace_id).then_some(sidebar)
+    })
+}
+
 pub(crate) fn init(cx: &mut App) {
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, _: &SearchThreads, window, cx| {
-            let workspace_id = workspace.weak_handle().entity_id();
-            let Some(sidebars) = cx.try_global::<Sidebars>() else {
-                return;
-            };
-            let sidebar = sidebars.0.iter().find_map(|sidebar| {
-                let sidebar = sidebar.upgrade()?;
-                (sidebar.read(cx).workspace.entity_id() == workspace_id).then_some(sidebar)
-            });
-            if let Some(sidebar) = sidebar {
+            if let Some(sidebar) = sidebar_of(workspace, cx) {
                 sidebar.update(cx, |sidebar, cx| sidebar.reveal_search(window, cx));
             }
         });
+        workspace.register_action(|workspace, _: &PreviousThread, window, cx| {
+            open_adjacent(workspace, Direction::Previous, window, cx)
+        });
+        workspace.register_action(|workspace, _: &NextThread, window, cx| {
+            open_adjacent(workspace, Direction::Next, window, cx)
+        });
     })
     .detach();
+}
+
+/// Opens the thread before or after the open one, in the order the sidebar shows them
+/// (`resolveAdjacentThreadId`): from a draft or another kind of tab, the last or the first. It
+/// stops at the ends. As T3 shows one thread at a time, the thread's tab is replaced, unless its
+/// composer holds a draft, so stepping through the list doesn't pile up tabs.
+fn open_adjacent(
+    workspace: &mut Workspace,
+    direction: Direction,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let from = workspace
+        .active_item(cx)
+        .and_then(|item| item.downcast::<ThreadView>())
+        .filter(|view| view.read(cx).thread_id().is_some());
+    let current = from
+        .as_ref()
+        .and_then(|view| view.read(cx).thread_id().map(str::to_string));
+    let target = match sidebar_of(workspace, cx) {
+        Some(sidebar) => sidebar
+            .read(cx)
+            .adjacent(current.as_deref(), direction)
+            .map(|thread| (thread.id.clone(), thread.title.clone())),
+        None => {
+            let shells = ThreadShells::global(cx);
+            let filter = ThreadListFilter::get(cx);
+            shells.read(cx).shell().and_then(|shell| {
+                let list = ThreadList::from_shell(shell, &filter, now());
+                let order = list.iter().collect::<Vec<_>>();
+                adjacent_in(&order, current.as_deref(), direction)
+                    .map(|thread| (thread.id.clone(), thread.title.clone()))
+            })
+        }
+    };
+    let Some((thread_id, title)) = target else {
+        return;
+    };
+    let opened = ThreadView::open(thread_id, title.into(), workspace, window, cx);
+    if let Some(from) = from
+        && opened.is_some_and(|opened| opened != from)
+        && from.read(cx).composer().read(cx).is_empty(cx)
+        && let Some(pane) = workspace.pane_for(&from)
+    {
+        pane.update(cx, |pane, cx| {
+            pane.close_item_by_id(from.entity_id(), workspace::SaveIntent::Skip, window, cx)
+        })
+        .detach_and_log_err(cx);
+    }
+}
+
+fn adjacent_in<'a>(
+    order: &[&'a ThreadEntry],
+    current: Option<&str>,
+    direction: Direction,
+) -> Option<&'a ThreadEntry> {
+    let Some(current) = current else {
+        return match direction {
+            Direction::Previous => order.last().copied(),
+            Direction::Next => order.first().copied(),
+        };
+    };
+    let index = order.iter().position(|thread| thread.id == current)?;
+    match direction {
+        Direction::Previous => index.checked_sub(1).map(|index| order[index]),
+        Direction::Next => order.get(index + 1).copied(),
+    }
 }
 
 pub struct ThreadsSidebar {
@@ -601,7 +1075,15 @@ pub struct ThreadsSidebar {
     visited_since_activated: bool,
     search: Entity<Editor>,
     query: String,
+    messages: MessageSearch,
     context_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
+    /// The thread being dragged, while a drag is on.
+    dragging: Option<String>,
+    pending_drop: Option<PendingDrop>,
+    /// Bumped whenever the rows change, so the drop check below is redone.
+    generation: usize,
+    /// The last drop check: for (generation, dragged thread, row), whether it can drop there.
+    drop_check: RefCell<Option<(usize, String, usize, bool)>>,
     _subscriptions: Vec<Subscription>,
     _clock: Task<()>,
 }
@@ -622,6 +1104,7 @@ impl ThreadsSidebar {
         });
         let subscriptions = vec![
             cx.observe(&shells, |this, _, cx| {
+                this.shell_changed(cx);
                 this.rebuild(cx);
                 this.visit_active(cx);
             }),
@@ -629,6 +1112,7 @@ impl ThreadsSidebar {
             cx.subscribe(&search, |this, search, event: &EditorEvent, cx| {
                 if let EditorEvent::BufferEdited = event {
                     this.query = search.read(cx).text(cx);
+                    this.search_messages(cx);
                     this.rebuild(cx);
                 }
             }),
@@ -661,12 +1145,333 @@ impl ThreadsSidebar {
             visited_since_activated: false,
             search,
             query: String::new(),
+            messages: MessageSearch::default(),
             context_menu: None,
+            dragging: None,
+            pending_drop: None,
+            generation: 0,
+            drop_check: RefCell::new(None),
             _subscriptions: subscriptions,
             _clock: clock,
         };
         this.rebuild(cx);
         this
+    }
+
+    /// The thread before or after `current` in the order the sidebar shows them.
+    fn adjacent(&self, current: Option<&str>, direction: Direction) -> Option<&ThreadEntry> {
+        let order = self
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Thread(section, index) | Item::Found(section, index) => {
+                    self.thread(*section, *index)
+                }
+                Item::Message(index) => {
+                    self.messages.matches.get(*index).map(|found| &found.thread)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        adjacent_in(&order, current, direction)
+    }
+
+    /// Asks T3 for the threads whose messages match the search, once the user stops typing for
+    /// a moment (`orchestration.searchThreads`, a read). Servers without it give title matches
+    /// alone.
+    fn search_messages(&mut self, cx: &mut Context<Self>) {
+        let Some(query) = message_query(&self.query) else {
+            self.messages = MessageSearch::default();
+            return;
+        };
+        if query == self.messages.query {
+            return;
+        }
+        let Some(backend) = crate::backend(cx) else {
+            return;
+        };
+        // Matches for a query this one refines or widens show until its own arrive; others go.
+        let previous = std::mem::take(&mut self.messages.query);
+        if !(query.contains(&previous) || previous.contains(&query)) {
+            self.messages.raw.clear();
+        }
+        self.messages.query = query.clone();
+        self.messages.pending = true;
+        self.messages.failed = false;
+        self.messages._task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(MESSAGE_SEARCH_DEBOUNCE)
+                .await;
+            let result = backend
+                .call::<t3_api::rpc::OrchestrationSearchThreads>(
+                    OrchestrationV2SearchThreadsInput {
+                        environment_label: None,
+                        limit: None,
+                        older_settled_before: None,
+                        project_ids: None,
+                        query: query.clone(),
+                        titles_only: None,
+                    },
+                    Access::Read,
+                )
+                .await;
+            this.update(cx, |this, cx| {
+                if this.messages.query != query {
+                    return;
+                }
+                this.messages.pending = false;
+                match result {
+                    Ok(result) => this.messages.raw = result.matches,
+                    Err(error) => {
+                        this.messages.raw.clear();
+                        if crate::is_unsupported_rpc(&error) {
+                            log::info!("this T3 can't search messages: {error:#}");
+                        } else {
+                            log::warn!("couldn't search the threads' messages: {error:#}");
+                            this.messages.failed = true;
+                        }
+                    }
+                }
+                this.rebuild(cx);
+            })
+            .ok();
+        }));
+    }
+
+    /// Lets go of a drop's order once the shell has caught up with it.
+    fn shell_changed(&mut self, cx: &mut Context<Self>) {
+        let sequence = self
+            .shells
+            .read(cx)
+            .shell()
+            .map_or(0, |shell| shell.sequence);
+        if self.pending_drop.as_ref().is_some_and(|pending| {
+            pending.sent && pending.sequence.is_none_or(|sent| sequence >= sent)
+        }) {
+            self.pending_drop = None;
+        }
+    }
+
+    /// The list's places, as a drop sees them.
+    fn drop_slots(&self) -> Vec<DropSlot<'_>> {
+        self.items
+            .iter()
+            .map(|item| match item {
+                Item::Header(section) => DropSlot::Header(*section),
+                Item::Thread(section, index) => self
+                    .thread(*section, *index)
+                    .map_or(DropSlot::Note, |thread| DropSlot::Thread(&thread.id)),
+                _ => DropSlot::Note,
+            })
+            .collect()
+    }
+
+    /// Where `thread_id` lands, dropped on row `over`, and what the drop does. Without `keys`,
+    /// the plan's order keys aren't the ones to write, but whether it does anything is right.
+    fn plan_drop(
+        &self,
+        thread_id: &str,
+        over: usize,
+        keys: Option<(&HashMap<String, String>, &HashMap<String, String>)>,
+    ) -> Option<(DropTarget, DropPlan)> {
+        if !self.query.trim().is_empty() {
+            return None;
+        }
+        let slots = self.drop_slots();
+        let from = slots
+            .iter()
+            .position(|slot| *slot == DropSlot::Thread(thread_id))?;
+        let target = resolve_drop(&slots, from, over)?;
+        let thread = self.list.find(thread_id)?;
+        let ids = |threads: &[ThreadEntry]| {
+            threads
+                .iter()
+                .map(|thread| thread.id.clone())
+                .collect::<Vec<_>>()
+        };
+        let (pinned_order, active_order) = (ids(&self.list.pinned), ids(&self.list.active));
+        let none = HashMap::default();
+        let (pin_keys, active_keys) = keys.unwrap_or((&none, &none));
+        let plan = organize::plan_drop(
+            &DropSource {
+                thread_id,
+                section: thread.section,
+                pinned: thread.pinned,
+                settled: thread.settled,
+                pinned_order: &pinned_order,
+                active_order: &active_order,
+                pin_keys,
+                active_keys,
+            },
+            &target,
+        );
+        (plan != DropPlan::None).then_some((target, plan))
+    }
+
+    /// Whether `thread_id` can drop on row `over`; asked on every frame of a drag.
+    fn can_drop(&self, thread_id: &str, over: usize) -> bool {
+        if let Some((generation, id, row, can)) = &*self.drop_check.borrow()
+            && *generation == self.generation
+            && id == thread_id
+            && *row == over
+        {
+            return *can;
+        }
+        let can = self.plan_drop(thread_id, over, None).is_some();
+        *self.drop_check.borrow_mut() = Some((self.generation, thread_id.to_string(), over, can));
+        can
+    }
+
+    /// Whether a drop on row `over` puts the dragged thread after it (it came from above) or
+    /// before it.
+    fn drops_after(&self, thread_id: &str, over: usize) -> bool {
+        // Pinned's header takes a thread to the top of Pinned, under it.
+        if self.items.get(over) == Some(&Item::Header(Section::Pinned)) {
+            return true;
+        }
+        self.items
+            .iter()
+            .position(|item| match item {
+                Item::Thread(section, index) => self
+                    .thread(*section, *index)
+                    .is_some_and(|thread| thread.id == thread_id),
+                _ => false,
+            })
+            .is_some_and(|from| from < over)
+    }
+
+    fn start_drag(&mut self, thread_id: &str, cx: &mut Context<Self>) {
+        if self.dragging.as_deref() != Some(thread_id) {
+            self.dragging = Some(thread_id.to_string());
+            self.rebuild(cx);
+        }
+    }
+
+    fn end_drag(&mut self, cx: &mut Context<Self>) {
+        if self.dragging.take().is_some() {
+            self.rebuild(cx);
+        }
+    }
+
+    /// Drops `dragged` on row `over`: shows the new order at once, and sends what T3 needs to
+    /// get there, one command after another.
+    pub(crate) fn drop_thread(
+        &mut self,
+        thread_id: &str,
+        over: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (pin_keys, active_keys) = organize::order_keys(cx);
+        let planned = self.plan_drop(thread_id, over, Some((&pin_keys, &active_keys)));
+        self.dragging = None;
+        let Some((target, plan)) = planned else {
+            self.rebuild(cx);
+            return;
+        };
+        let order = match target.section {
+            Section::Pinned => target.pinned_order.clone(),
+            Section::Active => target.active_order.clone(),
+            Section::Snoozed | Section::Settled => Vec::new(),
+        };
+        let timeout = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(PENDING_DROP_TIMEOUT).await;
+            this.update(cx, |this, cx| {
+                if this
+                    .pending_drop
+                    .as_ref()
+                    .is_some_and(|pending| pending.sent)
+                {
+                    this.pending_drop = None;
+                    this.rebuild(cx);
+                }
+            })
+            .ok();
+        });
+        let settling = plan == DropPlan::Settle;
+        self.pending_drop = Some(PendingDrop {
+            thread_id: thread_id.to_string(),
+            section: target.section,
+            order,
+            sequence: None,
+            sent: settling,
+            _timeout: Some(timeout),
+        });
+        self.rebuild(cx);
+        if settling {
+            let open_view = organize::open_view_of(&self.workspace, thread_id, cx);
+            organize::settle_thread(
+                thread_id.to_string(),
+                open_view,
+                self.workspace.clone(),
+                window,
+                cx,
+            );
+            return;
+        }
+        let send = organize::send_in_order(organize::drop_commands(thread_id, &plan), cx);
+        let workspace = self.workspace.clone();
+        cx.spawn(async move |this, cx| {
+            let result = send.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(sequence) => {
+                        if let Some(pending) = &mut this.pending_drop {
+                            pending.sent = true;
+                            pending.sequence = sequence;
+                        }
+                        this.shell_changed(cx);
+                    }
+                    Err(error) => {
+                        this.pending_drop = None;
+                        organize::report(
+                            &workspace,
+                            format!("Couldn't move the thread: {error:#}"),
+                            cx,
+                        );
+                    }
+                }
+                this.rebuild(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Makes row `index` a place to drop threads: it shows where the thread would go, and
+    /// takes the drop.
+    fn drop_zone<E: InteractiveElement>(
+        &self,
+        element: E,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> E {
+        let sidebar = cx.entity().downgrade();
+        let accent = palette(cx).accent.hsla();
+        let check = sidebar.clone();
+        element
+            .can_drop(move |dragged, _, cx| {
+                dragged
+                    .downcast_ref::<DraggedThread>()
+                    .zip(check.upgrade())
+                    .is_some_and(|(dragged, sidebar)| sidebar.read(cx).can_drop(&dragged.id, index))
+            })
+            .drag_over::<DraggedThread>(move |style, dragged, _, cx| {
+                let after = sidebar
+                    .upgrade()
+                    .is_some_and(|sidebar| sidebar.read(cx).drops_after(&dragged.id, index));
+                let style = style.border_color(accent);
+                if after {
+                    style.border_b_2()
+                } else {
+                    style.border_t_2()
+                }
+            })
+            .on_drop(
+                cx.listener(move |this, dragged: &DraggedThread, window, cx| {
+                    this.drop_thread(&dragged.id, index, window, cx)
+                }),
+            )
     }
 
     /// Highlights the thread the workspace shows, and tells T3 the user is looking at it.
@@ -690,6 +1495,57 @@ impl ThreadsSidebar {
     #[cfg(test)]
     pub(crate) fn row_count(&self) -> usize {
         self.items.len()
+    }
+
+    /// The list's rows, briefly: `Pinned`, `t:<thread id>`, `found:<id>`, `message:<id>`, and
+    /// so on.
+    #[cfg(test)]
+    pub(crate) fn rows(&self) -> Vec<String> {
+        self.items
+            .iter()
+            .map(|item| match item {
+                Item::Header(section) => section.label().to_string(),
+                Item::Thread(section, index) => {
+                    format!("t:{}", self.list.section(*section)[*index].id)
+                }
+                Item::Found(section, index) => {
+                    format!("found:{}", self.list.section(*section)[*index].id)
+                }
+                Item::Empty(section) => format!("empty:{}", section.label()),
+                Item::MoreSettled => "more".to_string(),
+                Item::MessagesHeader => "In messages".to_string(),
+                Item::Message(index) => {
+                    format!("message:{}", self.messages.matches[*index].thread.id)
+                }
+                Item::SearchingMessages => "searching".to_string(),
+                Item::MessageSearchFailed => "search failed".to_string(),
+                Item::NoMatches => "no matches".to_string(),
+            })
+            .collect()
+    }
+
+    /// The row described as [`Self::rows`] does.
+    #[cfg(test)]
+    pub(crate) fn row(&self, row: &str) -> usize {
+        self.rows()
+            .iter()
+            .position(|described| described == row)
+            .unwrap_or_else(|| panic!("no row {row} in {:?}", self.rows()))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn search_editor(&self) -> &Entity<Editor> {
+        &self.search
+    }
+
+    #[cfg(test)]
+    pub(crate) fn can_drop_on(&self, thread_id: &str, row: usize) -> bool {
+        self.can_drop(thread_id, row)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn begin_drag(&mut self, thread_id: &str, cx: &mut Context<Self>) {
+        self.start_drag(thread_id, cx)
     }
 
     /// Records a visit to the active thread (`thread.visit`) when it has news the user hasn't
@@ -723,13 +1579,29 @@ impl ThreadsSidebar {
         .detach();
     }
 
-    /// Rebuilds the list from the shell, the filter, the search and the folds.
+    /// Rebuilds the list from the shell, the filter, the search, the folds, and a drop T3's
+    /// shell doesn't show yet.
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         let shells = self.shells.read(cx);
         self.list = match shells.shell() {
             Some(shell) => ThreadList::from_shell(shell, &ThreadListFilter::get(cx), now()),
             None => ThreadList::default(),
         };
+        if let Some(pending) = &self.pending_drop {
+            apply_pending_drop(&mut self.list, pending);
+        }
+        self.messages.matches = if self.query.trim().is_empty() {
+            Vec::new()
+        } else {
+            let found = self
+                .list
+                .search(&self.query)
+                .into_iter()
+                .map(|thread| thread.id.as_str())
+                .collect::<HashSet<_>>();
+            rank_message_matches(&self.messages.raw, &self.list, &found)
+        };
+        self.generation += 1;
         let items = self.items_for_list();
         let keys = items.iter().map(|item| self.key(item)).collect::<Vec<_>>();
         // Only what changed is remeasured, and the scroll position stays.
@@ -760,7 +1632,8 @@ impl ThreadsSidebar {
         let mut items = Vec::new();
         if !self.query.trim().is_empty() {
             let found = self.list.search_positions(&self.query);
-            if found.is_empty() {
+            let messages = &self.messages;
+            if found.is_empty() && messages.matches.is_empty() && !messages.pending {
                 items.push(Item::NoMatches);
             }
             items.extend(
@@ -768,6 +1641,14 @@ impl ThreadsSidebar {
                     .into_iter()
                     .map(|(section, index)| Item::Found(section, index)),
             );
+            if !messages.matches.is_empty() {
+                items.push(Item::MessagesHeader);
+                items.extend((0..messages.matches.len()).map(Item::Message));
+            } else if messages.pending {
+                items.push(Item::SearchingMessages);
+            } else if messages.failed {
+                items.push(Item::MessageSearchFailed);
+            }
             return items;
         }
         if self.list.is_empty() {
@@ -775,7 +1656,9 @@ impl ThreadsSidebar {
         }
         for section in Section::ALL {
             let threads = self.list.section(section);
-            if threads.is_empty() && section != Section::Active {
+            // While a thread is dragged, an empty Pinned takes it.
+            let drop_to_pin = section == Section::Pinned && self.dragging.is_some();
+            if threads.is_empty() && section != Section::Active && !drop_to_pin {
                 continue;
             }
             items.push(Item::Header(section));
@@ -811,6 +1694,16 @@ impl ThreadsSidebar {
             }
             Item::Empty(section) => ItemKey::Empty(*section),
             Item::MoreSettled => ItemKey::MoreSettled,
+            Item::MessagesHeader => ItemKey::MessagesHeader,
+            Item::Message(index) => ItemKey::Message(
+                self.messages
+                    .matches
+                    .get(*index)
+                    .map(|found| found.thread.id.clone())
+                    .unwrap_or_default(),
+            ),
+            Item::SearchingMessages => ItemKey::SearchingMessages,
+            Item::MessageSearchFailed => ItemKey::MessageSearchFailed,
             Item::NoMatches => ItemKey::NoMatches,
         }
     }
@@ -912,15 +1805,65 @@ impl ThreadsSidebar {
             return div().into_any_element();
         };
         match item {
-            Item::Header(section) => self.render_header(section, cx),
+            Item::Header(section) => self.render_header(index, section, cx),
             Item::Thread(section, row) | Item::Found(section, row) => {
                 let found = matches!(item, Item::Found(..));
                 match self.thread(section, row).cloned() {
-                    Some(thread) => self.render_thread(index, thread, found, window, cx),
+                    Some(thread) => self.render_thread(index, thread, found, None, window, cx),
                     None => div().into_any_element(),
                 }
             }
-            Item::Empty(_) => row_note("Nothing active. Settled threads are below."),
+            Item::Message(row) => match self.messages.matches.get(row).cloned() {
+                Some(found) => {
+                    let snippet = found.snippet.clone();
+                    self.render_thread(index, found.thread, true, Some(snippet), window, cx)
+                }
+                None => div().into_any_element(),
+            },
+            Item::MessagesHeader => div()
+                .px_2()
+                .pt_2()
+                .pb_0p5()
+                .child(
+                    Label::new("In messages")
+                        .size(LabelSize::XSmall)
+                        .weight(FontWeight::SEMIBOLD)
+                        .color(Color::Muted),
+                )
+                .into_any_element(),
+            Item::SearchingMessages => row_note("Searching messages…"),
+            Item::MessageSearchFailed => row_note("Couldn't search the threads' messages."),
+            Item::Empty(Section::Pinned) => self
+                .drop_zone(
+                    div()
+                        .id(("empty", index))
+                        .mx_1()
+                        .px_2()
+                        .py_1()
+                        .rounded(scaled(tokens::CONTROL_RADIUS))
+                        .border_1()
+                        .border_dashed()
+                        .border_color(palette(cx).border.hsla())
+                        .child(
+                            Label::new("Drop here to pin")
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        ),
+                    index,
+                    cx,
+                )
+                .into_any_element(),
+            Item::Empty(_) => self
+                .drop_zone(
+                    div().id(("empty", index)).px_3().py_1().child(
+                        Label::new("Nothing active. Settled threads are below.")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    ),
+                    index,
+                    cx,
+                )
+                .into_any_element(),
             Item::MoreSettled => {
                 let hidden = self.list.settled.len().saturating_sub(self.settled_shown);
                 div()
@@ -941,17 +1884,18 @@ impl ThreadsSidebar {
         }
     }
 
-    fn render_header(&self, section: Section, cx: &mut Context<Self>) -> AnyElement {
+    fn render_header(&self, index: usize, section: Section, cx: &mut Context<Self>) -> AnyElement {
         let count = self.list.section(section).len();
         let folds = section.folds();
         let folded = folds && self.folded.contains(&section);
-        h_flex()
+        let header = h_flex()
             .id(SharedString::from(format!("section-{}", section.label())))
             .w_full()
             .h(scaled(px(26.)))
             .px_2()
             .pt_1()
-            .gap_1()
+            .gap_1();
+        self.drop_zone(header, index, cx)
             .when(folds, |this| {
                 this.cursor_pointer()
                     .on_click(cx.listener(move |this, _, _, cx| this.toggle_fold(section, cx)))
@@ -979,11 +1923,14 @@ impl ThreadsSidebar {
             .into_any_element()
     }
 
+    /// A thread's row. `snippet`, for a message match, takes the place of its project and
+    /// branch.
     fn render_thread(
         &self,
         index: usize,
         thread: ThreadEntry,
         found: bool,
+        snippet: Option<String>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1005,6 +1952,21 @@ impl ThreadsSidebar {
         if found {
             details = format!("{} · {details}", thread.section.label());
         }
+        let details_line = match snippet {
+            Some(snippet) => {
+                let highlighted = highlights(&snippet, &self.messages.query);
+                HighlightedLabel::new(snippet, highlighted)
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted)
+                    .truncate()
+                    .into_any_element()
+            }
+            None => Label::new(details)
+                .size(LabelSize::XSmall)
+                .color(Color::Muted)
+                .truncate()
+                .into_any_element(),
+        };
         let snoozed = thread
             .snoozed_until
             .as_deref()
@@ -1012,10 +1974,17 @@ impl ThreadsSidebar {
             .and_then(|until| wake_label(until, now()));
         let group = SharedString::from(format!("thread-row-{index}"));
         let can_write = organize::blocked_reason(cx).is_none();
+        let pull_request = thread.pull_request.clone();
         let action_thread = thread.clone();
         let menu_thread = thread.clone();
         let open_thread = thread.clone();
-        div()
+        // Rows drag to reorder, except in search results.
+        let dragged = (can_write && !found).then(|| DraggedThread {
+            id: thread.id.clone(),
+            title: thread.title.clone().into(),
+        });
+        let sidebar = cx.entity().downgrade();
+        let row = div()
             .id(("thread", index))
             .group(group.clone())
             .w_full()
@@ -1026,7 +1995,24 @@ impl ThreadsSidebar {
             .cursor_pointer()
             .when(active, |this| this.bg(palette.accent_soft.hsla()))
             .hover(|style| style.bg(palette.surface_2.hsla()))
-            .on_click(cx.listener(move |this, _, window, cx| this.open(&open_thread, window, cx)))
+            .when_some(dragged, |this, dragged| {
+                this.on_drag(dragged, move |dragged, _, _, cx| {
+                    let thread_id = dragged.id.clone();
+                    let sidebar = sidebar.clone();
+                    cx.defer(move |cx| {
+                        sidebar
+                            .update(cx, |sidebar, cx| sidebar.start_drag(&thread_id, cx))
+                            .ok();
+                    });
+                    cx.new(|_| dragged.clone())
+                })
+            });
+        let row = if found {
+            row
+        } else {
+            self.drop_zone(row, index, cx)
+        };
+        row.on_click(cx.listener(move |this, _, window, cx| this.open(&open_thread, window, cx)))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -1085,14 +2071,10 @@ impl ThreadsSidebar {
                         h_flex()
                             .gap_1p5()
                             .pl(scaled(px(12.)))
-                            .child(
-                                div().flex_1().min_w_0().child(
-                                    Label::new(details)
-                                        .size(LabelSize::XSmall)
-                                        .color(Color::Muted)
-                                        .truncate(),
-                                ),
-                            )
+                            .child(div().flex_1().min_w_0().child(details_line))
+                            .when_some(pull_request, |this, pull_request| {
+                                this.child(pull_request_chip(index, &pull_request, cx))
+                            })
                             .when_some(snoozed, |this, until| {
                                 this.child(
                                     h_flex()
@@ -1168,6 +2150,36 @@ impl ThreadsSidebar {
     }
 }
 
+/// A row's pull request: its number, in its state's color, with its title and state on hover
+/// (T3's `ThreadSearchPullRequestNumber` and the sidebar's PR indicator).
+fn pull_request_chip(index: usize, pull_request: &RowPullRequest, cx: &App) -> AnyElement {
+    let color = pull_request.color(cx);
+    let tooltip = match &pull_request.title {
+        Some(title) => format!(
+            "#{} {title} ({})",
+            pull_request.number,
+            pull_request.state_label()
+        ),
+        None => format!("Pull request #{}", pull_request.number),
+    };
+    h_flex()
+        .id(("thread-pull-request", index))
+        .flex_none()
+        .gap_0p5()
+        .child(
+            Icon::new(IconName::PullRequest)
+                .size(IconSize::XSmall)
+                .color(Color::Custom(color)),
+        )
+        .child(
+            Label::new(format!("#{}", pull_request.number))
+                .size(LabelSize::XSmall)
+                .color(Color::Custom(color)),
+        )
+        .tooltip(Tooltip::text(tooltip))
+        .into_any_element()
+}
+
 /// When a snoozed thread wakes, briefly (`snoozeWakeLabel`): in minutes, hours, or days.
 fn wake_label(until: &str, now: OffsetDateTime) -> Option<String> {
     let remaining = millis(Some(until))? - now.unix_timestamp_nanos() / 1_000_000;
@@ -1196,6 +2208,10 @@ impl Render for ThreadsSidebar {
         if self.rem_size != window.rem_size() {
             self.rem_size = window.rem_size();
             self.list_state.remeasure();
+        }
+        // A drag let go outside the list drops nothing.
+        if self.dragging.is_some() && !cx.has_active_drag() {
+            cx.defer_in(window, |this, _, cx| this.end_drag(cx));
         }
         let palette = palette(cx);
         let shells = self.shells.read(cx);
@@ -1257,6 +2273,14 @@ impl Render for ThreadsSidebar {
                     })
                     .child(div().flex_1())
                     .child(self.render_project_filter(cx))
+                    .child(
+                        IconButton::new("archived-threads", IconName::Archive)
+                            .icon_size(IconSize::Small)
+                            .tooltip(Tooltip::text("Archived threads"))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(ShowArchivedThreads), cx)
+                            }),
+                    )
                     .child(
                         IconButton::new("add-project", IconName::FolderAdd)
                             .icon_size(IconSize::Small)
