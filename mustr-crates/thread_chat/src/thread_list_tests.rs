@@ -1181,6 +1181,15 @@ fn search_fixture() -> Arc<Recorder> {
             "Release notes",
             json!({ "settledOverride": "settled", "settledAt": "2026-10-27T08:00:00.000Z" }),
         ),
+        thread("d", "Tidy the logs", json!({})),
+        // A subagent of d, with no row of its own.
+        thread(
+            "d-child",
+            "Worker",
+            json!({ "lineage": {
+                "rootThreadId": "d", "parentThreadId": "d", "relationshipToParent": "subagent"
+            }}),
+        ),
     ]);
     let found = |thread_id: &str, snippet: &str, quality: f64, hits: i64, at: &str| {
         json!({
@@ -1196,6 +1205,7 @@ fn search_fixture() -> Arc<Recorder> {
             found("c", "retry the webhook once", 1.0, 1, "2026-10-27T09:00:00.000Z"),
             found("gone", "an archived thread", 1.0, 1, "2026-10-27T09:00:00.000Z"),
             found("b", "a weaker match of the same thread", 0.3, 1, "2026-10-27T11:00:00.000Z"),
+            found("d-child", "the subagent retried the webhook", 0.8, 1, "2026-10-27T08:00:00.000Z"),
         ]}),
     );
     backend
@@ -1223,9 +1233,16 @@ async fn search_lists_message_matches_after_title_matches(cx: &mut TestAppContex
         [(json!({ "query": "webhook retry" }), Access::Read)]
     );
     // Best first, each thread once, and none the title search found or the list doesn't have.
+    // A subagent's match shows on its parent's row.
     assert_eq!(
         rows(&sidebar, cx),
-        ["found:a", "In messages", "message:c", "message:b"]
+        [
+            "found:a",
+            "In messages",
+            "message:c",
+            "message:b",
+            "message:d"
+        ]
     );
 
     // Words under three letters can't match messages, so T3 isn't asked.

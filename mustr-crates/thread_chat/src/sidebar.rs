@@ -747,18 +747,31 @@ pub(crate) fn message_query(query: &str) -> Option<String> {
 
 /// The threads whose messages match, best first (`rankMessageMatches`): matches of whole words
 /// or word starts first, then by quality, by how many messages match, and by how new the
-/// message is. A thread found by title already isn't repeated, nor is any thread twice, and
-/// threads the list doesn't have (archived ones, subagents, other projects when filtered) are
-/// left out.
-pub(crate) fn rank_message_matches(
+/// message is. A subagent has no row, so its match is its nearest ancestor's (`parent_of` gives
+/// a thread's parent). A thread found by title already isn't repeated, nor is any thread twice,
+/// and threads the list doesn't have (archived ones, other projects when filtered) are left out.
+pub(crate) fn rank_message_matches<'a>(
     matches: &[t3_api::types::OrchestrationThreadSearchMatch],
-    list: &ThreadList,
+    list: &'a ThreadList,
     found_by_title: &HashSet<&str>,
+    parent_of: impl Fn(&str) -> Option<String>,
 ) -> Vec<MessageMatch> {
+    /// How far up a subagent's lineage its row is looked for.
+    const MAX_DEPTH: usize = 8;
+    let row_of = |thread_id: &str| -> Option<&'a ThreadEntry> {
+        let mut thread_id = thread_id.to_string();
+        for _ in 0..MAX_DEPTH {
+            if let Some(entry) = list.find(&thread_id) {
+                return Some(entry);
+            }
+            thread_id = parent_of(&thread_id)?;
+        }
+        None
+    };
     let mut ranked = matches
         .iter()
-        .filter(|found| !found_by_title.contains(found.thread_id.as_str()))
-        .filter_map(|found| Some((found, list.find(&found.thread_id)?)))
+        .filter_map(|found| Some((found, row_of(&found.thread_id)?)))
+        .filter(|(_, thread)| !found_by_title.contains(thread.id.as_str()))
         .collect::<Vec<_>>();
     ranked.sort_by(|(left, _), (right, _)| {
         let quality =
@@ -773,7 +786,7 @@ pub(crate) fn rank_message_matches(
     let mut seen = HashSet::default();
     ranked
         .into_iter()
-        .filter(|(found, _)| seen.insert(found.thread_id.clone()))
+        .filter(|(_, thread)| seen.insert(thread.id.clone()))
         .take(MESSAGE_MATCH_LIMIT)
         .map(|(found, thread)| MessageMatch {
             thread: thread.clone(),
@@ -1691,7 +1704,16 @@ impl ThreadsSidebar {
                 .into_iter()
                 .map(|thread| thread.id.as_str())
                 .collect::<HashSet<_>>();
-            rank_message_matches(&self.messages.raw, &self.list, &found)
+            let shell = self.shells.read(cx).shell();
+            let parent_of = |thread_id: &str| {
+                shell?
+                    .threads
+                    .get(thread_id)?
+                    .lineage
+                    .parent_thread_id
+                    .clone()
+            };
+            rank_message_matches(&self.messages.raw, &self.list, &found, parent_of)
         };
         self.generation += 1;
         let items = self.items_for_list();
