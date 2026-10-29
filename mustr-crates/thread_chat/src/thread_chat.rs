@@ -68,9 +68,11 @@ pub use snooze::SnoozeThread;
 // WP14, agent setup and T3's settings:
 // WP17, threads, creation and navigation:
 pub mod bulk;
+mod details;
 mod launch;
 pub mod palette;
 pub use bulk::DeleteThread;
+pub use details::ShowThreadDetails;
 pub use launch::StartInBackground;
 #[cfg(test)]
 mod creation_tests;
@@ -135,6 +137,7 @@ pub fn init(cx: &mut App) {
     palette::init(cx);
     launch::init(cx);
     bulk::init(cx);
+    details::init(cx);
 }
 
 /// mustr's key bindings for threads. The app binds them after Zed's, so users can rebind them:

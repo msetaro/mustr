@@ -1469,6 +1469,13 @@ pub(crate) fn thread_menu(
         if let Some(pull_request) = &thread.pull_request {
             menu = menu.item(copy("Copy PR Link", pull_request.url.clone()));
         }
+        // WP17: the thread's details (`details.rs`).
+        menu = menu.item({
+            let (id, workspace) = (id.clone(), workspace.clone());
+            entry("Thread Details…", IconName::Info).handler(move |window, cx| {
+                crate::details::show_details(&id, workspace.clone(), window, cx)
+            })
+        });
         let delete_id = id.clone();
         menu.separator()
             .item({

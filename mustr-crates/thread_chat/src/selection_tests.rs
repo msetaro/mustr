@@ -305,3 +305,45 @@ async fn mod_z_in_an_empty_composer_undoes_a_settle(cx: &mut TestAppContext) {
     });
     assert_eq!(composer_text, Some(String::new()));
 }
+
+#[gpui::test]
+async fn thread_details_show_where_and_how_it_works(cx: &mut TestAppContext) {
+    let backend = recorder();
+    let (workspace, cx) = workspace(backend, cx).await;
+    open(&workspace, "c", cx);
+    cx.dispatch_action(crate::ShowThreadDetails);
+    cx.run_until_parked();
+    let details = workspace.read_with(cx, |workspace, cx| {
+        workspace
+            .active_modal::<crate::details::ThreadDetailsModal>(cx)
+            .map(|modal| modal.read(cx).details().clone())
+    });
+    // When, relative to the clock.
+    let details = details.map(|details| {
+        assert!(details.created.as_deref().unwrap().ends_with(" ago"));
+        crate::details::ThreadDetails {
+            created: None,
+            updated: None,
+            ..details
+        }
+    });
+    assert_eq!(
+        details,
+        Some(crate::details::ThreadDetails {
+            id: "c".into(),
+            title: "Charlie".into(),
+            project: Some("api".into()),
+            path: Some("/wt/charlie".into()),
+            in_worktree: true,
+            branch: Some("t3/retries".into()),
+            // Without the server config's agents, their ids.
+            model: "claude-opus-4-7 · claudeAgent".into(),
+            permission_mode: "Full access".into(),
+            status: None,
+            created: None,
+            updated: None,
+            pull_request: None,
+            parent: None,
+        })
+    );
+}

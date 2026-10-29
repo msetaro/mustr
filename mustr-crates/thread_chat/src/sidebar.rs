@@ -2241,6 +2241,14 @@ impl ThreadsSidebar {
                     cx.new(|_| dragged.clone())
                 })
             });
+        // T3's hover card, built when it shows (`details.rs`).
+        let hover_thread = thread.clone();
+        let row = row.tooltip(move |_, cx| {
+            let details = crate::details::thread_details(&hover_thread.id, now(), cx)
+                .unwrap_or_else(|| crate::details::ThreadDetails::of_row(&hover_thread));
+            cx.new(|_| crate::details::ThreadHoverCard { details })
+                .into()
+        });
         let row = if found {
             row
         } else {
