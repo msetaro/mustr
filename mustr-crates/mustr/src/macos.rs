@@ -12,30 +12,30 @@ use objc2_foundation::{NSAttributedString, NSData, NSDictionary, NSString};
 use std::path::Path;
 use workspace::Workspace;
 
-// Copied from crates/zed/src/zed.rs. These are declared in Zed's `zed` namespace, which mustr's
-// binary doesn't link, so Zed's macOS keymap binds them (cmd-h, alt-cmd-h, cmd-m) and the app
-// menu shows those shortcuts.
-gpui::actions!(
-    zed,
-    [
-        /// Hides mustr.
-        Hide,
-        /// Hides all other applications.
-        HideOthers,
-        /// Shows all hidden applications.
-        ShowAll,
-        /// Minimizes the current window.
-        Minimize,
-        /// Zooms the current window.
-        Zoom,
-    ]
-);
-
+// Copied from crates/zed/src/zed.rs, which declares them in Zed's `zed` namespace. mustr's binary
+// doesn't link that crate, so the names in Zed's namespace are their aliases: Zed's macOS keymap
+// binds them (cmd-h, alt-cmd-h, cmd-m), and the app menu shows those shortcuts, while the command
+// palette lists them under mustr's name ("mustr: hide", not "zed: hide").
 gpui::actions!(
     mustr,
     [
         /// Shows mustr's version in the standard About panel.
         About,
+        /// Hides mustr.
+        #[action(deprecated_aliases = ["zed::Hide"])]
+        Hide,
+        /// Hides all other applications.
+        #[action(deprecated_aliases = ["zed::HideOthers"])]
+        HideOthers,
+        /// Shows all hidden applications.
+        #[action(deprecated_aliases = ["zed::ShowAll"])]
+        ShowAll,
+        /// Minimizes the current window.
+        #[action(deprecated_aliases = ["zed::Minimize"])]
+        Minimize,
+        /// Zooms the current window.
+        #[action(deprecated_aliases = ["zed::Zoom"])]
+        Zoom,
     ]
 );
 

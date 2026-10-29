@@ -1,7 +1,8 @@
 use crate::{app_settings::INITIAL_SETTINGS, home::HomeView, nav_panel::NavPanel};
 use gpui::{
-    App, AppContext as _, Context, Entity, Global, Menu, MenuItem, OsAction, PromptLevel,
-    TaskExt as _, TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions, px,
+    App, AppContext as _, Context, Entity, Global, KeyBinding, Menu, MenuItem, OsAction,
+    PromptLevel, TaskExt as _, TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions,
+    px,
 };
 use review::{OpenThreadChat, ToggleFileTree};
 use settings::{Settings as _, SettingsStore};
@@ -18,7 +19,18 @@ use workspace::{
     AppState, CloseWindow, MultiWorkspace, OpenOptions, Pane, Workspace, WorkspaceSettings,
     create_and_open_local_file, with_active_or_new_workspace,
 };
-use zed_actions::{OpenKeymapFile, OpenSettings, OpenSettingsFile, Quit};
+
+gpui::actions!(
+    mustr,
+    [
+        /// Opens mustr's settings file.
+        OpenSettings,
+        /// Opens mustr's key bindings file.
+        OpenKeyBindings,
+        /// Quits mustr.
+        Quit,
+    ]
+);
 
 /// The Wayland app ID and X11 `WM_CLASS`. It must match the `.desktop` file name.
 const APP_ID: &str = "dev.mustr.mustr";
@@ -26,19 +38,28 @@ const APP_ID: &str = "dev.mustr.mustr";
 const INITIAL_KEYMAP: &str =
     "// mustr key bindings\n//\n// mustr uses Zed's keymap format.\n[\n]\n";
 
-pub fn init(cx: &mut App) {
-    cx.on_action(quit)
-        .on_action(|_: &OpenSettingsFile, cx| {
-            open_config_file(paths::settings_file(), INITIAL_SETTINGS, cx)
-        })
+/// Handles the app's own actions: settings, key bindings and quit.
+pub(crate) fn register_app_actions(cx: &mut App) {
+    let open_settings =
+        |cx: &mut App| open_config_file(paths::settings_file(), INITIAL_SETTINGS, cx);
+    let open_key_bindings =
+        |cx: &mut App| open_config_file(paths::keymap_file(), INITIAL_KEYMAP, cx);
+    // mustr's own actions, so the command palette doesn't list them under Zed's name ("zed: open
+    // settings"). Zed's stay handled, for its key bindings and for Zed's code that dispatches
+    // them, and are hidden from the palette (`hidden_actions.rs`).
+    cx.on_action(move |_: &OpenSettings, cx| open_settings(cx))
+        .on_action(move |_: &OpenKeyBindings, cx| open_key_bindings(cx))
+        .on_action(|_: &Quit, cx| quit(cx))
+        .on_action(|_: &zed_actions::Quit, cx| quit(cx))
+        .on_action(move |_: &zed_actions::OpenSettingsFile, cx| open_settings(cx))
         // Zed's keymaps bind its settings editor to cmd-, (ctrl-, on Linux). mustr's settings
         // are its settings file.
-        .on_action(|_: &OpenSettings, cx| {
-            open_config_file(paths::settings_file(), INITIAL_SETTINGS, cx)
-        })
-        .on_action(|_: &OpenKeymapFile, cx| {
-            open_config_file(paths::keymap_file(), INITIAL_KEYMAP, cx)
-        });
+        .on_action(move |_: &zed_actions::OpenSettings, cx| open_settings(cx))
+        .on_action(move |_: &zed_actions::OpenKeymapFile, cx| open_key_bindings(cx));
+}
+
+pub fn init(cx: &mut App) {
+    register_app_actions(cx);
 
     // Copied from crates/zed/src/zed.rs (`initialize_workspace`). Reading the old
     // value keeps rustc's unused-assignment lint from firing on the reassignment.
@@ -245,14 +266,10 @@ pub fn app_menus() -> Vec<Menu> {
             #[cfg(target_os = "macos")]
             MenuItem::separator(),
             MenuItem::action("Settings…", OpenSettings),
-            MenuItem::action("Key Bindings…", OpenKeymapFile),
+            MenuItem::action("Key Bindings…", OpenKeyBindings),
             MenuItem::action(
                 "Select Theme…",
                 zed_actions::theme_selector::Toggle::default(),
-            ),
-            MenuItem::action(
-                "Select Icon Theme…",
-                zed_actions::icon_theme_selector::Toggle::default(),
             ),
             MenuItem::separator(),
             #[cfg(target_os = "macos")]
@@ -355,8 +372,16 @@ fn add_toolbar_items(
 
 static WAITING_QUIT_CONFIRMATION: AtomicBool = AtomicBool::new(false);
 
+/// The key bindings of mustr's app actions: Zed's keys for Zed's actions they stand in for.
+pub fn key_bindings() -> Vec<KeyBinding> {
+    vec![
+        KeyBinding::new("secondary-,", OpenSettings, None),
+        KeyBinding::new("secondary-q", Quit, None),
+    ]
+}
+
 // Copied from crates/zed/src/zed.rs (`quit`).
-fn quit(_: &Quit, cx: &mut App) {
+fn quit(cx: &mut App) {
     if WAITING_QUIT_CONFIRMATION.load(Ordering::Acquire) {
         return;
     }
@@ -437,9 +462,9 @@ mod tests {
     use super::*;
     use gpui::{Action, Keystroke, TestAppContext};
 
-    /// The app menu shows the shortcuts Zed's default keymap binds to its actions, so mustr has
-    /// to register the actions that keymap names: cmd-, (ctrl-, on Linux) opens the settings, and
-    /// on macOS cmd-h, alt-cmd-h, and cmd-m hide and minimize.
+    /// The app menu shows the shortcuts of its actions: mustr binds its settings and quit to
+    /// Zed's keys for them, cmd-, and cmd-q (ctrl- on Linux), and on macOS Zed's keymap binds
+    /// cmd-h, alt-cmd-h, and cmd-m to hide and minimize, by their old names in Zed's namespace.
     #[gpui::test]
     fn zeds_keymap_binds_the_app_menus_shortcuts(cx: &mut TestAppContext) {
         cx.update(|cx| {
