@@ -3,7 +3,9 @@
 //! mode, and plan mode, as T3's composer footer has them (`ProviderModelPicker.tsx`,
 //! `TraitsPicker.tsx`, `ComposerFooterControls.tsx` in T3). On an open thread a pick changes the
 //! thread at once (`thread.model-selection.set`, `thread.runtime-mode.set`,
-//! `thread.interaction-mode.set`); on a draft it changes what the thread launches with.
+//! `thread.interaction-mode.set`); on a draft it changes what the thread launches with. On a
+//! draft in a git project, shift-clicking models picks several, to start a thread with each
+//! (`launch.rs`), as T3's model picker does.
 
 use crate::{
     backend::ThreadBackend,
@@ -17,9 +19,9 @@ use crate::{
     thread_view::ThreadView,
 };
 use gpui::{
-    Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, ElementId, Entity, IntoElement,
-    MouseButton, ParentElement as _, Render, RenderOnce, SharedString, Styled as _, Task,
-    WeakEntity, Window, actions, div, px,
+    Anchor, AnyElement, App, ClickEvent, Context, CursorStyle, DismissEvent, ElementId, Entity,
+    IntoElement, MouseButton, ParentElement as _, Render, RenderOnce, SharedString, Styled as _,
+    Task, WeakEntity, Window, actions, div, px,
 };
 use mustr_ui::{palette, tokens, tokens::scaled};
 use std::{rc::Rc, sync::Arc};
@@ -358,6 +360,18 @@ fn draft_settings(form: Entity<NewThreadForm>, cx: &App) -> Settings {
     let draft = form.read(cx);
     let agents = draft.agents().map(<[_]>::to_vec).unwrap_or_default();
     let selected = draft.model();
+    let several = draft.several_models().map(|picks| {
+        picks
+            .iter()
+            .map(|pick| {
+                agents
+                    .iter()
+                    .find(|agent| agent.instance_id == pick.instance_id)
+                    .and_then(|agent| agent.model(&pick.slug))
+                    .map_or_else(|| pick.slug.clone(), |model| model.name.clone())
+            })
+            .collect::<Vec<_>>()
+    });
     let agent = selected.map(|(agent, _)| agent.clone());
     let runtime_modes = agent
         .as_ref()
@@ -366,13 +380,20 @@ fn draft_settings(form: Entity<NewThreadForm>, cx: &App) -> Settings {
     Settings {
         instance_id: selected.map(|(agent, _)| agent.instance_id.clone()),
         model_slug: selected.map(|(_, model)| model.slug.clone()),
-        model_name: selected.map_or_else(
-            || match draft.agents() {
-                None => "Loading models…".to_string(),
-                Some(_) => "No model".to_string(),
-            },
-            |(_, model)| model.name.clone(),
-        ),
+        model_name: match &several {
+            // T3's label for several: the first two, and how many more.
+            Some(names) if names.len() > 2 => {
+                format!("{}, {} more", names[..2].join(", "), names.len() - 2)
+            }
+            Some(names) => names.join(", "),
+            None => selected.map_or_else(
+                || match draft.agents() {
+                    None => "Loading models…".to_string(),
+                    Some(_) => "No model".to_string(),
+                },
+                |(_, model)| model.name.clone(),
+            ),
+        },
         options: draft.resolved_options(),
         picked: Vec::new(),
         runtime_mode: draft.runtime_mode(),
@@ -580,7 +601,9 @@ impl Render for ThreadSettingsBar {
     }
 }
 
-/// The models of every agent, under the agent's name, as T3's model picker groups them.
+/// The models of every agent, under the agent's name, as T3's model picker groups them. On a
+/// draft that can start several threads, a shift-click adds a model or takes it out, and the
+/// menu stays open.
 fn model_menu(
     settings: &Settings,
     bar: WeakEntity<ThreadSettingsBar>,
@@ -592,7 +615,33 @@ fn model_menu(
     let current_model = settings.model_slug.clone();
     let agent_locked = settings.agent_locked;
     let model_locked = settings.model_locked;
-    ContextMenu::build(window, cx, move |mut menu, _, _| {
+    let draft = match &settings.target {
+        Target::Draft(form) => Some(form.clone()),
+        Target::Thread { .. } => None,
+    };
+    let is_draft = draft.is_some();
+    let build = move |mut menu: ContextMenu, _: &mut Window, cx: &mut Context<ContextMenu>| {
+        // Read again on every rebuild, as shift-clicks change them.
+        let several = draft.as_ref().and_then(|form| {
+            form.read(cx).several_models().map(|picks| {
+                picks
+                    .iter()
+                    .map(|pick| (pick.instance_id.clone(), pick.slug.clone()))
+                    .collect::<Vec<_>>()
+            })
+        });
+        let can_start_several = draft
+            .as_ref()
+            .is_some_and(|form| form.read(cx).can_start_several());
+        let (current_agent, current_model) = match &draft {
+            Some(form) => form
+                .read(cx)
+                .model()
+                .map(|(agent, model)| (Some(agent.instance_id.clone()), Some(model.slug.clone())))
+                .unwrap_or_default(),
+            None => (current_agent.clone(), current_model.clone()),
+        };
+        let this_menu = cx.weak_entity();
         for (index, agent) in agents.iter().enumerate() {
             if index > 0 {
                 menu = menu.separator();
@@ -600,7 +649,12 @@ fn model_menu(
             let same_agent = current_agent.as_deref() == Some(agent.instance_id.as_str());
             menu = menu.header(agent.name.clone());
             for model in &agent.models {
-                let selected = same_agent && current_model.as_deref() == Some(model.slug.as_str());
+                let selected = match &several {
+                    Some(picks) => picks.iter().any(|(instance_id, slug)| {
+                        *instance_id == agent.instance_id && *slug == model.slug
+                    }),
+                    None => same_agent && current_model.as_deref() == Some(model.slug.as_str()),
+                };
                 let disabled = !selected
                     && if same_agent {
                         model_locked.is_some()
@@ -608,6 +662,8 @@ fn model_menu(
                         agent_locked.is_some()
                     };
                 let bar = bar.clone();
+                let draft = draft.clone();
+                let this_menu = this_menu.clone();
                 let instance_id = agent.instance_id.clone();
                 let slug = model.slug.clone();
                 menu = menu.toggleable_entry_disabled_when(
@@ -616,11 +672,23 @@ fn model_menu(
                     disabled,
                     ui::IconPosition::End,
                     None,
-                    move |_, cx| {
-                        bar.update(cx, |bar, cx| {
-                            bar.pick_model(instance_id.clone(), slug.clone(), cx)
-                        })
-                        .ok();
+                    move |window, cx| {
+                        let (instance_id, slug) = (instance_id.clone(), slug.clone());
+                        let Some(form) = &draft else {
+                            bar.update(cx, |bar, cx| bar.pick_model(instance_id, slug, cx))
+                                .ok();
+                            return;
+                        };
+                        if can_start_several && window.modifiers().shift {
+                            form.update(cx, |form, cx| form.toggle_model(instance_id, slug, cx));
+                            return;
+                        }
+                        form.update(cx, |form, cx| form.pick_model(instance_id, slug, cx));
+                        // The menu stays open for shift-clicks; a click closes it.
+                        let this_menu = this_menu.clone();
+                        cx.defer(move |cx| {
+                            this_menu.update(cx, |_, cx| cx.emit(DismissEvent)).ok();
+                        });
                     },
                 );
             }
@@ -628,8 +696,18 @@ fn model_menu(
         for reason in [agent_locked, model_locked].into_iter().flatten() {
             menu = menu.separator().label(reason);
         }
+        if can_start_several {
+            menu = menu
+                .separator()
+                .label("Shift-click to start a thread with each of several models.");
+        }
         menu
-    })
+    };
+    if is_draft {
+        ContextMenu::build_persistent(window, cx, build)
+    } else {
+        ContextMenu::build(window, cx, build)
+    }
 }
 
 /// The model's options: each choice under its label, and each switch as On and Off, as T3's

@@ -67,9 +67,11 @@ pub use sidebar::{NextThread, PreviousThread, RowPullRequest};
 pub use snooze::SnoozeThread;
 // WP14, agent setup and T3's settings:
 // WP17, threads, creation and navigation:
+mod launch;
+pub mod palette;
+pub use launch::StartInBackground;
 #[cfg(test)]
 mod creation_tests;
-pub mod palette;
 pub use palette::{
     CopyThreadId, FindInThread, NewThreadInProject, NewThreadWithoutProject, PaletteResult,
     palette_results,
@@ -127,6 +129,7 @@ pub fn init(cx: &mut App) {
     thread_settings::FollowUpBehavior::load(cx);
     // WP17, threads, creation and navigation:
     palette::init(cx);
+    launch::init(cx);
 }
 
 /// mustr's key bindings for threads. The app binds them after Zed's, so users can rebind them:
@@ -198,7 +201,10 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-z", UndoThreadAction, Some("ThreadView")),
         KeyBinding::new("secondary-z", UndoThreadAction, Some("ThreadsSidebar")),
         // WP14, agent setup and T3's settings:
-        // WP17, threads, creation and navigation:
+        // WP17, threads, creation and navigation: T3's `mod+Enter` and `mod+alt+Enter` start a
+        // draft's thread in the background. On other threads they go on to Send.
+        KeyBinding::new("secondary-enter", StartInBackground, composer),
+        KeyBinding::new("secondary-alt-enter", StartInBackground, composer),
     ]
 }
 

@@ -1,9 +1,11 @@
-//! Tests of starting threads (WP17): the palette's new threads, against a recording backend
-//! that asserts the exact payloads T3 would get. Nothing here launches a real thread.
+//! Tests of starting threads (WP17): the palette's new threads, starting in the background, and
+//! one prompt for several models, against a recording backend that asserts the exact payloads T3
+//! would get. Nothing here launches a real thread.
 
 use crate::{
-    NewThreadInProject, NewThreadWithoutProject, SendMessage, ThreadView,
+    NewThreadInProject, NewThreadWithoutProject, SendMessage, StartInBackground, ThreadView,
     backend::{Access, AttachmentUpload, ThreadBackend},
+    launch::StartedToast,
     shell::ThreadShells,
 };
 use anyhow::{Result, anyhow};
@@ -29,7 +31,7 @@ use t3_api::{
         OrchestrationV2ThreadLaunchResult, ServerProvider,
     },
 };
-use workspace::{MultiWorkspace, Workspace};
+use workspace::{MultiWorkspace, Workspace, notifications::NotificationId};
 
 const NOW: &str = "2026-10-27T12:00:00.000Z";
 
@@ -188,6 +190,24 @@ impl Recorder {
             .iter()
             .filter(|(called, _, _)| called == tag)
             .map(|(_, payload, access)| (payload.clone(), *access))
+            .collect()
+    }
+
+    /// The commands sent, without their fresh ids.
+    pub(crate) fn commands(&self) -> Vec<Value> {
+        self.commands
+            .lock()
+            .iter()
+            .map(|command| {
+                let mut command = serde_json::to_value(command).unwrap();
+                let id = command
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("commandId")
+                    .unwrap();
+                assert!(uuid::Uuid::parse_str(id.as_str().unwrap()).is_ok());
+                command
+            })
             .collect()
     }
 
@@ -385,6 +405,16 @@ fn type_message(view: &Entity<ThreadView>, text: &str, cx: &mut VisualTestContex
     cx.run_until_parked();
 }
 
+fn composer_text(view: &Entity<ThreadView>, cx: &mut VisualTestContext) -> String {
+    view.read_with(cx, |view, cx| view.composer().read(cx).text(cx))
+}
+
+fn has_started_toast(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) -> bool {
+    workspace.read_with(cx, |workspace, _| {
+        workspace.has_notification(&NotificationId::unique::<StartedToast>())
+    })
+}
+
 // The palette.
 
 fn palette(
@@ -520,4 +550,240 @@ async fn the_palette_copies_the_thread_id_and_finds_in_it(cx: &mut TestAppContex
         cx.read_from_clipboard().and_then(|item| item.text()),
         Some("thread-web".to_string())
     );
+}
+
+// Starting in the background.
+
+#[gpui::test]
+async fn starting_in_the_background_keeps_the_draft(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let draft = new_draft(&workspace, cx);
+    type_message(&draft, "Add retries to the webhook dispatcher", cx);
+    cx.simulate_keystrokes("ctrl-enter");
+    cx.run_until_parked();
+
+    assert_eq!(
+        backend.launches(),
+        [json!({
+            "creationSource": "web",
+            "projectId": "project-api",
+            "title": "Add retries to the webhook dispatcher",
+            "generateTitle": true,
+            // T3's default model, with its options' defaults left to T3.
+            "modelSelection": { "instanceId": "claudeAgent", "model": "claude-opus-4-7" },
+            "runtimeMode": "auto-accept-edits",
+            "interactionMode": "default",
+            "workspaceStrategy": { "type": "root" },
+            "initialMessage": { "text": "Add retries to the webhook dispatcher", "attachments": [] }
+        })]
+    );
+    // The draft is still open, empty, for the next thread; a toast offers the started one.
+    assert_eq!(active_view(&workspace, cx), draft);
+    assert!(draft.read_with(cx, |view, _| view.new_thread.is_some()
+        && view.error().is_none()));
+    assert_eq!(composer_text(&draft, cx), "");
+    assert!(has_started_toast(&workspace, cx));
+
+    // The same keys on a draft without a message send nothing.
+    cx.simulate_keystrokes("ctrl-enter");
+    cx.run_until_parked();
+    assert_eq!(backend.launches().len(), 1);
+
+    // On a thread that has started, they send the message, as before.
+    workspace.update_in(cx, |workspace, window, cx| {
+        ThreadView::open("thread-web".into(), "Fix".into(), workspace, window, cx)
+    });
+    cx.run_until_parked();
+    let thread = active_view(&workspace, cx);
+    type_message(&thread, "Also cap the delay", cx);
+    cx.simulate_keystrokes("ctrl-enter");
+    cx.run_until_parked();
+    let commands = backend.commands();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0]["type"], "message.dispatch");
+    assert_eq!(commands[0]["text"], "Also cap the delay");
+    assert_eq!(backend.launches().len(), 1);
+}
+
+#[gpui::test]
+async fn a_refused_background_start_keeps_the_prompt(cx: &mut TestAppContext) {
+    let backend = Recorder::with(true);
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let draft = new_draft(&workspace, cx);
+    type_message(&draft, "Add retries", cx);
+    cx.dispatch_action(StartInBackground);
+    cx.run_until_parked();
+    assert_eq!(composer_text(&draft, cx), "Add retries");
+    assert_eq!(
+        draft.read_with(cx, |view, _| view.error().cloned()),
+        Some("Not sent: read only.".into())
+    );
+    assert!(!has_started_toast(&workspace, cx));
+    // The next Enter is an ordinary send again, not a background one.
+    let form = draft
+        .read_with(cx, |view, _| view.new_thread.clone())
+        .unwrap();
+    assert!(!form.read_with(cx, |form, _| form.background));
+}
+
+// One prompt for several models.
+
+#[gpui::test]
+async fn several_models_start_a_thread_each_in_a_worktree(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let draft = new_draft(&workspace, cx);
+    let form = draft
+        .read_with(cx, |view, _| view.new_thread.clone())
+        .unwrap();
+    form.update(cx, |form, cx| {
+        form.pick_option(
+            "effort",
+            t3_api::types::ProviderOptionSelectionValue::String("low".into()),
+            cx,
+        );
+        // Shift-clicks in the model picker.
+        form.toggle_model("codex".into(), "gpt-5.5".into(), cx);
+        form.toggle_model("claudeAgent".into(), "claude-sonnet-4-6".into(), cx);
+        form.toggle_model("claudeAgent".into(), "claude-sonnet-4-6".into(), cx);
+        form.toggle_model("codex".into(), "gpt-5.5-mini".into(), cx);
+    });
+    let picked = |cx: &mut VisualTestContext| {
+        form.read_with(cx, |form, _| {
+            form.several_models().map(|picks| {
+                picks
+                    .iter()
+                    .map(|pick| pick.slug.clone())
+                    .collect::<Vec<_>>()
+            })
+        })
+    };
+    assert_eq!(
+        picked(cx),
+        Some(vec![
+            "claude-opus-4-7".to_string(),
+            "gpt-5.5".to_string(),
+            "gpt-5.5-mini".to_string()
+        ])
+    );
+    type_message(&draft, "Make the build faster", cx);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+
+    let launches = backend.launches();
+    assert_eq!(
+        launches
+            .iter()
+            .map(|launch| (
+                &launch["modelSelection"],
+                &launch["runtimeMode"],
+                &launch["workspaceStrategy"],
+                &launch["initialMessage"]["text"],
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                // The model picked first keeps its options.
+                &json!({
+                    "instanceId": "claudeAgent", "model": "claude-opus-4-7",
+                    "options": [{ "id": "effort", "value": "low" }]
+                }),
+                &json!("auto-accept-edits"),
+                // Each in a worktree of its own from the default branch, though the project's
+                // threads work in its checkout by default.
+                &json!({ "type": "worktree", "baseRef": "main", "startFromOrigin": false }),
+                &json!("Make the build faster"),
+            ),
+            (
+                &json!({ "instanceId": "codex", "model": "gpt-5.5" }),
+                // Codex can't auto-accept edits.
+                &json!("approval-required"),
+                &json!({ "type": "worktree", "baseRef": "main", "startFromOrigin": false }),
+                &json!("Make the build faster"),
+            ),
+            (
+                &json!({ "instanceId": "codex", "model": "gpt-5.5-mini" }),
+                &json!("approval-required"),
+                &json!({ "type": "worktree", "baseRef": "main", "startFromOrigin": false }),
+                &json!("Make the build faster"),
+            ),
+        ]
+    );
+    // The draft stays, with the models picked, for the next prompt.
+    assert_eq!(active_view(&workspace, cx), draft);
+    assert_eq!(composer_text(&draft, cx), "");
+    assert_eq!(picked(cx).map(|picks| picks.len()), Some(3));
+    assert!(has_started_toast(&workspace, cx));
+
+    // Down to one model, the draft starts one thread again, with that model.
+    form.update(cx, |form, cx| {
+        form.toggle_model("claudeAgent".into(), "claude-opus-4-7".into(), cx);
+        form.toggle_model("codex".into(), "gpt-5.5-mini".into(), cx);
+    });
+    assert_eq!(picked(cx), None);
+    assert_eq!(
+        form.read_with(cx, |form, _| form
+            .model()
+            .map(|(_, model)| model.slug.clone())),
+        Some("gpt-5.5".to_string())
+    );
+}
+
+#[gpui::test]
+async fn a_model_that_fails_stays_picked_with_the_prompt(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    backend.failing_models.lock().insert("gpt-5.5".into());
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let draft = new_draft(&workspace, cx);
+    let form = draft
+        .read_with(cx, |view, _| view.new_thread.clone())
+        .unwrap();
+    form.update(cx, |form, cx| {
+        form.toggle_model("codex".into(), "gpt-5.5".into(), cx)
+    });
+    type_message(&draft, "Make the build faster", cx);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+
+    assert_eq!(backend.launches().len(), 2);
+    assert_eq!(
+        draft.read_with(cx, |view, _| view.error().cloned()),
+        Some("Couldn't start GPT-5.5: gpt-5.5 is signed out".into())
+    );
+    // Only the one that failed is left picked, and the prompt stays to try again.
+    assert_eq!(composer_text(&draft, cx), "Make the build faster");
+    assert_eq!(
+        form.read_with(cx, |form, _| (
+            form.several_models().is_none(),
+            form.model().map(|(_, model)| model.slug.clone())
+        )),
+        (true, Some("gpt-5.5".to_string()))
+    );
+    // The one that started is offered in a toast.
+    assert!(has_started_toast(&workspace, cx));
+}
+
+#[gpui::test]
+async fn several_models_need_a_git_project(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let draft = new_draft(&workspace, cx);
+    let form = draft
+        .read_with(cx, |view, _| view.new_thread.clone())
+        .unwrap();
+    form.update(cx, |form, cx| form.select_scratch(cx));
+    cx.run_until_parked();
+    // Without a repository, a shift-click picks the model alone.
+    form.update(cx, |form, cx| {
+        assert!(!form.can_start_several());
+        form.toggle_model("codex".into(), "gpt-5.5".into(), cx);
+    });
+    assert!(form.read_with(cx, |form, _| form.several_models().is_none()));
+    type_message(&draft, "Sketch a CLI", cx);
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+    let launches = backend.launches();
+    assert_eq!(launches.len(), 1);
+    assert_eq!(launches[0]["modelSelection"]["model"], "gpt-5.5");
 }
