@@ -44,6 +44,7 @@ mod macos;
 // WP8, notifications:
 mod notifications;
 // WP11, terminals, worktrees and the PR flow:
+mod project_scripts;
 mod pull_request_details;
 mod pull_request_guide;
 mod remote_terminal;
