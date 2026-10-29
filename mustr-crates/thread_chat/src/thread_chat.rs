@@ -71,11 +71,13 @@ pub mod bulk;
 mod clone;
 mod details;
 mod launch;
+mod outside;
 pub mod palette;
 pub use bulk::DeleteThread;
 pub use clone::CloneRepository;
 pub use details::ShowThreadDetails;
 pub use launch::StartInBackground;
+pub use outside::ConnectOutsideAgent;
 #[cfg(test)]
 mod creation_tests;
 #[cfg(test)]
@@ -141,6 +143,7 @@ pub fn init(cx: &mut App) {
     bulk::init(cx);
     details::init(cx);
     clone::init(cx);
+    outside::init(cx);
 }
 
 /// mustr's key bindings for threads. The app binds them after Zed's, so users can rebind them:

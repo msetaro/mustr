@@ -375,6 +375,10 @@ impl ThreadBackend for Recorder {
         ready(Err(anyhow!("no uploads here")))
     }
 
+    fn server_url(&self) -> Option<String> {
+        Some("http://127.0.0.1:41234/".to_string())
+    }
+
     fn write_blocked_reason(&self) -> Option<String> {
         self.read_only.then(|| "read only".to_string())
     }
@@ -1035,4 +1039,37 @@ async fn a_failed_clone_says_why_and_retries(cx: &mut TestAppContext) {
         [(json!({ "projectId": project }), Access::SourceControlWrite)]
     );
     assert_eq!(backend.calls("projectClone.start").len(), 1);
+}
+
+// Outside agents.
+
+#[gpui::test]
+async fn outside_agents_get_t3s_mcp_url_and_commands(cx: &mut TestAppContext) {
+    let backend = Recorder::new();
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    cx.dispatch_action(crate::ConnectOutsideAgent);
+    cx.run_until_parked();
+    let url = workspace.read_with(cx, |workspace, cx| {
+        workspace
+            .active_modal::<crate::outside::OutsideAgentsModal>(cx)
+            .and_then(|modal| modal.read(cx).mcp_url().map(str::to_string))
+    });
+    assert_eq!(url.as_deref(), Some("http://127.0.0.1:41234/mcp"));
+    assert_eq!(
+        crate::outside::connect_commands("http://127.0.0.1:41234/mcp"),
+        [
+            (
+                "Claude Code",
+                "claude mcp add --transport http t3 http://127.0.0.1:41234/mcp\nclaude mcp login t3"
+                    .to_string()
+            ),
+            (
+                "Codex",
+                "codex mcp add t3 --url http://127.0.0.1:41234/mcp\ncodex mcp login t3"
+                    .to_string()
+            ),
+        ]
+    );
+    // Nothing goes to T3.
+    assert!(backend.commands().is_empty());
 }
