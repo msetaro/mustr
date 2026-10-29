@@ -156,7 +156,7 @@ pub fn parse_url(input: &str) -> Result<Url> {
 }
 
 /// `devbox:3773`, for a server saved without a name.
-fn default_name(url: &str) -> String {
+pub(crate) fn default_name(url: &str) -> String {
     Url::parse(url)
         .ok()
         .and_then(|url| {
@@ -229,6 +229,11 @@ impl SavedServers {
         let servers = cx.new(|_| Self { path, list });
         cx.set_global(GlobalSavedServers(servers.clone()));
         servers
+    }
+
+    /// The servers the user saved, by name.
+    pub fn servers(&self) -> &[SavedServer] {
+        &self.list.servers
     }
 
     fn update_list(&mut self, change: impl FnOnce(&mut ServerList), cx: &mut Context<Self>) {

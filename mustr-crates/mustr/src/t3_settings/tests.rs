@@ -1,11 +1,11 @@
-//! The T3 settings page against a recording backend: how it reads T3's settings on servers with
+//! T3 Code's part of the Settings page against a recording backend: how it reads T3's settings on servers with
 //! and without `server.getSettings`, and the exact `server.updateSettings` patches its controls
 //! send. Nothing here talks to T3.
 
 use super::*;
 use anyhow::anyhow;
 use futures::{StreamExt as _, stream::BoxStream};
-use gpui::{TestAppContext, VisualTestContext};
+use gpui::{Focusable as _, TestAppContext, VisualTestContext};
 use parking_lot::Mutex;
 use pretty_assertions::assert_eq;
 use settings::SettingsStore;
@@ -25,7 +25,7 @@ use t3_client::t3_api::{
 use thread_chat::{AttachmentUpload, ReadOnlyBackend, UnsupportedRpc};
 
 /// T3's settings as `server.getSettings` sends them, with T3's defaults.
-fn settings_json() -> Value {
+pub(crate) fn settings_json() -> Value {
     json!({
         "defaultRuntimeMode": "full-access",
         "defaultThreadEnvMode": null,
@@ -62,13 +62,13 @@ fn config_json(settings: Value) -> Value {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct RawCall {
+pub(crate) struct RawCall {
     tag: String,
     payload: Value,
     access: Access,
 }
 
-fn update(patch: Value) -> RawCall {
+pub(crate) fn update(patch: Value) -> RawCall {
     RawCall {
         tag: "server.updateSettings".into(),
         payload: json!({ "patch": patch }),
@@ -77,7 +77,7 @@ fn update(patch: Value) -> RawCall {
 }
 
 /// Plays T3: keeps its settings, applies each patch it gets, and answers with the result.
-struct FakeBackend {
+pub(crate) struct FakeBackend {
     calls: Mutex<Vec<RawCall>>,
     settings: Mutex<Value>,
     unsupported: Mutex<HashSet<String>>,
@@ -86,7 +86,7 @@ struct FakeBackend {
 }
 
 impl FakeBackend {
-    fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self {
             calls: Mutex::default(),
             settings: Mutex::new(settings_json()),
@@ -115,7 +115,7 @@ impl FakeBackend {
         })
     }
 
-    fn updates(&self) -> Vec<RawCall> {
+    pub(crate) fn updates(&self) -> Vec<RawCall> {
         self.calls()
             .into_iter()
             .filter(|call| call.tag == "server.updateSettings")
@@ -232,7 +232,7 @@ impl ThreadBackend for FakeBackend {
     }
 }
 
-fn open_page(
+pub(crate) fn open_page(
     backend: Arc<dyn ThreadBackend>,
     cx: &mut TestAppContext,
 ) -> (Entity<T3SettingsView>, &mut VisualTestContext) {
@@ -488,17 +488,6 @@ async fn t3s_own_changes_reach_the_page(cx: &mut TestAppContext) {
     view.read_with(cx, |view, cx| {
         assert_eq!(view.prefix.read(cx).text(cx), "mine/");
     });
-}
-
-#[gpui::test]
-async fn follow_ups_are_mustrs_own(cx: &mut TestAppContext) {
-    let backend = FakeBackend::new();
-    let (_, cx) = open_page(backend.clone(), cx);
-    cx.update(|_, cx| assert_eq!(FollowUpBehavior::get(cx), FollowUpBehavior::Queue));
-    click("segment-Steer", cx);
-    cx.update(|_, cx| assert_eq!(FollowUpBehavior::get(cx), FollowUpBehavior::Steer));
-    // T3 keeps its own in its app; nothing goes to the server.
-    assert_eq!(backend.updates(), []);
 }
 
 #[test]

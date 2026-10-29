@@ -1,4 +1,8 @@
-use crate::{app_settings::INITIAL_SETTINGS, home::HomeView, nav_panel::NavPanel};
+use crate::{
+    home::HomeView,
+    nav_panel::NavPanel,
+    settings_page::{self, Section},
+};
 use gpui::{
     App, AppContext as _, Context, Entity, Global, KeyBinding, Menu, MenuItem, OsAction,
     PromptLevel, TaskExt as _, TitlebarOptions, Window, WindowHandle, WindowKind, WindowOptions,
@@ -6,26 +10,23 @@ use gpui::{
 };
 use review::{OpenThreadChat, ToggleFileTree};
 use settings::{Settings as _, SettingsStore};
-use std::{
-    path::Path,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use util::ResultExt as _;
 use uuid::Uuid;
 use workspace::{
     AppState, CloseWindow, MultiWorkspace, OpenOptions, Pane, Workspace, WorkspaceSettings,
-    create_and_open_local_file, with_active_or_new_workspace,
+    with_active_or_new_workspace,
 };
 
 gpui::actions!(
     mustr,
     [
-        /// Opens mustr's settings file.
+        /// Opens mustr's settings.
         OpenSettings,
-        /// Opens mustr's key bindings file.
+        /// Opens mustr's keyboard shortcuts, to change them.
         OpenKeyBindings,
         /// Quits mustr.
         Quit,
@@ -35,27 +36,41 @@ gpui::actions!(
 /// The Wayland app ID and X11 `WM_CLASS`. It must match the `.desktop` file name.
 const APP_ID: &str = "dev.mustr.mustr";
 
-const INITIAL_KEYMAP: &str =
-    "// mustr key bindings\n//\n// mustr uses Zed's keymap format.\n[\n]\n";
-
 /// Handles the app's own actions: settings, key bindings and quit.
 pub(crate) fn register_app_actions(cx: &mut App) {
-    let open_settings =
-        |cx: &mut App| open_config_file(paths::settings_file(), INITIAL_SETTINGS, cx);
-    let open_key_bindings =
-        |cx: &mut App| open_config_file(paths::keymap_file(), INITIAL_KEYMAP, cx);
+    let open = |section: Section, query: Option<String>| {
+        move |cx: &mut App| {
+            let query = query.clone();
+            with_active_or_new_workspace(cx, move |workspace, window, cx| {
+                settings_page::show(workspace, section, query, window, cx)
+            })
+        }
+    };
+    let open_settings = move |cx: &mut App| open(Section::General, None)(cx);
+    let open_key_bindings = move |cx: &mut App| open(Section::KeyboardShortcuts, None)(cx);
     // mustr's own actions, so the command palette doesn't list them under Zed's name ("zed: open
     // settings"). Zed's stay handled, for its key bindings and for Zed's code that dispatches
-    // them, and are hidden from the palette (`hidden_actions.rs`).
+    // them, and are hidden from the palette (`hidden_actions.rs`). Every one opens mustr's
+    // Settings page: mustr never opens its settings or key bindings files.
     cx.on_action(move |_: &OpenSettings, cx| open_settings(cx))
         .on_action(move |_: &OpenKeyBindings, cx| open_key_bindings(cx))
         .on_action(|_: &Quit, cx| quit(cx))
         .on_action(|_: &zed_actions::Quit, cx| quit(cx))
         .on_action(move |_: &zed_actions::OpenSettingsFile, cx| open_settings(cx))
-        // Zed's keymaps bind its settings editor to cmd-, (ctrl-, on Linux). mustr's settings
-        // are its settings file.
+        // Zed's keymaps bind its settings editor to cmd-, (ctrl-, on Linux).
         .on_action(move |_: &zed_actions::OpenSettings, cx| open_settings(cx))
-        .on_action(move |_: &zed_actions::OpenKeymapFile, cx| open_key_bindings(cx));
+        .on_action(move |_: &zed_actions::OpenKeymapFile, cx| open_key_bindings(cx))
+        // Zed's keymap editor, which Zed's keymaps bind to cmd-k cmd-s.
+        .on_action(move |_: &zed_actions::OpenKeymap, cx| open_key_bindings(cx))
+        // The command palette's "change the key binding" (secondary confirm) for an action.
+        .on_action(move |action: &zed_actions::ChangeKeybinding, cx| {
+            open(Section::KeyboardShortcuts, Some(action.action.clone()))(cx)
+        })
+        // Links in Zed's views to one of Zed's settings: the Settings page, searching for it.
+        .on_action(move |action: &zed_actions::OpenSettingsAt, cx| {
+            let setting = action.path.rsplit('.').next().unwrap_or_default();
+            open(Section::General, Some(setting.replace('_', " ")))(cx)
+        });
 }
 
 pub fn init(cx: &mut App) {
@@ -437,30 +452,6 @@ fn quit(cx: &mut App) {
         anyhow::Ok(())
     })
     .detach_and_log_err(cx);
-}
-
-// Copied from crates/zed/src/zed.rs (`open_settings_file`), for local
-// workspaces only.
-fn open_config_file(abs_path: &'static Path, initial_content: &'static str, cx: &mut App) {
-    with_active_or_new_workspace(cx, move |_, window, cx| {
-        cx.spawn_in(window, async move |workspace, cx| {
-            let project = workspace.read_with(cx, |workspace, _| workspace.project().clone())?;
-            // A dedicated worktree for the config directory keeps language
-            // servers from restarting each time a settings file is reopened.
-            project
-                .update(cx, |project, cx| {
-                    project.find_or_create_worktree(paths::config_dir().as_path(), false, cx)
-                })
-                .await?;
-            workspace
-                .update_in(cx, |_, window, cx| {
-                    create_and_open_local_file(abs_path, window, cx, move || initial_content.into())
-                })?
-                .await?;
-            anyhow::Ok(())
-        })
-        .detach_and_log_err(cx);
-    });
 }
 
 #[cfg(test)]

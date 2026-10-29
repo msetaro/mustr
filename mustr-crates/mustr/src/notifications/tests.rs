@@ -783,6 +783,15 @@ async fn the_status_bar_counts_threads_waiting_and_opens_them(cx: &mut TestAppCo
     update(&mut shell, failed_b, "active");
     play(&notifier, &shell, cx);
     assert_eq!(count(cx), (2, 2));
+    // The Dock's count can be turned off in the Settings page; the status bar still counts.
+    let no_badge = NotificationSettings {
+        dock_badge: false,
+        ..NotificationSettings::default()
+    };
+    cx.update(|_, cx| apply_settings(no_badge, cx));
+    assert_eq!(count(cx), (2, 0));
+    cx.update(|_, cx| apply_settings(NotificationSettings::default(), cx));
+    assert_eq!(count(cx), (2, 2));
     assert_eq!(AttentionStatus::label(1), "1 thread needs you");
     assert_eq!(AttentionStatus::label(2), "2 threads need you");
 

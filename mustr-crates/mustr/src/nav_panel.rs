@@ -13,7 +13,7 @@
 //!
 //! Other parts of mustr add their own rail buttons with [`register_rail_entry`].
 
-use crate::{home::HomeView, navigation};
+use crate::{home::HomeView, navigation, settings_page::SettingsView};
 use gpui::{
     Action, AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle,
     Focusable, Global, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render,
@@ -29,7 +29,6 @@ use workspace::{
     ItemHandle, Workspace,
     dock::{Dock, DockPosition, Panel, PanelEvent, PanelSizeState},
 };
-use zed_actions::OpenSettingsFile;
 
 /// The tree's or the threads' width, next to the rail, at mustr's design size (`scaled`), in a
 /// window wide enough for it.
@@ -115,6 +114,7 @@ enum Destination {
     Home,
     Review,
     Thread,
+    Settings,
     Other,
 }
 
@@ -222,6 +222,7 @@ impl NavPanel {
         let destination = match item {
             Some(item) if item.downcast::<ReviewView>().is_some() => Destination::Review,
             Some(item) if item.downcast::<HomeView>().is_some() => Destination::Home,
+            Some(item) if item.downcast::<SettingsView>().is_some() => Destination::Settings,
             Some(_) if thread.is_some() => Destination::Thread,
             _ => Destination::Other,
         };
@@ -482,11 +483,14 @@ impl NavPanel {
             .children(self.render_rail_entries(cx))
             .child(div().flex_1())
             .child(
-                RailButton::new("rail-settings", MustrIcon::Settings.icon())
-                    .tooltip("Settings")
-                    .on_click(|_, window, cx| {
-                        window.dispatch_action(OpenSettingsFile.boxed_clone(), cx)
-                    }),
+                div().debug_selector(|| "rail-settings".into()).child(
+                    RailButton::new("rail-settings", MustrIcon::Settings.icon())
+                        .active(self.destination == Destination::Settings)
+                        .tooltip("Settings")
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(crate::window::OpenSettings.boxed_clone(), cx)
+                        }),
+                ),
             )
     }
 
@@ -1024,6 +1028,25 @@ mod tests {
         nav_panel.read_with(cx, |nav_panel, _| {
             assert_eq!(nav_panel.sidebar(), Sidebar::Threads)
         });
+    }
+
+    /// The rail's gear opens mustr's Settings page (`mustr::OpenSettings`), never a file.
+    #[gpui::test]
+    async fn the_gear_opens_the_settings_page(cx: &mut TestAppContext) {
+        let (_, _, cx) = workspace_with_nav_panel(cx).await;
+        let opened = Rc::new(Cell::new(0));
+        cx.update(|_, cx| {
+            let opened = opened.clone();
+            cx.on_action(move |_: &crate::window::OpenSettings, _| opened.set(opened.get() + 1));
+        });
+        cx.simulate_resize(gpui::size(px(1000.), px(800.)));
+        cx.run_until_parked();
+        let gear = cx
+            .debug_bounds("rail-settings")
+            .expect("the gear is on the rail");
+        cx.simulate_click(gear.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(opened.get(), 1);
     }
 
     #[gpui::test]

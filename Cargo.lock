@@ -11143,6 +11143,7 @@ dependencies = [
  "session",
  "settings",
  "shellexpand",
+ "strum 0.28.0",
  "t3_client",
  "t3_runtime",
  "tempfile",
