@@ -9,7 +9,7 @@ use gpui::{TestAppContext, VisualTestContext};
 use parking_lot::Mutex;
 use pretty_assertions::assert_eq;
 use settings::SettingsStore;
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 use t3_client::t3_api::{
     tagged::{
         OrchestrationV2Command, OrchestrationV2ShellStreamItem, OrchestrationV2ThreadStreamItem,
@@ -488,4 +488,147 @@ fn patches_show_before_t3_answers() {
     let empty: ServerSettings = serde_json::from_value(json!({})).unwrap();
     assert_eq!(branch_prefix(&empty), "t3");
     assert_eq!(branch_naming_mode(&empty), BranchNamingMode::Static);
+}
+
+/// Against T3's real engine, run the way mustr runs its own: the settings patches this page sends
+/// (with `null` to clear one), and the error T3 gives for adding a folder that's already a
+/// project. Ignored by default. It starts the pinned release from `MUSTR_T3_TEST_VERSIONS_DIR`
+/// (it never downloads), in a temporary base dir, and refuses to run unless `HOME` is temporary
+/// too, since T3 checks the agents' CLIs in it. No agent runs and nobody signs in.
+///
+/// ```sh
+/// HOME=$(mktemp -d) PATH=/usr/bin:/bin MUSTR_T3_TEST_VERSIONS_DIR=<dir> \
+///   target/debug/deps/mustr-<hash> live_settings_and_project_conflicts --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "starts T3 Code's engine"]
+fn live_settings_and_project_conflicts_on_a_temporary_engine() -> Result<()> {
+    use t3_client::{ClientMetadata, RpcConnection, RpcError, Scope};
+    use t3_runtime::engine::{self, BootstrapSecret, EngineLaunch, EngineProcess};
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    assert!(
+        home.starts_with("/tmp/"),
+        "run with a temporary HOME, not {home}"
+    );
+    let versions = std::path::PathBuf::from(
+        std::env::var("MUSTR_T3_TEST_VERSIONS_DIR")
+            .context("set MUSTR_T3_TEST_VERSIONS_DIR to an unpacked T3 release")?,
+    );
+    let version = t3_client::pinned_server_version();
+    let executable = versions.join(version).join("t3");
+    let temp = tempfile::tempdir()?;
+    let sleep: t3_runtime::Sleep = Arc::new(|duration| {
+        let (done, wait) = futures::channel::oneshot::channel();
+        std::thread::spawn(move || {
+            std::thread::sleep(duration);
+            done.send(()).ok();
+        });
+        async move {
+            wait.await.ok();
+        }
+        .boxed()
+    });
+    futures::executor::block_on(async {
+        let http = Arc::new(reqwest_client::ReqwestClient::new());
+        let launch = EngineLaunch {
+            executable,
+            base_dir: temp.path().join("t3-home"),
+            port: engine::pick_port()?,
+            log_file: temp.path().join("t3-engine.log"),
+        };
+        let secret = BootstrapSecret::generate();
+        let mut process =
+            EngineProcess::spawn(&launch, launch.envelope(&secret, engine::unix_millis())?).await?;
+        let result = async {
+            let url = launch.url();
+            engine::wait_until_ready(
+                http.as_ref(),
+                &url,
+                || process.try_exit(),
+                Duration::from_secs(120),
+                &sleep,
+            )
+            .await?;
+            let token = t3_client::exchange_pairing_credential(
+                http.as_ref(),
+                &url,
+                &secret.current_token(),
+                &[
+                    Scope::OrchestrationRead,
+                    Scope::OrchestrationOperate,
+                    Scope::SettingsWrite,
+                ],
+                &ClientMetadata::default(),
+            )
+            .await?;
+            let ticket = t3_client::websocket_ticket(http.as_ref(), &url, &token).await?;
+            let (connection, driver) =
+                RpcConnection::connect(&t3_client::websocket_url(&url, &ticket)?).await?;
+            let checks = async {
+                // The page's patches, including the ones that clear a setting.
+                for patch in [
+                    json!({ "defaultThreadEnvMode": "worktree", "sidebarAutoSettleAfterDays": null }),
+                    json!({ "branchNamingMode": "custom",
+                            "branchNameInstructions": "Use the issue ID." }),
+                    json!({ "defaultThreadEnvMode": null, "defaultModelSelection": null,
+                            "sidebarAutoSettleAfterDays": 14 }),
+                ] {
+                    let settings = connection
+                        .request(rpc::ServerUpdateSettings::TAG, json!({ "patch": patch }))
+                        .await?;
+                    let settings: ServerSettings = serde_json::from_value(settings)?;
+                    println!(
+                        "after {patch}: env mode {:?}, auto-settle {:?}, naming {:?}",
+                        settings.default_thread_env_mode,
+                        auto_settle_days(&settings),
+                        settings.branch_naming_mode
+                    );
+                    for (key, value) in patch.as_object().unwrap() {
+                        let saved = serde_json::to_value(&settings)?;
+                        let saved = saved.get(key).cloned().unwrap_or(Value::Null);
+                        assert_eq!(&saved, value, "{key}");
+                    }
+                }
+
+                // Adding a folder twice, past mustr's own check.
+                let folder = temp.path().join("repo");
+                std::fs::create_dir_all(&folder)?;
+                let project = thread_chat::projects::NewProject {
+                    workspace_root: folder.canonicalize()?.to_string_lossy().into_owned(),
+                    title: "repo".into(),
+                };
+                let created = connection
+                    .call::<rpc::ProjectsMutate>(thread_chat::projects::create_mutation(&project))
+                    .await?;
+                let again = connection
+                    .call::<rpc::ProjectsMutate>(thread_chat::projects::create_mutation(&project))
+                    .await
+                    .expect_err("T3 refuses a folder it already has");
+                let RpcError::Failed { error, .. } = &again else {
+                    panic!("T3 should give a typed error, not {again:?}");
+                };
+                println!("T3's error: {error}");
+                assert_eq!(
+                    thread_chat::projects::project_conflict(error, &project.workspace_root),
+                    Some(thread_chat::projects::AlreadyAProject {
+                        folder: project.workspace_root.clone(),
+                        project_id: Some(created.id.clone()),
+                    })
+                );
+                anyhow::Ok(())
+            };
+            let result = match futures::future::select(Box::pin(checks), driver).await {
+                futures::future::Either::Left((result, _)) => result,
+                futures::future::Either::Right((ended, _)) => {
+                    Err(anyhow::anyhow!("the connection ended: {ended:?}"))
+                }
+            };
+            connection.close();
+            result
+        }
+        .await;
+        process.stop(engine::STOP_GRACE, &sleep).await;
+        result
+    })
 }
