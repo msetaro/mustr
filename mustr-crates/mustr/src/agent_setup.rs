@@ -21,6 +21,9 @@
 mod tests;
 
 use crate::{
+    agent_accounts::{
+        AddAgentDialog, is_default_instance, mutate_instances, registry_agent_of, remove_payload,
+    },
     auth_terminal::{AuthTerminal, SendInput, SendSize},
     nav_panel::register_rail_entry,
 };
@@ -34,7 +37,7 @@ use gpui::{
 };
 use mustr_ui::{ButtonStyle, Card, Pill, TextButton, palette, tokens, tokens::scaled};
 use project::Project;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap},
     rc::Rc,
@@ -767,7 +770,7 @@ impl AgentSetupView {
         let output = "\u{1b}[1mSign in\u{1b}[0m\r\n\r\nOpen this page in your browser:\r\n  \
                       \u{1b}[4;34mhttps://example.com/device\u{1b}[0m\r\n\r\nThen enter the \
                       code it shows.\r\n\r\n\u{1b}[32m?\u{1b}[0m \u{1b}[1mCode:\u{1b}[0m ";
-        let state = serde_json::json!({
+        let state = json!({
             "instanceId": instance_id, "phase": "waiting", "flowId": "preview",
             "authorizationUrl": null, "expiresAt": null, "message": null, "methods": [],
             "interaction": {
@@ -1408,6 +1411,63 @@ impl AgentSetupView {
         cx.notify();
     }
 
+    fn open_add_agent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let backend = self.backend.clone();
+        self.workspace
+            .update(cx, |workspace, cx| {
+                workspace.toggle_modal(window, cx, |window, cx| {
+                    AddAgentDialog::new(backend, window, cx)
+                })
+            })
+            .ok();
+    }
+
+    /// Removes another account or a registry agent (`{operation: "remove"}`), and the copy of a
+    /// registry agent T3 downloaded.
+    pub(crate) fn remove_instance(&mut self, instance_id: String, cx: &mut Context<Self>) {
+        let Some(backend) = self.backend() else {
+            return;
+        };
+        let agent = self.agents.entry(instance_id.clone()).or_default();
+        if agent.pending.is_some() {
+            return;
+        }
+        agent.pending = Some("Removing");
+        agent.error = None;
+        cx.notify();
+        let registry_agent = registry_agent_of(self.configs.read(cx).settings(), &instance_id);
+        let payload = remove_payload(&instance_id);
+        let configs = self.configs.clone();
+        self._tasks.push(cx.spawn(async move |this, cx| {
+            let result = mutate_instances(backend.clone(), payload).await;
+            if result.is_ok()
+                && let Some(agent_id) = registry_agent
+                && let Err(error) = backend
+                    .call_raw(
+                        "server.uninstallAcpRegistryManagedBinary",
+                        json!({ "agentId": agent_id }),
+                        Access::ProvidersManage,
+                    )
+                    .await
+            {
+                log::warn!("couldn't remove the downloaded {agent_id}: {error:#}");
+            }
+            this.update(cx, |this, cx| {
+                let agent = this.agents.entry(instance_id.clone()).or_default();
+                agent.pending = None;
+                match result {
+                    Ok(settings) => {
+                        configs.update(cx, |configs, cx| configs.set_settings(settings, cx));
+                        this.agents.remove(&instance_id);
+                    }
+                    Err(error) => agent.error = Some(format!("{error:#}").into()),
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
     fn flow_id(&self, instance_id: &str) -> Option<String> {
         self.agents.get(instance_id)?.auth.as_ref()?.flow_id.clone()
     }
@@ -1601,6 +1661,20 @@ impl AgentSetupView {
         }
 
         let turn_on = (state == AgentState::Disabled).then(|| self.turn_on_button(provider, cx));
+        // Another account or a registry agent can be removed; an agent's default instance can't.
+        let remove = (!is_default_instance(&id, &provider.driver)).then(|| {
+            let busy = agent.is_some_and(|agent| agent.pending.is_some());
+            let instance = id.clone();
+            self.button(
+                format!("agent-remove-{id}"),
+                "Remove",
+                ButtonStyle::Default,
+                self.blocked(Access::ProvidersManage)
+                    .or_else(|| busy.then(|| "Busy".to_string())),
+                cx,
+                move |this, _, cx| this.remove_instance(instance.clone(), cx),
+            )
+        });
         let line = match state {
             AgentState::Ready => match &provider.auth.email {
                 Some(email) if !email.trim().is_empty() => {
@@ -1655,9 +1729,11 @@ impl AgentSetupView {
                             .or(provider.installed_version.clone()),
                         |this, version| this.child(muted(version).size(LabelSize::XSmall)),
                     )
-                    .when_some(turn_on, |this, turn_on| {
-                        this.child(div().flex_1()).child(turn_on)
-                    }),
+                    .when(turn_on.is_some() || remove.is_some(), |this| {
+                        this.child(div().flex_1())
+                    })
+                    .children(turn_on)
+                    .children(remove),
             )
             .child(muted(line))
             .when(!parts.is_empty(), |this| {
@@ -2693,7 +2769,20 @@ impl Render for AgentSetupView {
                          here; each agent's sign-in is shared with its own CLI."
                     ))),
             )
-            .child(refresh);
+            .child(
+                h_flex()
+                    .flex_none()
+                    .gap_2()
+                    .child(self.button(
+                        "agents-add".into(),
+                        "Add an agent…",
+                        ButtonStyle::Default,
+                        None,
+                        cx,
+                        |this, window, cx| this.open_add_agent(window, cx),
+                    ))
+                    .child(refresh),
+            );
         v_flex()
             .key_context("MustrAgentSetup")
             .track_focus(&self.focus_handle)

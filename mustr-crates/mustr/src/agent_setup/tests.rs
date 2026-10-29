@@ -1135,3 +1135,61 @@ async fn custom_models_join_the_agents_list(cx: &mut TestAppContext) {
         json!({ "driver": "codex", "config": { "customModels": ["gpt-6"] } })
     );
 }
+
+#[gpui::test]
+async fn other_accounts_and_registry_agents_can_be_removed(cx: &mut TestAppContext) {
+    let backend = Arc::new(FakeBackend::default());
+    let settings = json!({
+        "providerInstances": {
+            "codex_work": {
+                "driver": "codex", "enabled": true, "displayName": "Codex · Work",
+                "config": { "homePath": "~/.codex-work", "setupMode": "existing" }
+            },
+            "acpRegistry_goose": {
+                "driver": "acpRegistry", "enabled": true, "displayName": "Goose",
+                "config": { "agentId": "goose", "distribution": "auto" }
+            }
+        }
+    });
+    for _ in 0..2 {
+        backend.answer("server.updateSettings", settings.clone());
+    }
+    backend.answer(
+        "server.uninstallAcpRegistryManagedBinary",
+        json!({ "agentId": "goose", "removed": true }),
+    );
+    let (_, cx) = open_page(
+        backend.clone(),
+        vec![
+            provider("codex", "codex", "Codex", json!({})),
+            provider("codex_work", "codex", "Codex · Work", json!({})),
+            provider("acpRegistry_goose", "acpRegistry", "Goose", json!({})),
+        ],
+        settings,
+        cx,
+    );
+    // An agent's default instance stays.
+    assert!(cx.debug_bounds("agent-remove-codex").is_none());
+    click("agent-remove-codex_work", cx);
+    click("agent-remove-acpRegistry_goose", cx);
+    let remove = |id: &str| {
+        manage(
+            "server.updateSettings",
+            json!({
+                "patch": {},
+                "providerInstanceMutation": { "operation": "remove", "instanceId": id }
+            }),
+        )
+    };
+    assert_eq!(
+        backend.commands(),
+        [
+            remove("codex_work"),
+            remove("acpRegistry_goose"),
+            manage(
+                "server.uninstallAcpRegistryManagedBinary",
+                json!({ "agentId": "goose" })
+            ),
+        ]
+    );
+}
