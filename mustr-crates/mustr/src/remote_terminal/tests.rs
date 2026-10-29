@@ -762,3 +762,164 @@ async fn the_setup_scripts_terminal_opens_from_its_card(cx: &mut TestAppContext)
     assert_eq!(backend.attach_payloads().len(), 1);
     assert_eq!(remote_terminals(&panel, cx).len(), 1);
 }
+
+#[test]
+fn mouse_reports_are_encoded_as_a_local_terminal_would() {
+    use gpui::{Modifiers, MouseButton};
+    let cell = mouse::Cell { line: 4, column: 9 };
+    let none = Modifiers::default();
+    let sgr = Modes::MOUSE_REPORT_CLICK | Modes::SGR_MOUSE;
+    let text = |report: Option<Vec<u8>>| report.and_then(mouse::as_text);
+    assert_eq!(
+        text(mouse::button_report(
+            cell,
+            MouseButton::Left,
+            &none,
+            true,
+            sgr
+        ))
+        .as_deref(),
+        Some("\x1b[<0;10;5M")
+    );
+    assert_eq!(
+        text(mouse::button_report(
+            cell,
+            MouseButton::Right,
+            &none,
+            false,
+            sgr
+        ))
+        .as_deref(),
+        Some("\x1b[<2;10;5m")
+    );
+    // Legacy reports: the button and cell as bytes, release as button 3.
+    assert_eq!(
+        mouse::button_report(
+            cell,
+            MouseButton::Left,
+            &none,
+            true,
+            Modes::MOUSE_REPORT_CLICK
+        ),
+        Some(vec![0x1b, b'[', b'M', 32, 32 + 10, 32 + 5])
+    );
+    assert_eq!(
+        mouse::button_report(
+            cell,
+            MouseButton::Left,
+            &none,
+            false,
+            Modes::MOUSE_REPORT_CLICK
+        ),
+        Some(vec![0x1b, b'[', b'M', 35, 32 + 10, 32 + 5])
+    );
+    // Drags in drag mode; any motion only in motion mode.
+    let drag = Modes::MOUSE_DRAG | Modes::SGR_MOUSE;
+    assert_eq!(
+        text(mouse::moved_report(
+            cell,
+            Some(MouseButton::Left),
+            &none,
+            drag
+        ))
+        .as_deref(),
+        Some("\x1b[<32;10;5M")
+    );
+    assert_eq!(mouse::moved_report(cell, None, &none, drag), None);
+    assert_eq!(
+        text(mouse::moved_report(
+            cell,
+            None,
+            &none,
+            Modes::MOUSE_MOTION | Modes::SGR_MOUSE
+        ))
+        .as_deref(),
+        Some("\x1b[<35;10;5M")
+    );
+    // The wheel, with ctrl held.
+    let ctrl = Modifiers {
+        control: true,
+        ..Modifiers::default()
+    };
+    assert_eq!(
+        text(mouse::scroll_report(cell, true, &ctrl, sgr)).as_deref(),
+        Some("\x1b[<80;10;5M")
+    );
+    // Shift keeps the local selection; programs that didn't ask get nothing.
+    assert!(!mouse::reports(sgr, &Modifiers::shift()));
+    assert!(!mouse::reports(Modes::empty(), &none));
+    assert_eq!(
+        mouse::button_report(cell, MouseButton::Left, &none, true, Modes::empty()),
+        None
+    );
+}
+
+#[gpui::test]
+async fn clicks_go_to_programs_that_ask_for_them(cx: &mut TestAppContext) {
+    use gpui::{Modifiers, MouseButton, point};
+    let backend = TerminalBackend::new(json!([]));
+    let (_workspace, panel, cx) = panel_for(backend.clone(), cx).await;
+    cx.dispatch_action(OpenThreadTerminal {
+        thread_id: "a".into(),
+    });
+    cx.run_until_parked();
+    backend.send(0, snapshot("term-1", "$ ", "Terminal 1"));
+    cx.run_until_parked();
+    let remote = remote_terminals(&panel, cx)
+        .pop()
+        .expect("the terminal shows");
+    cx.run_until_parked();
+    let bounds = remote.read_with(cx, |remote, cx| {
+        remote.terminal.read(cx).last_content().terminal_bounds
+    });
+    // The middle of the cell at line 2, column 3.
+    let at = bounds.bounds.origin + point(bounds.cell_width * 3.5, bounds.line_height * 2.5);
+
+    // A shell doesn't ask: a click selects, and nothing goes to T3.
+    cx.simulate_click(at, Modifiers::default());
+    cx.run_until_parked();
+    assert_eq!(backend.typed(), "");
+
+    // tmux turns on mouse reports, in SGR.
+    backend.send(
+        0,
+        json!({ "type": "output", "threadId": "a", "terminalId": "term-1", "data": "\u{1b}[?1002h\u{1b}[?1006h" }),
+    );
+    cx.run_until_parked();
+    cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::default());
+    let next = at + point(bounds.cell_width, px(0.));
+    cx.simulate_mouse_move(next, MouseButton::Left, Modifiers::default());
+    cx.simulate_mouse_up(next, MouseButton::Left, Modifiers::default());
+    cx.run_until_parked();
+    assert_eq!(backend.typed(), "\x1b[<0;4;3M\x1b[<32;5;3M\x1b[<0;5;3m");
+
+    // Shift still selects.
+    cx.simulate_click(at, Modifiers::shift());
+    cx.run_until_parked();
+    assert_eq!(backend.typed(), "\x1b[<0;4;3M\x1b[<32;5;3M\x1b[<0;5;3m");
+}
+
+#[gpui::test]
+async fn an_imes_text_shows_until_its_committed(cx: &mut TestAppContext) {
+    let backend = TerminalBackend::new(json!([]));
+    let (_workspace, panel, cx) = panel_for(backend.clone(), cx).await;
+    cx.dispatch_action(OpenThreadTerminal {
+        thread_id: "a".into(),
+    });
+    cx.run_until_parked();
+    backend.send(0, snapshot("term-1", "$ ", "Terminal 1"));
+    cx.run_until_parked();
+    let remote = remote_terminals(&panel, cx)
+        .pop()
+        .expect("the terminal shows");
+    remote.update_in(cx, |remote, window, cx| {
+        remote.replace_and_mark_text_in_range(None, "にほ", None, window, cx);
+        let (text, _, _) = remote.marked_text_at(cx).expect("it shows at the cursor");
+        assert_eq!(text, "にほ");
+        assert_eq!(remote.marked_text_range(window, cx), Some(0..2));
+        remote.replace_text_in_range(None, "日本", window, cx);
+        assert_eq!(remote.marked_text_at(cx), None);
+    });
+    cx.run_until_parked();
+    assert_eq!(backend.typed(), "日本");
+}

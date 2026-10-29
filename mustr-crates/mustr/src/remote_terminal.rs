@@ -11,8 +11,11 @@
 //!   out with `terminal.resize` whenever it changes.
 //! - Zed's terminal encodes keys only for a local PTY, so the view's keys, pastes, `SendText`
 //!   bindings, typed text (including an IME's) and the wheel in full-screen programs are caught
-//!   on their way to the `TerminalView` and sent to T3 instead. Mouse reports to programs that
-//!   ask for them (`tmux`'s or `vim`'s mouse mode) aren't sent yet.
+//!   on their way to the `TerminalView` and sent to T3 instead. So are clicks, drags, moves and
+//!   the wheel for programs that ask for mouse reports (`tmux`'s or `vim`'s mouse mode), encoded
+//!   as a local terminal would (`mouse.rs`); Shift keeps the local selection, as in T3's
+//!   terminal. An IME's text being composed shows at the cursor, underlined, until it's
+//!   committed.
 //! - Closing a terminal ends its shell and deletes its history (`terminal.close` with
 //!   `deleteHistory`), as T3's app does. A shell that exits on its own is closed the same way,
 //!   keeping its history. Terminals T3 still runs for a thread are found again with
@@ -21,14 +24,16 @@
 //!   T3's app share a thread's terminals.
 
 mod keys;
+mod mouse;
 
 use anyhow::{Context as _, Result, anyhow};
 use futures::{StreamExt as _, channel::mpsc, channel::oneshot};
 use gpui::{
     App, AppContext as _, Bounds, ClipboardEntry, Context, DispatchPhase, ElementInputHandler,
     Entity, EntityInputHandler, EventEmitter, FocusHandle, Focusable, KeyDownEvent, Keystroke,
-    Pixels, ScrollDelta, ScrollWheelEvent, SharedString, Subscription, Task, TouchPhase,
-    UTF16Selection, WeakEntity, Window, canvas, point,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollDelta,
+    ScrollWheelEvent, SharedString, Subscription, Task, TextRun, TouchPhase, UTF16Selection,
+    UnderlineStyle, WeakEntity, Window, canvas, fill, point,
 };
 use project::Project;
 use serde_json::{Map, Value};
@@ -217,6 +222,10 @@ pub struct RemoteTerminal {
     marked_text: Option<String>,
     /// The wheel's movement in lines that hasn't been sent yet, in full-screen programs.
     scroll_lines: Rc<Cell<f32>>,
+    /// The cell the last mouse report was about, so a move within a cell sends nothing.
+    last_mouse_cell: Option<mouse::Cell>,
+    /// The button whose press went to the program, so its release does too.
+    reported_press: Option<MouseButton>,
     _attach: Task<()>,
     _input: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -307,6 +316,8 @@ impl RemoteTerminal {
             input: input_tx,
             marked_text: None,
             scroll_lines: Rc::default(),
+            last_mouse_cell: None,
+            reported_press: None,
             _attach: attach,
             _input: input,
             _subscriptions: subscriptions,
@@ -496,6 +507,82 @@ impl RemoteTerminal {
         self.terminal.read(cx).last_content().mode
     }
 
+    /// Sends a mouse report: no local side effects, unlike typed input.
+    fn send_report(&mut self, report: Option<Vec<u8>>) {
+        if self.ended {
+            return;
+        }
+        if let Some(text) = report.and_then(mouse::as_text) {
+            self.input.unbounded_send(text).ok();
+        }
+    }
+
+    /// The cell under a mouse position.
+    fn mouse_cell(&self, position: gpui::Point<Pixels>, cx: &App) -> mouse::Cell {
+        let content = self.terminal.read(cx).last_content();
+        let bounds = content.terminal_bounds;
+        mouse::cell_at(
+            position - bounds.bounds.origin,
+            &bounds,
+            content.display_offset,
+        )
+    }
+
+    /// A press, for a program that asks for mouse reports. Returns whether it went to it.
+    fn mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) -> bool {
+        let mode = self.mode(cx);
+        if !mouse::reports(mode, &event.modifiers) {
+            return false;
+        }
+        let cell = self.mouse_cell(event.position, cx);
+        self.last_mouse_cell = Some(cell);
+        self.reported_press = Some(event.button);
+        self.send_report(mouse::button_report(
+            cell,
+            event.button,
+            &event.modifiers,
+            true,
+            mode,
+        ));
+        true
+    }
+
+    fn mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) -> bool {
+        if self.reported_press.take().is_none() {
+            return false;
+        }
+        let mode = self.mode(cx);
+        let cell = self.mouse_cell(event.position, cx);
+        self.last_mouse_cell = Some(cell);
+        self.send_report(mouse::button_report(
+            cell,
+            event.button,
+            &event.modifiers,
+            false,
+            mode,
+        ));
+        true
+    }
+
+    fn mouse_moved(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) -> bool {
+        let mode = self.mode(cx);
+        if !mouse::reports(mode, &event.modifiers) {
+            return false;
+        }
+        let cell = self.mouse_cell(event.position, cx);
+        if self.last_mouse_cell == Some(cell) {
+            return true;
+        }
+        self.last_mouse_cell = Some(cell);
+        self.send_report(mouse::moved_report(
+            cell,
+            event.pressed_button,
+            &event.modifiers,
+            mode,
+        ));
+        true
+    }
+
     /// Keys that send escape sequences (arrows, Enter, `ctrl-c`, …). Plain text goes on to the
     /// input handler, which an IME uses too. Vi mode moves the local selection, so it stays
     /// local.
@@ -554,13 +641,17 @@ impl RemoteTerminal {
     fn scroll_wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) -> bool {
         let content = self.terminal.read(cx).last_content();
         let mode = content.mode;
-        if event.shift
-            || mode.intersects(Modes::MOUSE_MODE)
-            || !mode.contains(Modes::ALT_SCREEN | Modes::ALTERNATE_SCROLL)
+        let reports = mouse::reports(mode, &event.modifiers);
+        if event.shift || (!reports && !mode.contains(Modes::ALT_SCREEN | Modes::ALTERNATE_SCROLL))
         {
             return false;
         }
         let line_height = content.terminal_bounds.line_height;
+        let cell = mouse::cell_at(
+            event.position - content.terminal_bounds.bounds.origin,
+            &content.terminal_bounds,
+            content.display_offset,
+        );
         if event.touch_phase == TouchPhase::Started {
             self.scroll_lines.set(0.);
             return true;
@@ -574,9 +665,37 @@ impl RemoteTerminal {
         let lines = total.trunc();
         self.scroll_lines.set(total - lines);
         if lines != 0. {
-            self.send(alt_scroll(lines as i32), cx);
+            if reports {
+                // One report per line, at most three a step, as Zed's terminal sends them.
+                let steps = (lines.abs() as usize).min(3);
+                for _ in 0..steps {
+                    self.send_report(mouse::scroll_report(
+                        cell,
+                        lines > 0.,
+                        &event.modifiers,
+                        mode,
+                    ));
+                }
+            } else {
+                self.send(alt_scroll(lines as i32), cx);
+            }
         }
         true
+    }
+
+    /// Where an IME's text being composed shows: at the cursor, a line high.
+    fn marked_text_at(&self, cx: &App) -> Option<(String, gpui::Point<Pixels>, Pixels)> {
+        let text = self.marked_text.clone().filter(|text| !text.is_empty())?;
+        let content = self.terminal.read(cx).last_content();
+        let bounds = content.terminal_bounds;
+        let cursor = content.cursor.point;
+        let line = cursor.line + content.display_offset as i32;
+        let origin = bounds.bounds.origin
+            + point(
+                bounds.cell_width * cursor.column as f32,
+                bounds.line_height * line as f32,
+            );
+        Some((text, origin, bounds.line_height))
     }
 
     fn grid_changed(&mut self, cx: &mut Context<Self>) {
@@ -614,6 +733,52 @@ impl RemoteTerminal {
             }
         }));
     }
+}
+
+/// Paints an IME's text being composed over the cell it covers, underlined, as Zed's terminal
+/// does for a local shell (`crates/terminal_view/src/terminal_element.rs`).
+fn paint_marked_text(
+    text: &str,
+    origin: gpui::Point<Pixels>,
+    line_height: Pixels,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let theme = theme_settings::ThemeSettings::get_global(cx);
+    let terminal = TerminalSettings::get_global(cx);
+    let mut font = theme.buffer_font.clone();
+    if let Some(family) = &terminal.font_family {
+        font.family = family.0.clone().into();
+    }
+    let font_size = terminal
+        .font_size
+        .unwrap_or_else(|| theme.buffer_font_size(cx));
+    let colors = cx.theme().colors();
+    let color = colors.terminal_foreground;
+    let background = colors.terminal_background;
+    let shaped = window.text_system().shape_line(
+        text.to_string().into(),
+        font_size,
+        &[TextRun {
+            len: text.len(),
+            font,
+            color,
+            underline: Some(UnderlineStyle {
+                color: Some(color),
+                thickness: px(1.),
+                wavy: false,
+            }),
+            ..Default::default()
+        }],
+        None,
+    );
+    window.paint_quad(fill(
+        Bounds::new(origin, gpui::size(shaped.width, line_height)),
+        background,
+    ));
+    shaped
+        .paint(origin, line_height, gpui::TextAlign::Left, None, window, cx)
+        .log_err();
 }
 
 fn clamp_size((cols, rows): (i64, i64)) -> (i64, i64) {
@@ -822,8 +987,9 @@ impl EntityInputHandler for RemoteTerminal {
             .map(|text| 0..text.encode_utf16().count())
     }
 
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.marked_text = None;
+        cx.notify();
     }
 
     fn replace_text_in_range(
@@ -844,9 +1010,10 @@ impl EntityInputHandler for RemoteTerminal {
         new_text: &str,
         _: Option<Range<usize>>,
         _: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         self.marked_text = (!new_text.is_empty()).then(|| new_text.to_string());
+        cx.notify();
     }
 
     /// Where the IME's window goes: at the cursor.
@@ -952,6 +1119,54 @@ impl Render for RemoteTerminal {
                                 cx.stop_propagation();
                             }
                         });
+                        // Clicks, drags and moves go to programs that ask for mouse reports,
+                        // instead of selecting.
+                        let this = entity.downgrade();
+                        let focus = focus_handle.clone();
+                        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                            if phase != DispatchPhase::Capture || !bounds.contains(&event.position)
+                            {
+                                return;
+                            }
+                            let handled = this
+                                .update(cx, |this, cx| this.mouse_down(event, cx))
+                                .unwrap_or(false);
+                            if handled {
+                                window.focus(&focus, cx);
+                                cx.stop_propagation();
+                            }
+                        });
+                        let this = entity.downgrade();
+                        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                            if phase != DispatchPhase::Capture {
+                                return;
+                            }
+                            let handled = this
+                                .update(cx, |this, cx| this.mouse_up(event, cx))
+                                .unwrap_or(false);
+                            if handled {
+                                cx.stop_propagation();
+                            }
+                        });
+                        let this = entity.downgrade();
+                        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                            if phase != DispatchPhase::Capture
+                                || (!bounds.contains(&event.position)
+                                    && event.pressed_button.is_none())
+                            {
+                                return;
+                            }
+                            let handled = this
+                                .update(cx, |this, cx| this.mouse_moved(event, cx))
+                                .unwrap_or(false);
+                            if handled {
+                                cx.stop_propagation();
+                            }
+                        });
+                        let marked = entity.read(cx).marked_text_at(cx);
+                        if let Some((text, origin, line_height)) = marked {
+                            paint_marked_text(&text, origin, line_height, window, cx);
+                        }
                     },
                 )
                 .absolute()
