@@ -1296,6 +1296,37 @@ async fn the_palette_compacts_and_restarts_the_agent(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn restarting_a_working_agent_asks_first(cx: &mut TestAppContext) {
+    let mut projection = two_runs();
+    projection.runs[1] = run("run-2", 2, "running");
+    let backend = Recorder::new(&projection, shell_thread(json!({})));
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    open(&workspace, cx);
+
+    // While the agent works, restarting its session would end the run, so it asks.
+    cx.dispatch_action(RestartAgentSession);
+    cx.run_until_parked();
+    assert!(cx.has_pending_prompt());
+    cx.simulate_prompt_answer("Cancel");
+    cx.run_until_parked();
+    assert!(backend.commands().is_empty(), "nothing is sent on Cancel");
+
+    cx.dispatch_action(RestartAgentSession);
+    cx.run_until_parked();
+    cx.simulate_prompt_answer("Restart");
+    cx.run_until_parked();
+    assert_eq!(
+        backend.commands_without_ids(),
+        [json!({
+            "type": "provider-session.detach",
+            "threadId": THREAD,
+            "providerSessionId": "session-1",
+            "reason": "client-requested"
+        })]
+    );
+}
+
+#[gpui::test]
 async fn compacting_waits_for_an_agent_that_takes_it(cx: &mut TestAppContext) {
     let projection = two_runs();
     let backend = Recorder::new(&projection, shell_thread(json!({})));

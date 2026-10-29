@@ -86,10 +86,6 @@ pub struct ThreadView {
     /// Above the timeline (`worktree_setup.rs`).
     worktree_setup: Entity<WorktreeSetupCard>,
     /// Find in thread's matches (`find_bar.rs`).
-    #[expect(
-        dead_code,
-        reason = "find in thread keeps its matches here once it searches (WP12)"
-    )]
     pub(crate) find: crate::find_bar::FindState,
     pub(crate) sending: bool,
     /// Requests being answered, by id.
