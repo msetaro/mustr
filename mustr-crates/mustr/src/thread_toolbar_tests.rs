@@ -453,3 +453,114 @@ async fn the_toolbar_shows_over_threads_and_opens_their_editor(cx: &mut TestAppC
         }]
     );
 }
+
+/// The toolbar's keys reach it from the composer and the thread view, over Zed's own bindings
+/// (`editor::SelectNext`, `workspace::Open`, the git panel), with any base keymap and in vim mode.
+#[gpui::test]
+fn the_toolbar_keys_beat_zeds_in_a_thread(cx: &mut TestAppContext) {
+    use gpui::{Action as _, KeyContext, Keystroke, UpdateGlobal as _};
+    use settings::{BaseKeymapContent, SettingsStore};
+    cx.update(|cx| {
+        let settings_store = SettingsStore::test(cx);
+        cx.set_global(settings_store);
+        crate::app_settings::apply_default_overrides(cx).unwrap();
+        let contexts = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| KeyContext::parse(name).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let in_view = contexts(&["Workspace", "Pane", "ThreadView"]);
+        let in_composer = contexts(&[
+            "Workspace",
+            "Pane",
+            "ThreadView",
+            "ThreadComposer",
+            "Editor mode=auto_height",
+        ]);
+        for base_keymap in [BaseKeymapContent::Zed, BaseKeymapContent::VSCode] {
+            for vim_mode in [false, true] {
+                SettingsStore::update_global(cx, |store, cx| {
+                    store.update_user_settings(cx, |settings| {
+                        settings.base_keymap = Some(base_keymap);
+                        settings.vim_mode = Some(vim_mode);
+                    });
+                });
+                cx.clear_key_bindings();
+                crate::keymap::load_default_keymap(cx);
+                for (keys, action) in [
+                    ("secondary-d", ReviewChanges.name()),
+                    ("secondary-o", OpenThreadInEditor.name()),
+                    ("secondary-shift-g", SwitchThreadBranch.name()),
+                ] {
+                    let keystroke = Keystroke::parse(keys).unwrap();
+                    for (where_, stack) in [("view", &in_view), ("composer", &in_composer)] {
+                        let (bindings, _) = cx
+                            .key_bindings()
+                            .borrow()
+                            .bindings_for_input(std::slice::from_ref(&keystroke), stack);
+                        assert_eq!(
+                            bindings.first().map(|binding| binding.action().name()),
+                            Some(action),
+                            "{keys} in the {where_} ({base_keymap:?}, vim {vim_mode})"
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[gpui::test]
+async fn the_palette_offers_the_toolbar_on_the_focused_thread(cx: &mut TestAppContext) {
+    let backend = RecordingBackend::with_shell(shell(vec![shell_thread(json!({}))]));
+    backend.respond(
+        "server.getConfig",
+        Ok(json!({ "availableEditors": ["zed"] })),
+    );
+    init_test(backend.clone(), cx);
+    cx.update(init);
+    let (workspace, cx) = workspace(cx).await;
+    cx.update(|_, cx| crate::thread_git::Editors::global(cx));
+    cx.run_until_parked();
+    let available = |cx: &mut VisualTestContext| {
+        workspace.update_in(cx, |workspace, window, cx| {
+            window.focus(&workspace.active_pane().focus_handle(cx), cx);
+            [
+                window.is_action_available(&ReviewChanges, cx),
+                window.is_action_available(&OpenThreadInEditor, cx),
+                window.is_action_available(&SwitchThreadBranch, cx),
+                window.is_action_available(&CommitPushAndPr, cx),
+                window.is_action_available(&LinkThreadPullRequest, cx),
+            ]
+        })
+    };
+    cx.run_until_parked();
+    assert_eq!(available(cx), [false; 5], "no thread is open");
+
+    let weak = workspace.downgrade();
+    workspace.update_in(cx, |_, window, cx| {
+        thread_chat::open_thread(THREAD.to_string(), "Add retries".into(), weak, window, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(available(cx), [true; 5]);
+
+    cx.dispatch_action(OpenThreadInEditor);
+    cx.run_until_parked();
+    assert_eq!(
+        backend.calls_to("shell.openInEditor"),
+        [Call {
+            tag: "shell.openInEditor".to_string(),
+            payload: json!({ "cwd": WORKTREE, "editor": "zed" }),
+            access: Access::Operate,
+        }]
+    );
+    cx.dispatch_action(LinkThreadPullRequest);
+    cx.run_until_parked();
+    assert!(
+        workspace
+            .read_with(cx, |workspace, cx| workspace
+                .active_modal::<LinkPullRequestDialog>(cx))
+            .is_some()
+    );
+}

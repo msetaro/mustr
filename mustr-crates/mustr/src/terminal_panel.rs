@@ -7,22 +7,33 @@
 //! - Whether the panel shows is kept per thread too, as T3 keeps its drawer open per thread: it
 //!   opens for a thread whose terminals were showing and closes for one whose weren't. Other
 //!   items, such as home or a review, leave it as it is.
-//! - The terminals are Zed's (`terminal_view`), on this machine. A thread on a T3 that runs on
-//!   another machine would need T3's `terminal.*` RPCs and the `terminal:*` scopes, which mustr
-//!   doesn't use yet, so the panel says that instead.
+//! - When T3 runs on this machine, the terminals are Zed's (`terminal_view`), started in the
+//!   thread's folder. When it runs on another machine (or `MUSTR_IGNORE_LOCAL_WORKTREES` is set),
+//!   they're T3's, on that machine (`remote_terminal.rs`), in the same tabs with the same keys.
+//!   A thread's terminals that T3 still runs show again when the panel first shows the thread.
 //! - The panel is created synchronously with the workspace (`window.rs`), so dock restoration
 //!   finds it. Zed's own terminal panel loads asynchronously, which is why mustr doesn't use it.
 //!   Terminals start later, when a thread first wants one.
 //!
 //! [`OpenThreadTerminal`] (the thread toolbar's Terminal button) opens a thread's terminals,
 //! [`ToggleThreadTerminal`] (`secondary-j`, as in T3, and Zed's `ctrl-\``) shows or hides the
-//! active thread's, and [`NewThreadTerminal`] adds one.
+//! active thread's, and [`NewThreadTerminal`] adds one. [`AddTerminalSelectionToChat`] (the
+//! header's Add to chat, or `secondary->`) puts the selected lines in the thread's composer as a
+//! terminal chip (`thread_chat::AddComposerContext`), as T3's terminal does.
+//!
+//! The header's Run ▾ runs the project's scripts (T3's `ProjectScriptsControl.tsx`): the
+//! project's own (`scripts` in T3's shell) and those in the thread folder's `t3.json`
+//! (`projects.readFile`), each in a new terminal, typed with a space first as T3 does.
 
-use crate::worktrees::{display_path, worktrees_are_local};
+use crate::{
+    remote_terminal::{self, Launch, RemoteTerminal, RemoteTerminalEvent},
+    thread_git::{MenuSlot, menu_position},
+    worktrees::{display_path, worktrees_are_local},
+};
 use gpui::{
-    Action, AnyElement, App, AppContext as _, Context, Entity, EntityId, EventEmitter, FocusHandle,
-    Focusable, FontWeight, KeyBinding, Pixels, SharedString, Subscription, Task, WeakEntity,
-    Window, actions,
+    Action, AnyElement, AnyView, App, AppContext as _, Context, Entity, EntityId, EventEmitter,
+    FocusHandle, Focusable, FontWeight, KeyBinding, Pixels, SharedString, Subscription, Task,
+    WeakEntity, Window, actions,
 };
 use mustr_ui::{TextButton, WindowTab, kbds_for_action, palette, tokens, tokens::scaled};
 use project::Project;
@@ -30,10 +41,19 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
-use t3_client::t3_api::types::OrchestrationV2ThreadShell;
+use t3_client::t3_api::{
+    rpc,
+    types::{
+        OrchestrationV2ThreadShell, ProjectReadFileInput, ProjectScript, TerminalSessionStatus,
+        TerminalSummary,
+    },
+};
 use terminal_view::TerminalView;
-use thread_chat::{OpenThreadTerminal, ThreadShells, ThreadView};
-use ui::{Tooltip, prelude::*};
+use thread_chat::{
+    Access, AddComposerContext, ComposerContext, OpenThreadTerminal, ThreadBackendExt as _,
+    ThreadShells, ThreadView, actions::TerminalContext,
+};
+use ui::{ContextMenu, Tooltip, prelude::*};
 use workspace::{
     ItemHandle, Workspace,
     dock::{DockPosition, Panel, PanelEvent},
@@ -51,6 +71,9 @@ actions!(
         NewThreadTerminal,
         /// Closes the terminal the terminal panel shows.
         CloseThreadTerminal,
+        /// Adds the lines selected in the thread's terminal to its composer, for the next
+        /// message.
+        AddTerminalSelectionToChat,
     ]
 );
 
@@ -87,6 +110,8 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         // In the terminal, Linux's `ctrl-w` still goes to the shell: Zed's `Terminal` context
         // binds it, and it's nested deeper than the panel's.
         KeyBinding::new("secondary-w", CloseThreadTerminal, Some(KEY_CONTEXT)),
+        // Zed's key for adding a selection to its agent, which mustr leaves out.
+        KeyBinding::new("secondary->", AddTerminalSelectionToChat, Some(KEY_CONTEXT)),
     ]
 }
 
@@ -164,13 +189,22 @@ pub(crate) enum TerminalLocation {
     Loading,
     /// T3's shell doesn't have the thread, so its worktree isn't known: it's archived or gone.
     UnknownThread,
-    /// T3 runs on another machine, where the folder is.
-    Remote,
+    /// T3 runs on another machine, where the folder is: its terminals run there.
+    Remote(RemoteFolder),
     /// T3 runs here, but the folder is gone. `checkout` is the project's, if it's still here.
     Missing {
         path: String,
         checkout: Option<PathBuf>,
     },
+}
+
+/// A thread's folder on T3's machine, where its terminals start: its worktree, or its project's
+/// checkout (`projectScriptCwd` in T3's `packages/shared/src/projectScripts.ts`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RemoteFolder {
+    pub cwd: String,
+    pub worktree_path: Option<String>,
+    pub project_root: String,
 }
 
 pub(crate) fn terminal_location(
@@ -179,10 +213,27 @@ pub(crate) fn terminal_location(
     on_this_machine: bool,
     is_dir: impl Fn(&Path) -> bool,
 ) -> TerminalLocation {
-    if !on_this_machine {
-        return TerminalLocation::Remote;
-    }
     let root = project_root.map(str::trim).filter(|root| !root.is_empty());
+    if !on_this_machine {
+        let worktree_path =
+            crate::worktrees::normalize_worktree_path(thread.worktree_path.as_deref())
+                .map(str::to_string);
+        let project_root = root.unwrap_or_default().to_string();
+        let cwd = worktree_path
+            .clone()
+            .unwrap_or_else(|| project_root.clone());
+        if cwd.is_empty() {
+            return TerminalLocation::Missing {
+                path: String::new(),
+                checkout: None,
+            };
+        }
+        return TerminalLocation::Remote(RemoteFolder {
+            cwd,
+            worktree_path,
+            project_root,
+        });
+    }
     let checkout = root.map(PathBuf::from).filter(|root| is_dir(root));
     match crate::worktrees::normalize_worktree_path(thread.worktree_path.as_deref()) {
         Some(path) if is_dir(Path::new(path)) => TerminalLocation::Local(PathBuf::from(path)),
@@ -200,12 +251,35 @@ pub(crate) fn terminal_location(
     }
 }
 
-/// A terminal the panel hosts.
+/// A terminal the panel hosts: Zed's on this machine, or one on T3's machine.
 struct HostedTerminal {
     view: Entity<TerminalView>,
-    cwd: PathBuf,
+    remote: Option<Entity<RemoteTerminal>>,
+    /// Where it started, as the tab's tooltip shows it.
+    cwd: SharedString,
     title: SharedString,
-    _subscription: Subscription,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl HostedTerminal {
+    fn content(&self) -> AnyView {
+        match &self.remote {
+            Some(remote) => remote.clone().into(),
+            None => self.view.clone().into(),
+        }
+    }
+
+    fn title(&self, cx: &App) -> SharedString {
+        match &self.remote {
+            Some(remote) => remote.read(cx).title(cx),
+            None => terminal_title(&self.view, cx),
+        }
+    }
+
+    fn remote_id<'a>(&self, cx: &'a App) -> Option<&'a str> {
+        let remote = self.remote.as_ref()?;
+        Some(remote.read(cx).launch().terminal_id.as_str())
+    }
 }
 
 /// One thread's terminals.
@@ -223,6 +297,13 @@ struct ThreadTerminals {
     cwd_override: Option<PathBuf>,
     /// A terminal waits for T3's threads to load, to know where to start.
     waiting_for_shell: bool,
+    /// Whether the panel has looked for the terminals T3 runs for this thread on its machine.
+    found_remote: bool,
+    /// A script's command for the next terminal that starts.
+    pending_command: Option<String>,
+    /// The scripts in the thread folder's `t3.json`, once read.
+    file_scripts: Option<Vec<Script>>,
+    _read_scripts: Option<Task<()>>,
 }
 
 impl ThreadTerminals {
@@ -244,6 +325,8 @@ pub struct ThreadTerminalPanel {
     shells: Option<(Entity<ThreadShells>, Subscription)>,
     /// The active thread view, whose thread changes when a draft is started.
     _active_thread: Option<Subscription>,
+    /// The Run ▾ menu.
+    menu: MenuSlot,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -274,6 +357,7 @@ impl ThreadTerminalPanel {
             focus_on_start: false,
             shells: None,
             _active_thread: None,
+            menu: MenuSlot::default(),
             _subscriptions: vec![subscription],
         }
     }
@@ -338,8 +422,171 @@ impl ThreadTerminalPanel {
     fn show_thread(&mut self, thread_id: String, window: &mut Window, cx: &mut Context<Self>) {
         self.follow_shell(window, cx);
         self.threads.entry(thread_id.clone()).or_default();
-        self.thread_id = Some(thread_id);
+        self.thread_id = Some(thread_id.clone());
+        self.read_file_scripts(thread_id, cx);
         cx.notify();
+    }
+
+    /// The thread's folder on T3's machine (or this one): where its scripts run, and where its
+    /// `t3.json` is.
+    fn script_folder(&self, thread_id: &str, cx: &App) -> Option<String> {
+        let (shells, _) = self.shells.as_ref()?;
+        let shell = shells.read(cx).shell()?;
+        let thread = shell.threads.get(thread_id)?;
+        crate::worktrees::normalize_worktree_path(thread.worktree_path.as_deref())
+            .map(str::to_string)
+            .or_else(|| {
+                let project = shell.projects.get(&thread.project_id)?;
+                Some(project.workspace_root.clone()).filter(|root| !root.trim().is_empty())
+            })
+    }
+
+    /// The project's own scripts, from T3's shell.
+    fn project_scripts(&self, thread_id: &str, cx: &App) -> Vec<Script> {
+        let Some((shells, _)) = &self.shells else {
+            return Vec::new();
+        };
+        let Some(shell) = shells.read(cx).shell() else {
+            return Vec::new();
+        };
+        shell
+            .threads
+            .get(thread_id)
+            .and_then(|thread| shell.projects.get(&thread.project_id))
+            .map(|project| project.scripts.iter().map(Script::from_project).collect())
+            .unwrap_or_default()
+    }
+
+    /// Reads the thread folder's `t3.json` once, when the panel first shows the thread.
+    fn read_file_scripts(&mut self, thread_id: String, cx: &mut Context<Self>) {
+        let Some(terminals) = self.threads.get(&thread_id) else {
+            return;
+        };
+        if terminals.file_scripts.is_some() || terminals._read_scripts.is_some() {
+            return;
+        }
+        let (Some(backend), Some(cwd)) =
+            (thread_chat::backend(cx), self.script_folder(&thread_id, cx))
+        else {
+            return;
+        };
+        let read = backend.call::<rpc::ProjectsReadFile>(
+            ProjectReadFileInput {
+                cwd,
+                relative_path: T3_PROJECT_FILE.to_string(),
+                allow_missing: Some(true),
+            },
+            Access::FilesystemRead,
+        );
+        let key = thread_id.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let scripts = match read.await {
+                Ok(file) if !file.truncated && file.exists != Some(false) => {
+                    file_scripts(&file.contents)
+                }
+                Ok(_) => Vec::new(),
+                Err(error) => {
+                    log::info!("couldn't read {T3_PROJECT_FILE}: {error:#}");
+                    Vec::new()
+                }
+            };
+            this.update(cx, |this, cx| {
+                if let Some(terminals) = this.threads.get_mut(&thread_id) {
+                    terminals.file_scripts = Some(scripts);
+                    terminals._read_scripts = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        });
+        if let Some(terminals) = self.threads.get_mut(&key) {
+            terminals._read_scripts = Some(task);
+        }
+    }
+
+    /// The scripts Run ▾ offers: the project's, then `t3.json`'s that the project doesn't have
+    /// (by command or name, as T3 compares them).
+    pub(crate) fn scripts(&self, cx: &App) -> (Vec<Script>, Vec<Script>) {
+        let Some(thread_id) = self.thread_id.as_deref() else {
+            return Default::default();
+        };
+        let project = self.project_scripts(thread_id, cx);
+        let file = self
+            .threads
+            .get(thread_id)
+            .and_then(|terminals| terminals.file_scripts.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|script| {
+                !project.iter().any(|known| {
+                    known.command == script.command || known.name.eq_ignore_ascii_case(&script.name)
+                })
+            })
+            .collect();
+        (project, file)
+    }
+
+    /// Runs a script in a new terminal of the shown thread.
+    pub(crate) fn run_script(
+        &mut self,
+        command: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return;
+        };
+        let terminals = self.threads.entry(thread_id.clone()).or_default();
+        if terminals.starting.is_some() {
+            return;
+        }
+        terminals.pending_command = Some(command);
+        terminals.error = None;
+        self.focus_on_start = true;
+        self.start_terminal(thread_id, window, cx);
+        let workspace = self.workspace.clone();
+        window.defer(cx, move |window, cx| {
+            workspace
+                .update(cx, |workspace, cx| workspace.open_panel::<Self>(window, cx))
+                .ok();
+        });
+    }
+
+    fn deploy_scripts_menu(
+        &mut self,
+        position: gpui::Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (project, file) = self.scripts(cx);
+        let this = cx.weak_entity();
+        let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            for script in &project {
+                let this = this.clone();
+                let command = script.command.clone();
+                menu = menu.entry(script.menu_label(), None, move |window, cx| {
+                    this.update(cx, |this, cx| this.run_script(command.clone(), window, cx))
+                        .ok();
+                });
+            }
+            if !file.is_empty() {
+                if !project.is_empty() {
+                    menu = menu.separator();
+                }
+                menu = menu.header(format!("From {T3_PROJECT_FILE}"));
+                for script in &file {
+                    let this = this.clone();
+                    let command = script.command.clone();
+                    menu = menu.entry(script.menu_label(), None, move |window, cx| {
+                        this.update(cx, |this, cx| this.run_script(command.clone(), window, cx))
+                            .ok();
+                    });
+                }
+            }
+            menu
+        });
+        self.menu
+            .deploy(position, menu, window, cx, |this| &mut this.menu);
     }
 
     fn follow_shell(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -359,6 +606,8 @@ impl ThreadTerminalPanel {
         let Some(thread_id) = self.thread_id.clone() else {
             return;
         };
+        // Its `t3.json` can be read once the shell says where its folder is.
+        self.read_file_scripts(thread_id.clone(), cx);
         let waiting = self
             .threads
             .get(&thread_id)
@@ -442,6 +691,9 @@ impl ThreadTerminalPanel {
         }
         let cwd = match (terminals.cwd_override.clone(), location) {
             (Some(cwd), _) | (None, TerminalLocation::Local(cwd)) => cwd,
+            (None, TerminalLocation::Remote(folder)) => {
+                return self.start_remote_terminals(thread_id, folder, window, cx);
+            }
             (None, TerminalLocation::Loading) => {
                 terminals.waiting_for_shell = true;
                 self.follow_shell(window, cx);
@@ -470,8 +722,18 @@ impl ThreadTerminalPanel {
                     return;
                 };
                 terminals.starting = None;
+                let command = terminals.pending_command.take();
                 match view {
-                    Ok(view) => this.add_terminal(&thread_id, view, cwd, window, cx),
+                    Ok(view) => {
+                        if let Some(command) = command {
+                            let terminal = view.read(cx).terminal().clone();
+                            terminal.update(cx, |terminal, _| {
+                                terminal.write_init_command(format!(" {command}\r").into_bytes())
+                            });
+                        }
+                        let cwd = display_path(&cwd).into();
+                        this.add_terminal(&thread_id, view, None, cwd, window, cx)
+                    }
                     Err(error) => {
                         log::error!("couldn't start a terminal in {}: {error:#}", cwd.display());
                         terminals.error = Some(
@@ -490,34 +752,206 @@ impl ThreadTerminalPanel {
         cx.notify();
     }
 
+    /// Starts a terminal on T3's machine. The first time the panel shows the thread, it shows
+    /// the terminals T3 still runs for it instead, if there are any, as T3's drawer does.
+    fn start_remote_terminals(
+        &mut self,
+        thread_id: String,
+        folder: RemoteFolder,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(backend) = thread_chat::backend(cx) else {
+            return;
+        };
+        let size = self.grid_size(cx);
+        let Some(terminals) = self.threads.get_mut(&thread_id) else {
+            return;
+        };
+        terminals.error = None;
+        let command = terminals.pending_command.take();
+        let reattach = !std::mem::replace(&mut terminals.found_remote, true);
+        let shown_ids = terminals
+            .terminals
+            .iter()
+            .filter_map(|hosted| hosted.remote_id(cx).map(str::to_string))
+            .collect::<Vec<_>>();
+        let listed = remote_terminal::thread_terminals(backend, thread_id.clone(), cx);
+        terminals.starting = Some(cx.spawn_in(window, async move |this, cx| {
+            let mut launches = match listed.await {
+                Ok(listed) => {
+                    let mut launches =
+                        remote_launches(&thread_id, &folder, &listed, &shown_ids, reattach);
+                    // A script runs in a terminal of its own, after the ones T3 still runs.
+                    if command.is_some()
+                        && launches.iter().any(|launch| {
+                            listed
+                                .iter()
+                                .any(|listed| listed.terminal_id == launch.terminal_id)
+                        })
+                    {
+                        let ids = listed
+                            .iter()
+                            .map(|terminal| terminal.terminal_id.as_str())
+                            .chain(shown_ids.iter().map(String::as_str));
+                        launches.push(
+                            folder.launch(&thread_id, remote_terminal::next_terminal_id(ids, None)),
+                        );
+                    }
+                    launches
+                }
+                Err(error) => {
+                    // Without T3's list, a suffix keeps the id from reaching a terminal mustr
+                    // can't see, as T3's app does.
+                    log::warn!("couldn't list T3's terminals: {error:#}");
+                    let suffix = uuid::Uuid::new_v4().to_string();
+                    let ids = shown_ids.iter().map(String::as_str);
+                    let terminal_id = remote_terminal::next_terminal_id(ids, Some(&suffix));
+                    vec![folder.launch(&thread_id, terminal_id)]
+                }
+            };
+            let command_for = command.map(|command| {
+                (
+                    launches.last().map(|launch| launch.terminal_id.clone()),
+                    command,
+                )
+            });
+            let mut error = None;
+            for launch in launches.drain(..) {
+                let run = command_for
+                    .as_ref()
+                    .filter(|(terminal_id, _)| terminal_id.as_ref() == Some(&launch.terminal_id))
+                    .map(|(_, command)| command.clone());
+                let Ok(open) = this.update_in(cx, |this, window, cx| {
+                    RemoteTerminal::open(
+                        launch,
+                        size,
+                        this.workspace.clone(),
+                        &this.project,
+                        window,
+                        cx,
+                    )
+                }) else {
+                    return;
+                };
+                match open.await {
+                    Ok(remote) => this
+                        .update_in(cx, |this, window, cx| {
+                            if let Some(command) = &run {
+                                remote.update(cx, |remote, cx| remote.run_command(command, cx));
+                            }
+                            this.add_remote_terminal(&thread_id, remote, window, cx)
+                        })
+                        .ok(),
+                    Err(open_error) => {
+                        log::error!("couldn't start a terminal on T3's machine: {open_error:#}");
+                        error = Some(open_error);
+                        None
+                    }
+                };
+            }
+            this.update(cx, |this, cx| {
+                let Some(terminals) = this.threads.get_mut(&thread_id) else {
+                    return;
+                };
+                terminals.starting = None;
+                if let Some(error) = error
+                    && terminals.terminals.is_empty()
+                {
+                    terminals.error = Some(
+                        format!("Couldn't start a terminal on T3's machine: {error:#}").into(),
+                    );
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    /// The grid size of a terminal the panel shows, for a new one to start at.
+    fn grid_size(&self, cx: &App) -> Option<(i64, i64)> {
+        let hosted = self.shown().and_then(ThreadTerminals::active).or_else(|| {
+            self.threads
+                .values()
+                .find_map(|terminals| terminals.active())
+        })?;
+        let bounds = hosted
+            .view
+            .read(cx)
+            .terminal()
+            .read(cx)
+            .last_content()
+            .terminal_bounds;
+        let size = (bounds.num_columns() as i64, bounds.num_lines() as i64);
+        (size.0 > 1 && size.1 > 1).then_some(size)
+    }
+
+    fn add_remote_terminal(
+        &mut self,
+        thread_id: &str,
+        remote: Entity<RemoteTerminal>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let view = remote.read(cx).view().clone();
+        let cwd = remote.read(cx).launch().cwd.clone().into();
+        self.add_terminal(thread_id, view, Some(remote), cwd, window, cx);
+    }
+
     fn add_terminal(
         &mut self,
         thread_id: &str,
         view: Entity<TerminalView>,
-        cwd: PathBuf,
+        remote: Option<Entity<RemoteTerminal>>,
+        cwd: SharedString,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let subscription = cx.subscribe_in(
-            &view,
-            window,
-            |this, view, event: &ItemEvent, window, cx| match event {
-                // The shell exited.
-                ItemEvent::CloseItem => this.remove_terminal(view.entity_id(), window, cx),
-                ItemEvent::UpdateTab => this.update_title(view, cx),
-                _ => {}
-            },
-        );
-        let title = terminal_title(&view, cx);
+        let terminal = view.read(cx).terminal().clone();
+        let mut subscriptions = vec![
+            cx.subscribe_in(
+                &view,
+                window,
+                |this, view, event: &ItemEvent, window, cx| match event {
+                    // The shell exited.
+                    ItemEvent::CloseItem => this.remove_terminal(view.entity_id(), window, cx),
+                    ItemEvent::UpdateTab => this.update_title(view, cx),
+                    _ => {}
+                },
+            ),
+            // The header's Add to chat follows the selection.
+            cx.subscribe(&terminal, |_, _, event: &terminal::Event, cx| {
+                if let terminal::Event::SelectionsChanged = event {
+                    cx.notify();
+                }
+            }),
+        ];
+        if let Some(remote) = &remote {
+            let view = view.clone();
+            subscriptions.push(cx.subscribe_in(
+                remote,
+                window,
+                move |this, _, event: &RemoteTerminalEvent, window, cx| match event {
+                    RemoteTerminalEvent::TitleChanged => this.update_title(&view, cx),
+                    RemoteTerminalEvent::Ended => {
+                        this.remove_terminal(view.entity_id(), window, cx)
+                    }
+                },
+            ));
+        }
+        let mut hosted = HostedTerminal {
+            view: view.clone(),
+            remote,
+            cwd,
+            title: SharedString::default(),
+            _subscriptions: subscriptions,
+        };
+        hosted.title = hosted.title(cx);
         let Some(terminals) = self.threads.get_mut(thread_id) else {
             return;
         };
-        terminals.terminals.push(HostedTerminal {
-            view: view.clone(),
-            cwd,
-            title,
-            _subscription: subscription,
-        });
+        terminals.terminals.push(hosted);
         terminals.active = terminals.terminals.len() - 1;
         if self.focus_on_start && self.thread_id.as_deref() == Some(thread_id) {
             self.focus_on_start = false;
@@ -527,17 +961,17 @@ impl ThreadTerminalPanel {
     }
 
     fn update_title(&mut self, view: &Entity<TerminalView>, cx: &mut Context<Self>) {
-        let title = terminal_title(view, cx);
         let hosted = self
             .threads
             .values_mut()
             .flat_map(|terminals| terminals.terminals.iter_mut())
             .find(|hosted| hosted.view == *view);
-        if let Some(hosted) = hosted
-            && hosted.title != title
-        {
-            hosted.title = title;
-            cx.notify();
+        if let Some(hosted) = hosted {
+            let title = hosted.title(cx);
+            if hosted.title != title {
+                hosted.title = title;
+                cx.notify();
+            }
         }
     }
 
@@ -561,8 +995,23 @@ impl ThreadTerminalPanel {
             .and_then(ThreadTerminals::active)
             .map(|hosted| hosted.view.entity_id())
         {
-            self.remove_terminal(id, window, cx);
+            self.close_terminal(id, window, cx);
         }
+    }
+
+    /// Closes a terminal the user closed. One on T3's machine is ended there too; a local one
+    /// ends when it's dropped.
+    fn close_terminal(&mut self, id: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+        let remote = self
+            .threads
+            .values()
+            .flat_map(|terminals| terminals.terminals.iter())
+            .find(|hosted| hosted.view.entity_id() == id)
+            .and_then(|hosted| hosted.remote.clone());
+        if let Some(remote) = remote {
+            remote.update(cx, |remote, cx| remote.close(cx));
+        }
+        self.remove_terminal(id, window, cx);
     }
 
     /// Drops a terminal, which ends its shell. Closing the shown thread's last one hides the
@@ -604,6 +1053,45 @@ impl ThreadTerminalPanel {
         cx.notify();
     }
 
+    /// The shown terminal's selection as a composer chip for its thread.
+    fn selection_context(&self, cx: &App) -> Option<(String, TerminalContext)> {
+        let thread_id = self.thread_id.clone()?;
+        let terminals = self.shown()?;
+        let hosted = terminals.active()?;
+        let content = hosted.view.read(cx).terminal().read(cx).last_content();
+        let selection = content.selection?;
+        let terminal_id = match hosted.remote_id(cx) {
+            Some(terminal_id) => terminal_id.to_string(),
+            None => format!("local-{}", terminals.active + 1),
+        };
+        let context = terminal_context(
+            terminal_id,
+            hosted.title.to_string(),
+            content.selection_text.as_deref()?,
+            (selection.start.line, selection.end.line),
+            content.total_lines.saturating_sub(content.screen_lines),
+            &uuid::Uuid::new_v4().simple().to_string(),
+        )?;
+        Some((thread_id, context))
+    }
+
+    /// Puts the selection in the thread's composer, which `AddComposerContext`'s handler owns,
+    /// and keeps the terminal's focus, as T3's Add to chat does. (Zed's terminal can't clear a
+    /// selection without copying it, so it stays.)
+    fn add_selection_to_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((thread_id, context)) = self.selection_context(cx) else {
+            return;
+        };
+        window.dispatch_action(
+            Box::new(AddComposerContext {
+                thread_id,
+                context: ComposerContext::Terminal(context),
+            }),
+            cx,
+        );
+        cx.notify();
+    }
+
     /// Starts terminals in the project's checkout instead of the thread's folder, which is gone.
     fn use_checkout(&mut self, checkout: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let Some(thread_id) = self.thread_id.clone() else {
@@ -639,7 +1127,7 @@ impl ThreadTerminalPanel {
             .and_then(|thread_id| self.thread_title(thread_id, cx));
         let cwd = terminals
             .and_then(ThreadTerminals::active)
-            .map(|hosted| display_path(&hosted.cwd));
+            .map(|hosted| hosted.cwd.to_string());
         let details = [title.map(|title| title.to_string()), cwd]
             .into_iter()
             .flatten()
@@ -658,14 +1146,14 @@ impl ThreadTerminalPanel {
                             hosted.title.clone(),
                         )
                         .active(index == terminals.active)
-                        .tooltip(display_path(&hosted.cwd))
+                        .tooltip(hosted.cwd.clone())
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.activate_terminal(index, window, cx)
                         }))
                         .on_close({
                             let this = cx.entity().downgrade();
                             move |window, cx| {
-                                this.update(cx, |this, cx| this.remove_terminal(id, window, cx))
+                                this.update(cx, |this, cx| this.close_terminal(id, window, cx))
                                     .ok();
                             }
                         })
@@ -676,6 +1164,11 @@ impl ThreadTerminalPanel {
             .unwrap_or_default();
         let can_add = self.thread_id.is_some()
             && terminals.is_some_and(|terminals| !terminals.terminals.is_empty());
+        let has_selection = self.selection_context(cx).is_some();
+        let has_scripts = {
+            let (project, file) = self.scripts(cx);
+            !project.is_empty() || !file.is_empty()
+        };
         let focus_handle = self.focus_handle.clone();
         h_flex()
             .flex_none()
@@ -723,6 +1216,29 @@ impl ThreadTerminalPanel {
                         .truncate(),
                 ),
             )
+            .when(has_scripts, |this| {
+                this.child(
+                    TextButton::new("thread-terminal-scripts", "Run ▾")
+                        .tooltip("Run one of the project's scripts in a new terminal")
+                        .on_click(cx.listener(|_, event, window, cx| {
+                            // After the click's own focus changes (the dock focuses its
+                            // terminal), which would close a menu opened now.
+                            let position = menu_position(event, window);
+                            cx.defer_in(window, move |this, window, cx| {
+                                this.deploy_scripts_menu(position, window, cx)
+                            });
+                        })),
+                )
+            })
+            .when(has_selection, |this| {
+                this.child(
+                    TextButton::new("add-terminal-selection-to-chat", "Add to chat")
+                        .tooltip("Add the selected lines to the thread's next message")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.add_selection_to_chat(window, cx)
+                        })),
+                )
+            })
             .child(
                 IconButton::new("hide-thread-terminals", IconName::Close)
                     .icon_size(IconSize::Small)
@@ -758,7 +1274,7 @@ impl ThreadTerminalPanel {
                 .flex_1()
                 .min_h_0()
                 .w_full()
-                .child(hosted.view.clone())
+                .child(hosted.content())
                 .into_any_element();
         }
         if let Some(error) = terminals.and_then(|terminals| terminals.error.clone()) {
@@ -804,11 +1320,9 @@ impl ThreadTerminalPanel {
                 "T3 doesn't list this thread as active, so mustr doesn't know its worktree.".into(),
                 None,
             ),
-            TerminalLocation::Remote => (
-                "This thread's worktree is on the machine T3 runs on. Terminals on a remote \
-                     T3 aren't supported yet."
-                    .into(),
-                None,
+            TerminalLocation::Remote(folder) => (
+                format!("No terminals open in {} on T3's machine.", folder.cwd).into(),
+                start,
             ),
             TerminalLocation::Missing { path, checkout } => {
                 let text: SharedString =
@@ -869,6 +1383,165 @@ impl ThreadTerminalPanel {
     }
 }
 
+impl RemoteFolder {
+    fn launch(&self, thread_id: &str, terminal_id: String) -> Launch {
+        Launch {
+            thread_id: thread_id.to_string(),
+            terminal_id,
+            cwd: self.cwd.clone(),
+            worktree_path: self.worktree_path.clone(),
+            project_root: self.project_root.clone(),
+        }
+    }
+}
+
+/// The terminals to show for a thread on T3's machine: the ones T3 runs for it, when the panel
+/// first shows the thread (`reattach`), or else a new one, numbered after every terminal T3 has
+/// for it and every one the panel shows.
+fn remote_launches(
+    thread_id: &str,
+    folder: &RemoteFolder,
+    listed: &[TerminalSummary],
+    shown_ids: &[String],
+    reattach: bool,
+) -> Vec<Launch> {
+    let mut running = listed
+        .iter()
+        .filter(|terminal| {
+            matches!(
+                terminal.status,
+                TerminalSessionStatus::Running | TerminalSessionStatus::Starting
+            ) && !shown_ids.contains(&terminal.terminal_id)
+        })
+        .collect::<Vec<_>>();
+    if reattach && !running.is_empty() {
+        running.sort_by(|a, b| a.terminal_id.cmp(&b.terminal_id));
+        return running
+            .into_iter()
+            .map(|terminal| Launch {
+                thread_id: thread_id.to_string(),
+                terminal_id: terminal.terminal_id.clone(),
+                cwd: terminal.cwd.clone(),
+                worktree_path: terminal.worktree_path.clone(),
+                project_root: folder.project_root.clone(),
+            })
+            .collect();
+    }
+    let ids = listed
+        .iter()
+        .map(|terminal| terminal.terminal_id.as_str())
+        .chain(shown_ids.iter().map(String::as_str));
+    vec![folder.launch(thread_id, remote_terminal::next_terminal_id(ids, None))]
+}
+
+/// A terminal selection as T3's composer chip (`terminalContextRecord`): its text without
+/// leading and trailing blank lines, and its lines counted from the top of the scrollback, from
+/// 1. `lines` are the selection's grid lines, which count from the screen's top, negative in the
+/// scrollback above it (`history` lines).
+pub(crate) fn terminal_context(
+    terminal_id: String,
+    terminal_label: String,
+    selection_text: &str,
+    lines: (i32, i32),
+    history: usize,
+    producer_id: &str,
+) -> Option<TerminalContext> {
+    const MAX_TEXT: usize = 64_000;
+    let normalized = selection_text.replace("\r\n", "\n");
+    let text = normalized.trim_matches('\n');
+    if text.trim().is_empty() {
+        return None;
+    }
+    let text = match text.char_indices().nth(MAX_TEXT) {
+        Some((end, _)) => &text[..end],
+        None => text,
+    };
+    let row = |line: i32| (i64::from(line) + history as i64 + 1).max(1) as u32;
+    let line_start = row(lines.0.min(lines.1));
+    let line_end = row(lines.0.max(lines.1)).max(line_start);
+    let range = if line_start == line_end {
+        format!("line {line_start}")
+    } else {
+        format!("lines {line_start}-{line_end}")
+    };
+    Some(TerminalContext {
+        context_id: format!("terminal_{producer_id}"),
+        label: format!("{terminal_label} {range}"),
+        terminal_id,
+        terminal_label,
+        line_start,
+        line_end,
+        text: text.to_string(),
+    })
+}
+
+/// T3's project file (`T3_PROJECT_FILE_NAME`).
+const T3_PROJECT_FILE: &str = "t3.json";
+
+/// A script Run ▾ offers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Script {
+    pub name: String,
+    pub command: String,
+    pub setup: bool,
+    pub on_settle: bool,
+}
+
+impl Script {
+    fn from_project(script: &ProjectScript) -> Self {
+        Self {
+            name: script.name.clone(),
+            command: script.command.clone(),
+            setup: script.run_on_worktree_create,
+            on_settle: script.run_on_settle == Some(true),
+        }
+    }
+
+    /// `projectScriptMenuLabel`: `Test`, or `Install (setup, on settle)`.
+    pub(crate) fn menu_label(&self) -> String {
+        let roles = [(self.setup, "setup"), (self.on_settle, "on settle")]
+            .into_iter()
+            .filter_map(|(has, role)| has.then_some(role))
+            .collect::<Vec<_>>();
+        if roles.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{} ({})", self.name, roles.join(", "))
+        }
+    }
+}
+
+/// The scripts in a `t3.json` (T3's `T3ProjectFile`): those with a name and a command.
+pub(crate) fn file_scripts(contents: &str) -> Vec<Script> {
+    let Ok(file) = serde_json::from_str::<serde_json::Value>(contents) else {
+        return Vec::new();
+    };
+    let text = |script: &serde_json::Value, field: &str| {
+        script
+            .get(field)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let flag = |script: &serde_json::Value, field: &str| {
+        script.get(field).and_then(|value| value.as_bool()) == Some(true)
+    };
+    file.get("scripts")
+        .and_then(|scripts| scripts.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|script| {
+            Some(Script {
+                name: text(script, "name")?,
+                command: text(script, "command")?,
+                setup: flag(script, "runOnWorktreeCreate"),
+                on_settle: flag(script, "runOnSettle"),
+            })
+        })
+        .collect()
+}
+
 type MessageAction =
     Box<dyn Fn(&mut ThreadTerminalPanel, &mut Window, &mut Context<ThreadTerminalPanel>)>;
 
@@ -879,6 +1552,27 @@ fn terminal_title(view: &Entity<TerminalView>, cx: &App) -> SharedString {
         .filter(|title| !title.trim().is_empty())
         .unwrap_or_else(|| view.terminal().read(cx).title(true))
         .into()
+}
+
+#[cfg(test)]
+impl ThreadTerminalPanel {
+    /// The terminals on T3's machine the panel shows for its thread.
+    pub(crate) fn remote_terminals(&self) -> Vec<Entity<RemoteTerminal>> {
+        self.shown()
+            .map(|terminals| {
+                terminals
+                    .terminals
+                    .iter()
+                    .filter_map(|hosted| hosted.remote.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Why the shown thread's last terminal didn't start.
+    pub(crate) fn shown_error(&self) -> Option<SharedString> {
+        self.shown()?.error.clone()
+    }
 }
 
 impl EventEmitter<PanelEvent> for ThreadTerminalPanel {}
@@ -966,11 +1660,17 @@ impl Render for ThreadTerminalPanel {
             .on_action(cx.listener(|this, _: &CloseThreadTerminal, window, cx| {
                 this.close_active_terminal(window, cx)
             }))
+            .on_action(
+                cx.listener(|this, _: &AddTerminalSelectionToChat, window, cx| {
+                    this.add_selection_to_chat(window, cx)
+                }),
+            )
             .on_action(cx.listener(|this, _: &CloseActiveItem, window, cx| {
                 this.close_active_terminal(window, cx)
             }))
             .child(self.render_header(cx))
             .child(self.render_body(window, cx))
+            .children(self.menu.render())
     }
 }
 
@@ -1019,7 +1719,20 @@ mod tests {
                 false,
                 exists
             ),
-            TerminalLocation::Remote
+            TerminalLocation::Remote(RemoteFolder {
+                cwd: "/here/wt/a".into(),
+                worktree_path: Some("/here/wt/a".into()),
+                project_root: "/here/api".into(),
+            })
+        );
+        // On T3's machine, mustr can't check the folder; without a worktree, the checkout.
+        assert_eq!(
+            terminal_location(&shell_thread(None), Some("/there/api"), false, exists),
+            TerminalLocation::Remote(RemoteFolder {
+                cwd: "/there/api".into(),
+                worktree_path: None,
+                project_root: "/there/api".into(),
+            })
         );
     }
 
@@ -1044,7 +1757,8 @@ mod tests {
 
     #[gpui::test]
     async fn each_thread_keeps_its_own_terminals_open_or_closed(cx: &mut TestAppContext) {
-        // Remote, so no shell starts in the test; where terminals would start is checked above.
+        // Remote, so no shell starts in the test (and the fake can't open T3's); where
+        // terminals would start is checked above.
         let backend = FakeBackend::new(
             vec![thread("a", Some("/wt/a")), thread("b", Some("/wt/b"))],
             Vec::new(),
@@ -1074,7 +1788,14 @@ mod tests {
         cx.run_until_parked();
         assert!(showing(&workspace, &panel, cx));
         panel.read_with(cx, |panel, cx| {
-            assert_eq!(panel.location("a", cx), TerminalLocation::Remote)
+            assert_eq!(
+                panel.location("a", cx),
+                TerminalLocation::Remote(RemoteFolder {
+                    cwd: "/wt/a".into(),
+                    worktree_path: Some("/wt/a".into()),
+                    project_root: "/src/api".into(),
+                })
+            )
         });
 
         // Thread b's terminals weren't showing, so switching hides the panel...

@@ -165,6 +165,8 @@ pub(crate) fn load_default_keymap(cx: &mut App) {
     // WP5, scheduled tasks:
     // WP6, terminals and worktrees:
     mustr_bindings.extend(crate::terminal_panel::key_bindings());
+    // WP11, terminals, worktrees and the PR flow:
+    mustr_bindings.extend(crate::thread_toolbar::key_bindings());
     // Zoom, which must come after Zed's keymaps (`zoom::key_bindings`):
     mustr_bindings.extend(crate::zoom::key_bindings());
     for key_binding in &mut mustr_bindings {

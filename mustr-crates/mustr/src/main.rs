@@ -44,6 +44,7 @@ mod macos;
 // WP8, notifications:
 mod notifications;
 // WP11, terminals, worktrees and the PR flow:
+mod remote_terminal;
 // WP12, composer and timeline:
 // WP13, thread list and navigation:
 // WP14, agent setup and T3's settings:
