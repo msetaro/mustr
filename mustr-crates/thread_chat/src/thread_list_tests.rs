@@ -360,6 +360,9 @@ struct Recorder {
     unsupported: Mutex<HashSet<String>>,
     /// Every RPC called: its tag, payload and access level.
     calls: Mutex<Vec<(String, Value, Access)>>,
+    /// RPCs whose answers wait for the test (`answer_held`).
+    held: Mutex<HashSet<String>>,
+    holds: Mutex<Vec<futures::channel::oneshot::Sender<Result<Value>>>>,
 }
 
 impl Recorder {
@@ -480,6 +483,11 @@ impl ThreadBackend for Recorder {
         }
         if self.read_only && access.is_write() {
             return ready(Err(anyhow!("Not sent: read only.")));
+        }
+        if self.held.lock().contains(tag) {
+            let (sender, receiver) = futures::channel::oneshot::channel();
+            self.holds.lock().push(sender);
+            return async move { receiver.await? }.boxed();
         }
         match self.answers.lock().get(tag) {
             Some(Ok(answer)) => ready(Ok(answer.clone())),
@@ -935,6 +943,12 @@ impl Recorder {
         self.answers.lock().insert(tag.to_string(), Ok(answer));
     }
 
+    /// Answers the oldest held call.
+    fn answer_held(&self, answer: Value) {
+        let sender = self.holds.lock().remove(0);
+        sender.send(Ok(answer)).ok();
+    }
+
     fn calls_to(&self, tag: &str) -> Vec<(Value, Access)> {
         self.calls
             .lock()
@@ -1258,6 +1272,23 @@ fn snippets_highlight_the_searched_words() {
         .map(|index| &text[*index..*index + 1])
         .collect::<String>();
     assert_eq!(highlighted, "RetryWEBHOOKretry");
+}
+
+#[test]
+fn snippets_start_near_their_match() {
+    use crate::sidebar::focus_snippet;
+    assert_eq!(
+        focus_snippet("…we kept the old worktree around", "worktree"),
+        "…we kept the old worktree around"
+    );
+    assert_eq!(
+        focus_snippet(
+            "…excerpts and review comments, then the agent removed the worktree and pushed",
+            "worktree"
+        ),
+        "…removed the worktree and pushed"
+    );
+    assert_eq!(focus_snippet("no match here", "worktree"), "no match here");
 }
 
 #[gpui::test]
@@ -1756,4 +1787,45 @@ async fn new_threads_reuse_the_previous_worktree(cx: &mut TestAppContext) {
     cx.dispatch_action(crate::ToggleWorkspacePicker);
     cx.run_until_parked();
     assert!(!form.read_with(cx, |form, _| form.workspace_menu_is_open()));
+}
+
+#[gpui::test]
+async fn one_message_search_runs_at_a_time(cx: &mut TestAppContext) {
+    let backend = search_fixture();
+    backend
+        .held
+        .lock()
+        .insert("orchestration.searchThreads".into());
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let sidebar = sidebar(&workspace, cx);
+    let queries = |backend: &Recorder| {
+        backend
+            .calls_to("orchestration.searchThreads")
+            .into_iter()
+            .map(|(payload, _)| payload["query"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    search(&sidebar, "billing", cx);
+    cx.executor().advance_clock(Duration::from_millis(150));
+    cx.run_until_parked();
+    // T3 is still searching: the next queries wait for it.
+    search(&sidebar, "billing exp", cx);
+    cx.executor().advance_clock(Duration::from_millis(150));
+    search(&sidebar, "billing export", cx);
+    cx.executor().advance_clock(Duration::from_millis(150));
+    cx.run_until_parked();
+    assert_eq!(queries(&backend), ["billing"]);
+    assert_eq!(rows(&sidebar, cx), ["found:b", "searching"]);
+    // Its answer shows while the latest query goes.
+    let found = json!({ "matches": [{
+        "threadId": "c", "projectId": "project-1", "source": "user",
+        "snippet": "the billing export", "messageCreatedAt": NOW_ISO
+    }]});
+    backend.answer_held(found);
+    cx.run_until_parked();
+    assert_eq!(queries(&backend), ["billing", "billing export"]);
+    assert_eq!(rows(&sidebar, cx), ["found:b", "In messages", "message:c"]);
+    backend.answer_held(json!({ "matches": [] }));
+    cx.run_until_parked();
+    assert_eq!(rows(&sidebar, cx), ["found:b"]);
 }

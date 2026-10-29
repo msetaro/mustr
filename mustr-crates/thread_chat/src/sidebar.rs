@@ -695,16 +695,38 @@ pub(crate) struct MessageMatch {
 }
 
 /// The search's message matches, for one query.
+///
+/// One search at a time goes to T3: a server without a message index (T3 0.1.1) scans every
+/// message for each, which takes a minute on a big history, and a search mustr stops waiting
+/// for still runs there. The latest query goes once the one in flight answers.
 #[derive(Default)]
 struct MessageSearch {
-    /// The query as sent to T3.
+    /// The query as T3 takes it, the latest typed.
     query: String,
     matches: Vec<MessageMatch>,
     /// What T3 sent, kept so the matches follow the shell's changes.
     raw: Vec<t3_api::types::OrchestrationThreadSearchMatch>,
     pending: bool,
     failed: bool,
-    _task: Option<Task<()>>,
+    _debounce: Option<Task<()>>,
+    /// Whether the user stopped typing the latest query long enough to send it.
+    debounced: bool,
+    /// The query T3 is searching for now.
+    in_flight: Option<String>,
+    _request: Option<Task<()>>,
+}
+
+impl MessageSearch {
+    /// Forgets the query and its matches, but not the search T3 is running.
+    fn clear(&mut self) {
+        self.query.clear();
+        self.matches.clear();
+        self.raw.clear();
+        self.pending = false;
+        self.failed = false;
+        self._debounce = None;
+        self.debounced = false;
+    }
 }
 
 /// The search as T3 sends it (`useThreadSearch`): trimmed and cut to T3's limit, or `None` when
@@ -792,6 +814,40 @@ pub(crate) fn highlights(text: &str, query: &str) -> Vec<usize> {
         .filter(|(_, marked)| *marked)
         .map(|((index, _), _)| *index)
         .collect()
+}
+
+/// How many characters a snippet keeps before its first match, so the match shows in a row.
+const SNIPPET_LEAD_CHARS: usize = 16;
+
+/// `snippet` starting a little before the search's first match in it, at a word, so a row that
+/// cuts it off still shows the match.
+pub(crate) fn focus_snippet(snippet: &str, query: &str) -> String {
+    let Some(first) = highlights(snippet, query).first().copied() else {
+        return snippet.to_string();
+    };
+    let before = &snippet[..first];
+    if before.chars().count() <= SNIPPET_LEAD_CHARS {
+        return snippet.to_string();
+    }
+    let lead_start = before
+        .char_indices()
+        .rev()
+        .nth(SNIPPET_LEAD_CHARS - 1)
+        .map_or(0, |(index, _)| index);
+    // From the start of a word, if there's one in the lead.
+    let at_word = before[..lead_start]
+        .chars()
+        .last()
+        .is_none_or(|c| c.is_whitespace() || c == '…');
+    let start = if at_word {
+        lead_start
+    } else {
+        before[lead_start..]
+            .find(char::is_whitespace)
+            .map_or(lead_start, |space| lead_start + space + 1)
+            .min(first)
+    };
+    format!("…{}", snippet[start..].trim_start_matches('…'))
 }
 
 // Dragging threads.
@@ -1181,61 +1237,95 @@ impl ThreadsSidebar {
     /// alone.
     fn search_messages(&mut self, cx: &mut Context<Self>) {
         let Some(query) = message_query(&self.query) else {
-            self.messages = MessageSearch::default();
+            self.messages.clear();
             return;
         };
         if query == self.messages.query {
             return;
         }
-        let Some(backend) = crate::backend(cx) else {
-            return;
-        };
         // Matches for a query this one refines or widens show until its own arrive; others go.
         let previous = std::mem::take(&mut self.messages.query);
         if !(query.contains(&previous) || previous.contains(&query)) {
             self.messages.raw.clear();
         }
-        self.messages.query = query.clone();
+        self.messages.query = query;
         self.messages.pending = true;
         self.messages.failed = false;
-        self.messages._task = Some(cx.spawn(async move |this, cx| {
+        self.messages.debounced = false;
+        self.messages._debounce = Some(cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(MESSAGE_SEARCH_DEBOUNCE)
                 .await;
-            let result = backend
-                .call::<t3_api::rpc::OrchestrationSearchThreads>(
-                    OrchestrationV2SearchThreadsInput {
-                        environment_label: None,
-                        limit: None,
-                        older_settled_before: None,
-                        project_ids: None,
-                        query: query.clone(),
-                        titles_only: None,
-                    },
-                    Access::Read,
-                )
-                .await;
             this.update(cx, |this, cx| {
-                if this.messages.query != query {
-                    return;
-                }
-                this.messages.pending = false;
-                match result {
-                    Ok(result) => this.messages.raw = result.matches,
-                    Err(error) => {
-                        this.messages.raw.clear();
-                        if crate::is_unsupported_rpc(&error) {
-                            log::info!("this T3 can't search messages: {error:#}");
-                        } else {
-                            log::warn!("couldn't search the threads' messages: {error:#}");
-                            this.messages.failed = true;
-                        }
-                    }
-                }
+                this.messages.debounced = true;
+                this.send_message_search(cx)
+            })
+            .ok();
+        }));
+    }
+
+    /// Sends the latest query to T3, unless a search is in flight: then it goes when that one
+    /// answers.
+    fn send_message_search(&mut self, cx: &mut Context<Self>) {
+        if self.messages.in_flight.is_some() || self.messages.query.is_empty() {
+            return;
+        }
+        let Some(backend) = crate::backend(cx) else {
+            return;
+        };
+        let query = self.messages.query.clone();
+        self.messages.in_flight = Some(query.clone());
+        let search = backend.call::<t3_api::rpc::OrchestrationSearchThreads>(
+            OrchestrationV2SearchThreadsInput {
+                environment_label: None,
+                limit: None,
+                older_settled_before: None,
+                project_ids: None,
+                query: query.clone(),
+                titles_only: None,
+            },
+            Access::Read,
+        );
+        self.messages._request = Some(cx.spawn(async move |this, cx| {
+            let result = search.await;
+            this.update(cx, |this, cx| {
+                this.messages_found(&query, result, cx);
                 this.rebuild(cx);
             })
             .ok();
         }));
+    }
+
+    fn messages_found(
+        &mut self,
+        query: &str,
+        result: anyhow::Result<t3_api::types::OrchestrationV2SearchThreadsResult>,
+        cx: &mut Context<Self>,
+    ) {
+        let messages = &mut self.messages;
+        messages.in_flight = None;
+        let latest = messages.query == query;
+        let related = messages.query.contains(query) || query.contains(messages.query.as_str());
+        match result {
+            // Shown while the latest query is searched, if it's related.
+            Ok(result) if latest || related => messages.raw = result.matches,
+            Ok(_) => {}
+            Err(error) if latest => {
+                messages.raw.clear();
+                if crate::is_unsupported_rpc(&error) {
+                    log::info!("this T3 can't search messages: {error:#}");
+                } else {
+                    log::warn!("couldn't search the threads' messages: {error:#}");
+                    messages.failed = true;
+                }
+            }
+            Err(_) => {}
+        }
+        if latest {
+            messages.pending = false;
+        } else if !messages.query.is_empty() && messages.debounced {
+            self.send_message_search(cx);
+        }
     }
 
     /// Lets go of a drop's order once the shell has caught up with it.
@@ -1460,11 +1550,13 @@ impl ThreadsSidebar {
                 let after = sidebar
                     .upgrade()
                     .is_some_and(|sidebar| sidebar.read(cx).drops_after(&dragged.id, index));
+                // A line where the thread would go.
                 let style = style.border_color(accent);
+                let line = scaled(px(2.));
                 if after {
-                    style.border_b_2()
+                    style.border_b(line)
                 } else {
-                    style.border_t_2()
+                    style.border_t(line)
                 }
             })
             .on_drop(
@@ -1954,6 +2046,7 @@ impl ThreadsSidebar {
         }
         let details_line = match snippet {
             Some(snippet) => {
+                let snippet = focus_snippet(&snippet, &self.messages.query);
                 let highlighted = highlights(&snippet, &self.messages.query);
                 HighlightedLabel::new(snippet, highlighted)
                     .size(LabelSize::XSmall)
