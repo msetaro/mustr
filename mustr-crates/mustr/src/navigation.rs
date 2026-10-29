@@ -1,11 +1,11 @@
-//! Moving between mustr's top-level destinations: the home view and open reviews. Used by the
-//! title bar's tabs and the icon rail.
+//! Showing the Inbox's own page (`home.rs`), mustr's home. The rail's areas and the history are
+//! in `areas.rs`.
 
 use crate::home::HomeView;
 use gpui::{AppContext as _, Context, Window};
 use workspace::Workspace;
 
-/// Activates the home view, reopening it if it was closed.
+/// Shows the Inbox's page, reopening it if it was closed.
 pub fn show_home(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     let existing = workspace
         .panes()
