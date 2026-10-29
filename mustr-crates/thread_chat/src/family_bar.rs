@@ -1130,7 +1130,7 @@ impl Render for ThreadFamilyBar {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .p_1p5()
+                    .p(scaled(tokens::LIST_INSET))
                     .gap_0p5()
                     .children(
                         family

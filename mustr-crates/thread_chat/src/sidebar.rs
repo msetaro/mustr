@@ -2266,7 +2266,6 @@ impl ThreadsSidebar {
             title: thread.title.clone().into(),
         });
         let sidebar = cx.entity().downgrade();
-        // Inset from the panel's edges, with corners of its own, as T3's rows are.
         let row = div()
             .id(("thread", index))
             .debug_selector({
@@ -2278,7 +2277,7 @@ impl ThreadsSidebar {
             .h(scaled(ROW_HEIGHT))
             .px(scaled(px(10.)))
             .py(scaled(px(7.)))
-            .rounded(scaled(tokens::CORNER_RADIUS))
+            .rounded(scaled(tokens::CONTROL_RADIUS))
             .cursor_pointer()
             .border_1()
             .border_color(gpui::transparent_black())
@@ -2446,9 +2445,11 @@ impl ThreadsSidebar {
                             ))),
                     ),
             );
+        // Inset from the panel's edges with corners of its own, as rows in lists are
+        // (`mustr_ui::corners`).
         div()
             .w_full()
-            .px(scaled(px(6.)))
+            .px(scaled(tokens::LIST_INSET))
             .py(scaled(px(1.)))
             .child(row)
             .into_any_element()
