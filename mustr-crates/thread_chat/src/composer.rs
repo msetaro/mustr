@@ -42,6 +42,8 @@ actions!(
 );
 
 pub(crate) const COMPOSER_CONTEXT: &str = "ThreadComposer";
+/// The composer's placeholder while its message would decline an approval (T3's).
+const FEEDBACK_PLACEHOLDER: &str = "Send feedback to decline this request";
 /// The side of an image's tile in the composer, as T3's (`h-16 w-16`).
 const IMAGE_TILE_SIZE: f32 = 64.;
 /// A file's tile is as tall, and wide enough for its name.
@@ -66,6 +68,8 @@ pub struct ComposerState {
     pub(crate) output_streams: collections::HashMap<String, gpui::Task<()>>,
     /// The menu of mentions, commands, and skills, and the chips in the text (`mentions.rs`).
     pub(crate) menu: crate::mentions::ComposerMenu,
+    /// Whether the placeholder says the message declines an approval.
+    feedback_placeholder: bool,
     _save_draft: Option<gpui::Task<()>>,
 }
 
@@ -422,6 +426,14 @@ impl ThreadView {
             return;
         }
         let text = self.composer_text(cx);
+        // While the agent waits on an approval that takes a reason, the message declines it and
+        // tells the agent why, as T3's composer does.
+        if let Some(request_id) = self.feedback_target()
+            && !text.trim().is_empty()
+        {
+            self.decline_with_feedback(request_id, text, window, cx);
+            return;
+        }
         let has_images = self.images.has_attachments();
         if (text.trim().is_empty() && !has_images) || self.sending {
             return;
@@ -483,6 +495,82 @@ impl ThreadView {
             })
             .ok();
         }));
+    }
+
+    /// The approval the composer's message declines with a reason, if there is one: the first
+    /// pending approval, when its agent takes feedback (`supportsFeedback`, T3 0.1.3). Older
+    /// servers never offer it, so their composer sends as usual.
+    pub(crate) fn feedback_target(&self) -> Option<String> {
+        self.thread_state()?
+            .pending_requests()
+            .into_iter()
+            .find(|pending| !pending.is_question)
+            .filter(|pending| pending.supports_feedback && pending.can_respond)
+            .map(|pending| pending.request_id)
+    }
+
+    /// Declines the approval with the composer's text as the reason (`runtime-request.respond`
+    /// with `feedback`), then clears the composer. Like T3, it takes text alone: attachments and
+    /// chips would be lost, so they keep the message from going.
+    fn decline_with_feedback(
+        &mut self,
+        request_id: String,
+        text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return;
+        };
+        if self.sending || self.responding.contains(&request_id) {
+            return;
+        }
+        if !self.images.is_empty() || self.mention_context(&text).is_some() {
+            self.error =
+                Some("Send approval feedback without attachments or added context.".into());
+            cx.notify();
+            return;
+        }
+        let command =
+            commands::decline_with_feedback(&thread_id, &request_id, &text, commands::new_id());
+        let dispatch = self.backend.dispatch(command);
+        self.responding.insert(request_id.clone());
+        self.sending = true;
+        self.error = None;
+        cx.notify();
+        self._tasks.push(cx.spawn_in(window, async move |this, cx| {
+            let result = dispatch.await;
+            this.update_in(cx, |this, window, cx| {
+                this.sending = false;
+                this.responding.remove(&request_id);
+                match result {
+                    Ok(_) => this
+                        .composer
+                        .update(cx, |editor, cx| editor.clear(window, cx)),
+                    Err(error) => this.error = Some(format!("{error:#}").into()),
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
+    }
+
+    /// The composer's placeholder follows what its message would do: while it would decline an
+    /// approval, it says so, as T3's does.
+    fn sync_placeholder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let declines = self.feedback_target().is_some();
+        if declines == self.composer_state.feedback_placeholder {
+            return;
+        }
+        self.composer_state.feedback_placeholder = declines;
+        let placeholder = if declines {
+            FEEDBACK_PLACEHOLDER
+        } else {
+            "Message the agent…"
+        };
+        self.composer.update(cx, |editor, cx| {
+            editor.set_placeholder_text(placeholder, window, cx)
+        });
     }
 
     /// The masked input for a secret request, made the first time it's shown.
@@ -1257,6 +1345,15 @@ impl ThreadView {
                             ),
                         )
                 }))
+                .when(pending.supports_feedback && pending.can_respond, |this| {
+                    this.child(
+                        Label::new(
+                            "Or write below why to decline it, and the agent gets your reason.",
+                        )
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                    )
+                })
                 .child(
                     h_flex()
                         .gap_1p5()
@@ -1691,10 +1788,12 @@ impl ThreadView {
     }
 
     pub(crate) fn render_composer(
-        &self,
+        &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        self.sync_placeholder(window, cx);
+        let declines = self.feedback_target().is_some();
         let palette = palette(cx);
         let state = self.thread_state();
         let running = state.is_some_and(ThreadState::is_running);
@@ -1725,6 +1824,32 @@ impl ThreadView {
                             .tooltip("Replace the queued message with this")
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.send(Delivery::Queue, window, cx)
+                            })),
+                    )
+                    .into_any_element(),
+            );
+        } else if running && declines {
+            buttons.push(
+                div()
+                    .debug_selector(|| "thread-stop".into())
+                    .child(
+                        TextButton::new("thread-stop", "Stop")
+                            .disabled(blocked.is_some())
+                            .tooltip("Stop the agent's run")
+                            .on_click(cx.listener(|this, _, window, cx| this.stop(window, cx))),
+                    )
+                    .into_any_element(),
+            );
+            buttons.push(
+                div()
+                    .debug_selector(|| "thread-decline-feedback".into())
+                    .child(
+                        TextButton::new("thread-decline-feedback", "Decline with feedback")
+                            .style(MustrButtonStyle::Primary)
+                            .disabled(!can_write || !has_text)
+                            .tooltip("Decline the request and tell the agent why")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.send(Delivery::Auto, window, cx)
                             })),
                     )
                     .into_any_element(),
@@ -1861,9 +1986,15 @@ impl ThreadView {
                 .gap_1()
                 .child(send_binding)
                 .child(
-                    Label::new(if running { "queue" } else { "send" })
-                        .size(LabelSize::XSmall)
-                        .color(Color::Muted),
+                    Label::new(if declines {
+                        "decline"
+                    } else if running {
+                        "queue"
+                    } else {
+                        "send"
+                    })
+                    .size(LabelSize::XSmall)
+                    .color(Color::Muted),
                 )
                 .into_any_element()
         });

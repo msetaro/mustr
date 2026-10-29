@@ -456,6 +456,27 @@ pub fn respond_to_approval(
     })
 }
 
+/// Declines an approval and tells the agent why (`runtime-request.respond` with `feedback`,
+/// T3 0.1.3), as T3's composer does when the request `supportsFeedback`
+/// (`sendApprovalFeedback` in T3's `client-runtime/src/state/threadRequests.ts`).
+pub fn decline_with_feedback(
+    thread_id: &str,
+    request_id: &str,
+    feedback: &str,
+    command_id: String,
+) -> OrchestrationV2Command {
+    let mut command = respond_to_approval(
+        thread_id,
+        request_id,
+        ProviderApprovalDecision::Decline,
+        command_id,
+    );
+    if let OrchestrationV2Command::RuntimeRequestRespond(respond) = &mut command {
+        respond.feedback = Some(feedback.trim().to_string());
+    }
+    command
+}
+
 /// Answers the questions of a user-input request (`runtime-request.respond`), by question id.
 pub fn answer_questions(
     thread_id: &str,

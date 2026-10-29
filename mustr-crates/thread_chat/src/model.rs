@@ -784,6 +784,10 @@ pub struct PendingRequest {
     /// Whether the agent's session can still take an answer. T3's web app only answers live
     /// requests; others are shown, but not answerable.
     pub can_respond: bool,
+    /// Whether the agent takes a reason with a decline (`supportsFeedback`, T3 0.1.3): the
+    /// composer's message then declines the request and tells the agent why. Older servers
+    /// never say so.
+    pub supports_feedback: bool,
 }
 
 /// What the timeline shows: single items, and runs of the agent's work (tool calls, file
@@ -1160,6 +1164,11 @@ impl ThreadState {
                     can_respond: matches!(
                         request.response_capability,
                         OrchestrationV2RuntimeRequestResponseCapability::Live(_)
+                    ),
+                    supports_feedback: matches!(
+                        &request.response_capability,
+                        OrchestrationV2RuntimeRequestResponseCapability::Live(live)
+                            if live.supports_feedback == Some(true)
                     ),
                 }
             })
