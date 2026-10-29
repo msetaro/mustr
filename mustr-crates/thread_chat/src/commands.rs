@@ -15,6 +15,7 @@ use t3_api::{
     tagged::{
         ChatAttachment, OrchestrationV2Command, OrchestrationV2CommandDispatchMode,
         OrchestrationV2ThreadLaunchWorkspaceStrategy, SecretRequestAnswerInputAnswer,
+        UserInputAttachmentsValueItem,
     },
     types::{
         ChatFileAttachment, ChatFileAttachmentType, ChatImageAttachment, ChatImageAttachmentType,
@@ -50,6 +51,7 @@ use t3_api::{
         ProviderUserInputAnswers, RuntimeMode, SecretRequestAnswerInput,
         SecretRequestAnswerInputAnswerDecline, SecretRequestAnswerInputAnswerDeclineType,
         SecretRequestAnswerInputAnswerSave, SecretRequestAnswerInputAnswerSaveType,
+        UserInputAttachments,
     },
 };
 
@@ -479,20 +481,41 @@ pub fn decline_with_feedback(
     command
 }
 
-/// Answers the questions of a user-input request (`runtime-request.respond`), by question id.
+/// Answers the questions of a user-input request (`runtime-request.respond`), by question id,
+/// with the images and files uploaded for each answer (`attachmentsByQuestionId`, T3 0.1.3,
+/// left out when there are none, as T3's app leaves it out).
 pub fn answer_questions(
     thread_id: &str,
     request_id: &str,
     answers: Vec<(String, String)>,
+    attachments: Vec<(String, Vec<ChatAttachment>)>,
     command_id: String,
 ) -> OrchestrationV2Command {
     let answers = answers
         .into_iter()
         .map(|(question_id, answer)| (question_id, serde_json::Value::String(answer)))
         .collect();
+    let attachments = attachments
+        .into_iter()
+        .map(|(question_id, attachments)| {
+            let attachments = attachments
+                .into_iter()
+                .filter_map(|attachment| match attachment {
+                    ChatAttachment::Image(image) => {
+                        Some(UserInputAttachmentsValueItem::Image(image))
+                    }
+                    ChatAttachment::File(file) => Some(UserInputAttachmentsValueItem::File(file)),
+                    ChatAttachment::Unrecognized(_) => None,
+                })
+                .collect::<Vec<_>>();
+            (question_id, attachments)
+        })
+        .filter(|(_, attachments)| !attachments.is_empty())
+        .collect::<std::collections::BTreeMap<_, _>>();
     OrchestrationV2Command::RuntimeRequestRespond(OrchestrationV2CommandRuntimeRequestRespond {
         answers: Some(ProviderUserInputAnswers(answers)),
-        attachments_by_question_id: None,
+        attachments_by_question_id: (!attachments.is_empty())
+            .then(|| UserInputAttachments(attachments)),
         command_id,
         decision: None,
         feedback: None,
@@ -833,6 +856,7 @@ mod tests {
                     ("q1".into(), "yes".into()),
                     ("q2".into(), "Option B".into())
                 ],
+                Vec::new(),
                 "command-6".into()
             )),
             json!({

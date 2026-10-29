@@ -84,7 +84,7 @@ and dialogs narrow with the window.
 | Permission mode | Supervised, Auto-accept edits, Auto or Full access per thread; default in Settings (`chat/runtimeModeConfig.ts`, `docs/user/permission-modes.md`) | `launchThread.runtimeMode`, `thread.runtime-mode.set`, default from `server.getSettings` | Done (`thread_chat/src/settings_bar.rs`): T3's modes, `mod+shift+a`; new threads start from T3's default | — | P0 |
 | Change model or provider mid-thread | Model picker, `mod+shift+m` (`chat/ProviderModelPicker.tsx`, `chat/ModelPickerContent.tsx`) | `thread.model-selection.set` or `message.dispatch.modelSelection`; `provider.switch` | Done (`settings_bar.rs`: `thread.model-selection.set`, which T3 plans as a switch when the agent changes) | — | P0 |
 | Model options | Effort, fast mode, thinking, context window, `mod+shift+e` (`chat/TraitsPicker.tsx`) | `ModelSelection.options[{id,value}]` from provider capabilities in `server.getConfig` | Done (`settings_bar.rs`, `thread_settings.rs`) | — | P0 |
-| Plan mode, Implement plan | Toggle plan mode, or type `/plan` or `/default`. The plan card offers Implement, Refine, Implement in a new thread, Copy and Save to workspace (`chat/ProposedPlanCard.tsx`, `chat/useProposedPlanSend.ts`) | `thread.interaction-mode.set`; `message.dispatch` with `sourcePlanRef`; `thread.create` for a new thread | Done (`settings_bar.rs` Build or Plan, `slash_commands.rs`, the plan card in `timeline.rs`). No Save to workspace | — | P0 |
+| Plan mode, Implement plan | Toggle plan mode, or type `/plan` or `/default`. The plan card offers Implement, Refine, Implement in a new thread, Copy and Save to workspace (`chat/ProposedPlanCard.tsx`, `chat/useProposedPlanSend.ts`) | `thread.interaction-mode.set`; `message.dispatch` with `sourcePlanRef`; `thread.create` for a new thread | Done (`settings_bar.rs` Build or Plan, `slash_commands.rs`, the plan card in `timeline.rs`). Save to workspace writes the plan into the thread's folder when it's on this machine (`thread_chat/src/plan_save.rs`; T3's `projects.writeFile` needs `filesystem:write`, which mustr doesn't ask for), and is off for a folder on T3's machine | — | P0 |
 | Provider status | Banner when an agent is signed out or outdated (`chat/ProviderStatusBanner.tsx`) | `server.getConfig`, `subscribeServerConfig` | Done (`thread_chat/src/usage.rs`); Home says when no agent can run. Both have Set up, which opens the agents page | — | P1 |
 | Restart agent session | Picks up new skills or MCP servers (command palette) | `provider-session.detach` | Done (`thread_chat/src/history.rs`: header menu and palette); asks first while the agent works | — | P1 |
 | Custom models, model visibility | `settings/CustomModelEditor.tsx`, `modelPickerVisibility.ts` | `server.updateSettings` | Partial: custom models on the agents page (`mustr/src/agent_setup.rs`), by id, without per-model options. The settings bar's model picker hides the models T3's settings hide and lists the rest in their order (`thread_settings::shown_agents`); the schedule editor's and T3 settings' pickers still list every model | S | P2 |
@@ -96,14 +96,14 @@ and dialogs narrow with the window.
 |---|---|---|---|---|---|
 | Send, queue, steer, stop | Enter sends; follow-up behavior; `mod+Enter` does the opposite | `message.dispatch` (`dispatchMode`, `deliveryIntent`), `thread.stop` | Done (`thread_chat/src/composer.rs`, `commands.rs`) | — | P0 |
 | Image attachments | Paste, drag or pick images, up to 10 MiB each (`chat/ComposerAttachmentStrip.tsx`, `chat/useComposerAttachmentIntake.ts`) | `attachments.createUploadUrl`, then `POST /api/attachments/upload/:token`, then `message.dispatch.attachments` | Done (`thread_chat/src/attachments.rs`, `t3_client/src/attachments.rs`): paste, drop or pick, with progress, Retry and remove | — | P0: screenshots are a daily input |
-| File attachments, big pastes | Up to 100 files at 50 MiB each; pastes of 32 KiB or more become files (`chat/composerAttachmentFiles.ts`) | Same, with `type: "file"` | Done (`thread_chat/src/attachments.rs`): any file, dropped, picked or pasted, up to 100 at 50 MiB (or the server's limit), as tiles with progress, Retry and remove, and chips on sent messages; pastes of 32 KiB or more go as `pasted-text.txt` (`mod+shift+v` pastes text). No image or file context records | — | P1 |
+| File attachments, big pastes | Up to 100 files at 50 MiB each; pastes of 32 KiB or more become files (`chat/composerAttachmentFiles.ts`) | Same, with `type: "file"` | Done (`thread_chat/src/attachments.rs`): any file, dropped, picked or pasted, up to 100 at 50 MiB (or the server's limit), as tiles with progress, Retry and remove, and chips on sent messages; pastes of 32 KiB or more go as `pasted-text.txt` (`mod+shift+v` pastes text). On servers with `inlineMessageContext`, images and files also go as T3's image and file context records | — | P1 |
 | @-mentions and context chips | `@` for files, folders and threads, and `#` for PRs; terminal excerpts and review comments show as inline chips (`chat/useComposerMenuItems.ts`, `components/ContextChip.tsx`) | `projects.searchEntries` (needs `filesystem:read`), `pullRequests.list`; `message.dispatch.context` | Done: `@` and `#` with chips (`thread_chat/src/mentions.rs`; files on this machine through Zed's fuzzy matcher, `projects.searchEntries` when T3's folders are elsewhere), and terminal-excerpt and review-comment chips (`composer.rs`, through `AddComposerContext`), sent as T3's context records and kept in drafts | — | P1 |
 | Slash commands, skills | A `/` menu and `$skill`. T3's own commands are `/model`, `/plan` and `/default`; providers add `/compact` and `/goal` (`chat/ComposerCommandMenu.tsx`, `providerSkillSearch.ts`) | Skills and commands in `server.getConfig` providers; `message.dispatch` | Done (`thread_chat/src/slash_commands.rs`) | — | P1 |
 | Drafts kept per thread | Drafts survive closing and reloading (`composerDraftStore.ts`) | Local | Done (`composer.rs`): per thread, and across restarts in Zed's key-value store | — | P1: PLAN's "drafts are never lost" |
 | Recall a sent prompt | ArrowUp in an empty composer (`chat/composerPromptHistory.ts`) | Local | Done (`composer.rs`) | — | P1 |
-| Prompt stash | `mod+S` saves a prompt for later (`promptStashStore.ts`) | Local | Missing | S | P2 |
-| Quote a response | Select text, then Cite in composer (`chat/AssistantSelectionToolbar.tsx`) | `message.dispatch.context` | Missing | M | P2 |
-| Rich Markdown editing | Styled lists and code blocks as you type (`components/ComposerPromptEditorTiptap.tsx`) | — | Partial: a plain Zed editor, so Markdown is text | M | P2 |
+| Prompt stash | `mod+S` saves a prompt for later (`promptStashStore.ts`) | Local | Done (`thread_chat/src/stash.rs`): `mod+s` stashes the prompt with its chips and attachments, and brings back the only one, or shows the stash (newest first, at most 20, kept across restarts without attachments) | — | P2 |
+| Quote a response | Select text, then Cite in composer (`chat/AssistantSelectionToolbar.tsx`) | T3's citation link in `message.dispatch.text` (`[Assistant quote](t3-citation://v1/…)`) | Done (`thread_chat/src/quote.rs`): Quote on an agent message puts the selection (or the whole message) in the composer as T3's citation, drawn as a chip; clicking one in the timeline shows the quoted message | — | P2 |
+| Rich Markdown editing | Styled lists and code blocks as you type (`components/ComposerPromptEditorTiptap.tsx`) | — | Done (`thread_chat/src/formatting.rs`): the composer highlights Markdown and continues lists, with T3's `mod+b` (a selection only), `mod+i` and `mod+e`. The marks stay visible, as in any editor | — | P2 |
 | Voice input | iPhone only | — | — | — | Skip: mobile only |
 
 ### 2.5 Runs and the queue
@@ -126,8 +126,8 @@ and dialogs narrow with the window.
 | Answer questions | Options plus free text; dismiss (`chat/ComposerPendingUserInputPanel.tsx`) | `runtime-request.respond` `{answers}`, `thread.user-input.dismiss` | Done (`composer.rs`) | — | P0 |
 | Decline with feedback | Typing a reply declines a Claude approval and tells the agent why | `runtime-request.respond` `{feedback}` *(0.1.3)* | Done (`composer.rs`): Decline with feedback when the request `supportsFeedback`; older servers queue the reply as before | — | P1 |
 | Secret requests | The agent asks for a token; a masked input answers it (`chat/SecretRequestCard.tsx`) | `secrets.answerRequest` | Done (`timeline.rs` card, `composer.rs`) | — | P1: the agent waits until it's answered |
-| Attachments in answers | `questionAttachments.ts` | `runtime-request.respond.attachmentsByQuestionId` | Missing | S | P2 |
-| MCP elicitation | Request kinds `mcp-elicitation` and `permission` | `runtime-request.respond` | Partial: the generic approval card | S | P2 |
+| Attachments in answers | `questionAttachments.ts` | `runtime-request.respond.attachmentsByQuestionId` *(0.1.3)* | Done (`thread_chat/src/answers.rs`): the composer answers the question it's on with its text, images and files (Next, then Answer), on servers with `questionAttachments`; older ones take text only, and say so | — | P2 |
+| MCP elicitation | Request kinds `mcp-elicitation` and `permission` | `runtime-request.respond` | Done (`answers.rs`, `composer.rs`): as T3 asks them, an App access approval with the app's name, the prompt as prose, the reason, and the agent's options with their warnings; ACP agents' MCP forms come as questions, which take typed answers | — | P2 |
 
 ### 2.7 Timeline
 
@@ -138,12 +138,12 @@ and dialogs narrow with the window.
 | Images in messages | Thumbnails and a zoom dialog for attachments and tool screenshots (`chat/ZoomableImage.tsx`, `chat/ExpandedImageDialog.tsx`) | `assets.createUrl`, then `GET /api/assets/*` | Done (`attachments.rs`, `timeline.rs`) | — | P0 (goes with attachments) |
 | Live command output | Output streams while a command runs (`chat/CommandOutputPanel.tsx`) | `orchestration.subscribeCommandOutput` | Done (`timeline.rs`, while expanded) | — | P1 |
 | Copy a message or code block | `chat/MessageCopyButton.tsx` | — | Done (`timeline.rs`) | — | P1 |
-| Find in thread | `mod+F` (`chat/ThreadFindBar.tsx`) | `orchestration.searchThread` | Done (`thread_chat/src/find_bar.rs`): `mod+f` opens Zed's search bar over the thread, with T3's matches across the whole history highlighted, or what's loaded on servers without the call. It doesn't scroll inside a long message to its match, and a message-search match in the sidebar doesn't open it | S (the rest) | P1 |
+| Find in thread | `mod+F` (`chat/ThreadFindBar.tsx`) | `orchestration.searchThread` | Done (`thread_chat/src/find_bar.rs`): `mod+f` opens Zed's search bar over the thread, with T3's matches across the whole history highlighted, or what's loaded on servers without the call. It scrolls inside a long message to the match, and a message-search match in the sidebar opens the thread with find on the query (`thread_chat::open_thread_with_find`) | — | P1 |
 | Subagents | The subagent bar in a child ("Open parent") and the parent's lineage list, to open or stop a child (`chat/ProviderSubagentBar.tsx`, `chat/ThreadRelationshipsControl.tsx`) | On 0.1.1: shell `lineage` (`parentThreadId`, `rootThreadId`, `relationshipToParent: subagent`), the subagent item's `childThreadId`, `subagent.stop` `{runId, subagentId}`. *(0.1.3)* adds `orchestration.getThreadFamily` | Done (`thread_chat/src/family_bar.rs`): Open parent in a child; a parent's children with Open and Stop, from `getThreadFamily` merged behind the shell's `lineage`, or the `lineage` alone on 0.1.1 | — | P0: user's must-have |
 | "New since last visit" | Visit watermark (`chat/ThreadVisitWatermark.tsx`) | `thread.visit` | Done (`sidebar.rs` records visits; `timeline.rs` draws the line above what began after the last one) | — | P1 |
-| Markdown extras | Mermaid, math, tables, file links that open the file (`chat/MarkdownMermaidCodeBlock.tsx`, `chat/MarkdownFileLink.tsx`) | — | Partial: Zed markdown; file links don't open in mustr | M | P2 |
-| Inline charts, HTML renders | `chat/HtmlRenderFrame.tsx` (agents' `html_render`, `html_preview`) | `assets.createUrl` | Missing | M | P2: mustr has no HTML engine; open in the system browser |
-| Minimap, history paging | `chat/TimelineMinimap.tsx`; history pages | `GET /api/orchestration/threads/:id/history` | Partial: bounded snapshot, no minimap | M | P2 |
+| Markdown extras | Mermaid, math, tables, file links that open the file (`chat/MarkdownMermaidCodeBlock.tsx`, `chat/MarkdownFileLink.tsx`) | — | Done but math (`thread_chat/src/file_links.rs`): links to files and paths in inline code (T3's rule) open in mustr's editor at the line, or the thread's review when its folder is on T3's machine; web links open in the browser. Tables and Mermaid through Zed's Markdown; no math | — | P2 |
+| Inline charts, HTML renders | `chat/HtmlRenderFrame.tsx` (agents' `html_render`, `html_preview`) | `assets.createUrl` | Done (`thread_chat/src/html_renders.rs`): a card with the render's title and Open in browser, which loads it as T3's frame does into a temporary file | — | P2: mustr has no HTML engine; open in the system browser |
+| Minimap, history paging | `chat/TimelineMinimap.tsx`; history pages | `GET /api/orchestration/threads/:id/history` | Partial: no minimap. Paging isn't needed: mustr reads the whole thread (`threadSnapshot`, unbounded), so nothing is left to load | M | P2 |
 | MCP apps | `chat/McpAppFrame.tsx` | `mcpApps.*` | Missing | L | Skip: needs a webview |
 
 ### 2.8 Checkpoints, revert and fork
@@ -204,7 +204,7 @@ and dialogs narrow with the window.
 
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
-| Preview browser | An Electron webview on desktop, or the server's headless Chrome streamed into a panel; the agent drives it too (`preview/PreviewPanel.tsx`, `browser/ServerBrowserSurface.tsx`) | `preview.*`, `subscribePreviewEvents`, `/api/preview-stream/*` (`preview:operate`) | Missing | L | P2: agents' `preview_*` tools run headless without a client; open URLs in the system browser |
+| Preview browser | An Electron webview on desktop, or the server's headless Chrome streamed into a panel; the agent drives it too (`preview/PreviewPanel.tsx`, `browser/ServerBrowserSurface.tsx`) | `preview.*`, `subscribePreviewEvents`, `/api/preview-stream/*` (`preview:operate`) | Partial: a preview tool's page (`preview_open`, `preview_navigate`) has Open in browser on its tool call (`html_renders.rs`); no preview panel | L | P2: agents' `preview_*` tools run headless without a client; open URLs in the system browser |
 | Local dev servers | Finds listening ports (`preview/useDiscoveredLocalServers.ts`) | `subscribeDiscoveredLocalServers` | Missing | S | P2 |
 | Device emulation | iOS and Android simulators (`components/device/`) | `device.*`, `subscribeDeviceState` | Missing | L | Skip: only for mobile app work; agents' `device_*` tools still work |
 
@@ -366,11 +366,7 @@ merged into `m3/next`.
 ### What's left
 
 No P0 is open, and one P1 is partial. What the wave-3 packages left in their rows:
-- **Find in thread** (P1): it doesn't scroll inside a long message to its match, and a
-  message-search match in the sidebar doesn't open the thread's find (`find_bar.rs`, `sidebar.rs`).
 - **Command palette** (P1): T3's "new thread in…" isn't in Zed's palette.
-- **Composer context:** image and file context records; the composer sends terminal and
-  review-comment records, and images and files as attachments.
 - **Remote terminals:** mouse clicks and reports to full-screen programs, and input-method text
   (`remote_terminal.rs`).
 - **Worktree setup card:** Open terminal and Work locally (`worktree_setup.rs`).
@@ -382,9 +378,8 @@ No P0 is open, and one P1 is partial. What the wave-3 packages left in their row
   settings file leaves code and terminals at `buffer_font_size` (26); the zoom keys change both.
 
 **Later (P2):** several environments and remote access; start in background and
-one prompt for several models; cloning repos; prompt stash, quoting a response and rich Markdown;
-attachments in answers and MCP elicitation; Markdown file links, inline charts and the
-minimap; merge back and provider handoff; the uncommitted-only diff and worktree handoff; review
-guides, reviewers and labels, and source control accounts; the preview browser and local dev
-servers; outside agents; delete and bulk select; hover cards; the usage dashboard and provider
-instances; Save to workspace on plans; and automatic worktree cleanup.
+one prompt for several models; cloning repos; math in Markdown and the minimap; merge back and
+provider handoff; the uncommitted-only diff and worktree handoff; review guides, reviewers and
+labels, and source control accounts; the preview panel and local dev servers; outside agents;
+delete and bulk select; hover cards; the usage dashboard and provider instances; and automatic
+worktree cleanup.

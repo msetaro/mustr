@@ -18,7 +18,7 @@ use crate::{
 };
 use anyhow::Result;
 use collections::{BTreeMap, HashMap, HashSet};
-use gpui::{App, Context, Entity, EventEmitter, Task, Window};
+use gpui::{App, Context, Entity, EventEmitter, Focusable as _, Task, Window};
 use project::search::SearchQuery;
 use settings::SeedQuerySetting;
 use std::{ops::Range, sync::Arc, time::Duration};
@@ -56,6 +56,10 @@ pub struct ThreadMatch {
 pub(crate) struct FindState {
     /// What the bar searches for, while it does.
     query: Option<String>,
+    /// The query the bar opens with next, from [`open_thread_with_find`].
+    seed: Option<String>,
+    /// The bar opens once the view has drawn, so the action reaches the workspace.
+    deploy: bool,
     matches: Vec<ThreadMatch>,
     active: Option<usize>,
     /// The items whose Markdown has highlights.
@@ -228,7 +232,67 @@ async fn search_thread(
     Ok(found)
 }
 
+/// Opens a thread's view in `workspace` (or activates it) with find in thread on `query`, as
+/// a message-search match in the threads sidebar does: the find bar opens with the query, and
+/// the timeline scrolls to the first match.
+///
+/// Deferred like [`crate::open_thread`], so a view can call it from its own handlers.
+pub fn open_thread_with_find(
+    thread_id: String,
+    query: String,
+    workspace: gpui::WeakEntity<workspace::Workspace>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let title = crate::shell::ThreadShells::global(cx)
+        .read(cx)
+        .thread(&thread_id)
+        .map(|thread| gpui::SharedString::from(thread.title.clone()))
+        .unwrap_or_else(|| "Agent thread".into());
+    window.defer(cx, move |window, cx| {
+        let view = workspace.update(cx, |workspace, cx| {
+            ThreadView::open(thread_id, title, workspace, window, cx)
+        });
+        let Ok(Some(view)) = view else {
+            log::error!("couldn't open the agent thread");
+            return;
+        };
+        let query = query
+            .trim()
+            .chars()
+            .take(MAX_QUERY_CHARS)
+            .collect::<String>();
+        if query.is_empty() {
+            return;
+        }
+        view.update(cx, |view, cx| {
+            view.find.seed = Some(query);
+            view.find.deploy = true;
+            cx.notify();
+        });
+    });
+}
+
 impl ThreadView {
+    /// Opens the find bar on the query [`open_thread_with_find`] left, once this view has drawn:
+    /// Zed's bar handles `Deploy` on the workspace, which an action dispatched from a view not
+    /// yet drawn doesn't reach. The bar takes the query as it opens (`query_suggestion`).
+    pub(crate) fn deploy_pending_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.find.deploy) {
+            return;
+        }
+        let focus = self.composer.focus_handle(cx);
+        window.defer(cx, move |window, cx| {
+            window.focus(&focus, cx);
+            window.dispatch_action(Box::new(zed_actions::buffer_search::Deploy::find()), cx);
+        });
+    }
+
+    /// The query the find bar opens with next, for tests.
+    pub fn find_seed_for_test(&self) -> Option<&str> {
+        self.find.seed.as_deref()
+    }
+
     /// The timeline's items, in order, that find searches.
     fn findable_items(&self) -> Vec<&TimelineItem> {
         let Some(state) = self.thread_state() else {
@@ -365,10 +429,15 @@ impl SearchableItem for ThreadView {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> String {
-        self.find.query.clone().unwrap_or_default()
+        self.find
+            .seed
+            .take()
+            .or_else(|| self.find.query.clone())
+            .unwrap_or_default()
     }
 
-    /// Shows the match: highlights it as the active one and scrolls the timeline to its row.
+    /// Shows the match: highlights it as the active one, scrolls the timeline to its row, and
+    /// inside a long message to the match itself, as T3's find bar does.
     fn activate_match(
         &mut self,
         index: usize,
@@ -387,7 +456,19 @@ impl SearchableItem for ThreadView {
             .as_deref()
             .and_then(|item_id| self.row_of_item(item_id))
         {
+            // A timeline following its end would snap back to it.
+            self.list_state.pause_following_tail();
             self.list_state.scroll_to_reveal_item(row);
+        }
+        // The Markdown asks the timeline's list to scroll to the match once it's laid out,
+        // which the list does for its rows (`request_autoscroll`).
+        if let (Some(item_id), Some(range)) = (found.item_id.as_deref(), found.range.as_ref())
+            && let Some(markdown) = self.markdown.get(item_id)
+        {
+            let start = range.start;
+            markdown.update(cx, |markdown, cx| {
+                markdown.request_autoscroll_to_source_index(start, cx)
+            });
         }
         cx.emit(SearchEvent::ActiveMatchChanged);
         cx.notify();
@@ -433,6 +514,10 @@ impl SearchableItem for ThreadView {
             self.find.active = None;
         }
         self.find.query = Some(query.clone());
+        #[cfg(debug_assertions)]
+        if crate::debug_fixture::active() {
+            self.find.local_only = true;
+        }
         if self.find.local_only {
             return Task::ready(local_matches(&self.findable_items(), &query));
         }

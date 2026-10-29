@@ -48,6 +48,10 @@ const FEEDBACK_PLACEHOLDER: &str = "Send feedback to decline this request";
 const IMAGE_TILE_SIZE: f32 = 64.;
 /// A file's tile is as tall, and wide enough for its name.
 const FILE_TILE_WIDTH: f32 = 200.;
+/// What the thread's header, toolbar, composer and a few lines of its timeline take, at the
+/// designs' size: the agent's requests take the rest of the window, between a fifth and
+/// nearly half of it, and scroll beyond that.
+const PENDING_RESERVED_HEIGHT: f32 = 360.;
 
 /// A queued message being dragged to another place in the queue.
 #[derive(Clone)]
@@ -105,10 +109,23 @@ pub struct ComposerState {
     pub(crate) output_streams: collections::HashMap<String, gpui::Task<()>>,
     /// The menu of mentions, commands, and skills, and the chips in the text (`mentions.rs`).
     pub(crate) menu: crate::mentions::ComposerMenu,
-    /// Whether the placeholder says the message declines an approval.
-    feedback_placeholder: bool,
+    /// What the placeholder says, when it isn't the usual: that the message declines an
+    /// approval, or answers a question.
+    placeholder: Option<String>,
     /// Where the timeline's "new since your last visit" line goes (`timeline.rs`).
     pub(crate) visit: crate::timeline::VisitLine,
+    /// What's selected to quote in the composer (`quote.rs`).
+    pub(crate) quote: crate::quote::QuoteState,
+    /// The composer's answers to the agent's questions (`answers.rs`).
+    pub(crate) answering: crate::answers::AnswerState,
+    /// Whether the prompt stash's list shows (`stash.rs`).
+    pub(crate) stash: crate::stash::StashState,
+    /// Whether the composer's Markdown highlighting was asked for (`formatting.rs`).
+    pub(crate) markdown_highlighting: bool,
+    /// HTML renders being loaded to open in the browser (`html_renders.rs`).
+    pub(crate) opening_renders: collections::HashSet<String>,
+    /// A plan being saved to the thread's folder (`plan_save.rs`).
+    pub(crate) plan_save: crate::plan_save::PlanSaveState,
     _save_draft: Option<gpui::Task<()>>,
 }
 
@@ -393,11 +410,16 @@ impl ThreadView {
         }
     }
 
-    /// Escape closes the menu until the word that opened it changes.
+    /// Escape closes the menu until the word that opened it changes, or the prompt stash's
+    /// list.
     fn on_cancel(&mut self, _: &editor::actions::Cancel, _: &mut Window, cx: &mut Context<Self>) {
         if self.composer_state.menu.is_open() {
             cx.stop_propagation();
             self.dismiss_menu(cx);
+        } else if self.composer_state.stash.open {
+            cx.stop_propagation();
+            self.composer_state.stash.open = false;
+            cx.notify();
         }
     }
 }
@@ -476,6 +498,10 @@ impl ThreadView {
             self.decline_with_feedback(request_id, text, window, cx);
             return;
         }
+        // While the agent waits on a question, the message answers it (`answers.rs`).
+        if self.answer_with_composer(window, cx) {
+            return;
+        }
         let has_images = self.images.has_attachments();
         if (text.trim().is_empty() && !has_images) || self.sending {
             return;
@@ -511,8 +537,10 @@ impl ThreadView {
         };
         let thread_id = state.thread_id().to_string();
         let sent_images = self.images.uploaded_keys();
+        let attachments = self.images.attachments();
+        let context = self.with_attachment_records(context, &attachments, cx);
         let message = Message {
-            attachments: self.images.attachments(),
+            attachments,
             context,
             ..Message::text(text.trim())
         };
@@ -600,18 +628,18 @@ impl ThreadView {
     /// The composer's placeholder follows what its message would do: while it would decline an
     /// approval, it says so, as T3's does.
     fn sync_placeholder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let declines = self.feedback_target().is_some();
-        if declines == self.composer_state.feedback_placeholder {
+        let placeholder = if self.feedback_target().is_some() {
+            Some(FEEDBACK_PLACEHOLDER.to_string())
+        } else {
+            self.answer_placeholder(cx)
+        };
+        if placeholder == self.composer_state.placeholder {
             return;
         }
-        self.composer_state.feedback_placeholder = declines;
-        let placeholder = if declines {
-            FEEDBACK_PLACEHOLDER
-        } else {
-            "Message the agent…"
-        };
+        self.composer_state.placeholder = placeholder.clone();
+        let placeholder = placeholder.unwrap_or_else(|| "Message the agent…".to_string());
         self.composer.update(cx, |editor, cx| {
-            editor.set_placeholder_text(placeholder, window, cx)
+            editor.set_placeholder_text(&placeholder, window, cx)
         });
     }
 
@@ -1018,7 +1046,7 @@ impl ThreadView {
         self.add_paths(paths.paths().to_vec(), window, cx);
     }
 
-    fn dispatch(
+    pub(crate) fn dispatch(
         &mut self,
         command: t3_api::tagged::OrchestrationV2Command,
         request_id: Option<String>,
@@ -1038,6 +1066,7 @@ impl ThreadView {
                     this.responding.remove(request_id);
                     if result.is_ok() {
                         this.answers.remove(request_id);
+                        this.composer_state.answering.forget(request_id);
                     }
                 }
                 if let Err(error) = result {
@@ -1076,25 +1105,23 @@ impl ThreadView {
         self.dispatch(command, Some(request_id), window, cx);
     }
 
+    /// Answers a question request, with what's in the composer as the answer to the question
+    /// it's on (`answers.rs`).
     fn answer(&mut self, request_id: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(thread_id) = self.thread_id.clone() else {
-            return;
-        };
-        let answers = self
-            .answers
-            .get(&request_id)
-            .map(|answers| {
-                let mut answers = answers
-                    .iter()
-                    .map(|(question, answer)| (question.clone(), answer.clone()))
-                    .collect::<Vec<_>>();
-                answers.sort();
-                answers
+        let questions = self
+            .thread_state()
+            .and_then(|state| {
+                state
+                    .pending_requests()
+                    .into_iter()
+                    .find(|pending| pending.request_id == request_id)
+            })
+            .and_then(|pending| match pending.item.map(|item| item.kind) {
+                Some(ItemKind::Question { questions, .. }) => Some(questions),
+                _ => None,
             })
             .unwrap_or_default();
-        let command =
-            commands::answer_questions(&thread_id, &request_id, answers, commands::new_id());
-        self.dispatch(command, Some(request_id), window, cx);
+        self.answer_request(request_id, questions, window, cx);
     }
 
     fn dismiss_questions(
@@ -1282,20 +1309,6 @@ impl ThreadView {
         self.dispatch(command, None, window, cx);
     }
 
-    fn pick_answer(
-        &mut self,
-        request_id: String,
-        question_id: String,
-        answer: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.answers
-            .entry(request_id)
-            .or_default()
-            .insert(question_id, answer);
-        cx.notify();
-    }
-
     fn on_send(&mut self, _: &SendMessage, window: &mut Window, cx: &mut Context<Self>) {
         // While the menu shows something, Enter picks it (`composerCommandKey.ts` in T3).
         if self.composer_state.menu.highlighted_item().is_some() {
@@ -1344,6 +1357,8 @@ impl ThreadView {
         let request_id = pending.request_id.clone();
         let busy = self.responding.contains(&request_id);
         let blocked = self.write_blocked_reason().is_some() || !pending.can_respond || busy;
+        let mut app_name = None;
+        let mut reason = None;
         let (title, prompt, kind, options, questions) =
             match pending.item.as_ref().map(|item| &item.kind) {
                 Some(ItemKind::Approval {
@@ -1351,45 +1366,54 @@ impl ThreadView {
                     prompt,
                     request_kind,
                     options,
+                    app_name: app,
+                    reason: why,
                     ..
-                }) => (
-                    title.clone(),
-                    prompt.clone(),
-                    Some(request_kind.clone()),
-                    options.clone(),
-                    Vec::new(),
-                ),
+                }) => {
+                    app_name = app.clone();
+                    reason = why.clone();
+                    (
+                        title.clone(),
+                        prompt.clone(),
+                        Some(request_kind.clone()),
+                        options.clone(),
+                        Vec::new(),
+                    )
+                }
                 Some(ItemKind::Question {
                     title, questions, ..
                 }) => (title.clone(), None, None, Vec::new(), questions.clone()),
                 _ => (None, None, None, Vec::new(), Vec::new()),
             };
-        let heading = title.unwrap_or_else(|| {
-            if pending.is_question {
-                "The agent has a question".to_string()
-            } else {
-                match &kind {
-                    Some(kind) => format!("The agent asks to run a {kind} action"),
-                    None => "The agent asks for approval".to_string(),
-                }
-            }
-        });
+        // An MCP server's question reads as prose, a command or a path as code (T3's panel).
+        let elicitation = kind.as_deref() == Some("mcp-elicitation");
+        let heading = match (pending.is_question, &kind) {
+            (true, _) => title.unwrap_or_else(|| "The agent has a question".to_string()),
+            (false, Some(kind)) => crate::answers::approval_label(kind).to_string(),
+            (false, None) => title.unwrap_or_else(|| "The agent asks for approval".to_string()),
+        };
 
         let mut buttons: Vec<AnyElement> = Vec::new();
         if pending.is_question {
-            let answered = self.answers.get(&request_id);
-            let complete = questions.iter().all(|question| {
-                question.options.is_empty()
-                    || answered.is_some_and(|answers| answers.contains_key(&question.id))
-            });
+            let complete = self.answers_complete(&request_id, &questions, cx);
             buttons.push(
-                TextButton::new(SharedString::from(format!("answer-{request_id}")), "Answer")
-                    .style(MustrButtonStyle::Primary)
-                    .disabled(blocked || !complete)
-                    .on_click(cx.listener({
+                div()
+                    .debug_selector({
                         let request_id = request_id.clone();
-                        move |this, _, window, cx| this.answer(request_id.clone(), window, cx)
-                    }))
+                        move || format!("thread-answer-{request_id}")
+                    })
+                    .child(
+                        TextButton::new(
+                            SharedString::from(format!("answer-{request_id}")),
+                            "Answer",
+                        )
+                        .style(MustrButtonStyle::Primary)
+                        .disabled(blocked || !complete)
+                        .on_click(cx.listener({
+                            let request_id = request_id.clone();
+                            move |this, _, window, cx| this.answer(request_id.clone(), window, cx)
+                        })),
+                    )
                     .into_any_element(),
             );
             buttons.push(
@@ -1411,50 +1435,81 @@ impl ThreadView {
             // the agent doesn't list its own options.
             let options = if options.is_empty() {
                 vec![
-                    (ProviderApprovalDecision::Accept, "Approve".to_string()),
+                    (
+                        ProviderApprovalDecision::Accept,
+                        "Approve".to_string(),
+                        None,
+                    ),
                     (
                         ProviderApprovalDecision::AcceptForSession,
                         "Approve for session".to_string(),
+                        None,
                     ),
-                    (ProviderApprovalDecision::Decline, "Decline".to_string()),
-                    (ProviderApprovalDecision::Cancel, "Cancel".to_string()),
+                    (
+                        ProviderApprovalDecision::Decline,
+                        "Decline".to_string(),
+                        None,
+                    ),
+                    (ProviderApprovalDecision::Cancel, "Cancel".to_string(), None),
                 ]
             } else {
                 options
                     .iter()
-                    .map(|option| (option.decision.clone(), option.label.clone()))
+                    .map(|option| {
+                        (
+                            option.decision.clone(),
+                            option.label.clone(),
+                            option.warning.clone(),
+                        )
+                    })
                     .collect()
             };
-            for (index, (decision, label)) in options.into_iter().enumerate() {
+            for (index, (decision, label, warning)) in options.into_iter().enumerate() {
                 let primary = decision == ProviderApprovalDecision::Accept;
                 let selector = format!("thread-respond-{request_id}-{index}");
+                let button = TextButton::new(
+                    SharedString::from(format!("respond-{request_id}-{index}")),
+                    label,
+                )
+                .style(if primary {
+                    MustrButtonStyle::Primary
+                } else {
+                    MustrButtonStyle::Default
+                })
+                .disabled(blocked)
+                .on_click(cx.listener({
+                    let request_id = request_id.clone();
+                    move |this, _, window, cx| {
+                        this.respond(request_id.clone(), decision.clone(), window, cx)
+                    }
+                }));
                 buttons.push(
-                    div()
+                    h_flex()
                         .debug_selector(|| selector)
-                        .child(
-                            TextButton::new(
-                                SharedString::from(format!("respond-{request_id}-{index}")),
-                                label,
+                        .gap_0p5()
+                        .when_some(warning.clone(), |this, warning| {
+                            this.child(
+                                div()
+                                    .id(SharedString::from(format!(
+                                        "respond-warning-{request_id}-{index}"
+                                    )))
+                                    .child(
+                                        Icon::new(IconName::Warning)
+                                            .size(IconSize::XSmall)
+                                            .color(Color::Warning),
+                                    )
+                                    .tooltip(Tooltip::text(warning)),
                             )
-                            .style(if primary {
-                                MustrButtonStyle::Primary
-                            } else {
-                                MustrButtonStyle::Default
-                            })
-                            .disabled(blocked)
-                            .on_click(cx.listener({
-                                let request_id = request_id.clone();
-                                move |this, _, window, cx| {
-                                    this.respond(request_id.clone(), decision.clone(), window, cx)
-                                }
-                            })),
-                        )
+                        })
+                        .child(match warning {
+                            Some(warning) => button.tooltip(warning),
+                            None => button,
+                        })
                         .into_any_element(),
                 );
             }
         }
 
-        let answers = self.answers.get(&request_id).cloned().unwrap_or_default();
         let selector = format!("thread-pending-{request_id}");
         div().debug_selector(|| selector).child(
             Card::new()
@@ -1464,6 +1519,7 @@ impl ThreadView {
                 .child(
                     h_flex()
                         .gap_1p5()
+                        .min_w_0()
                         .child(
                             Icon::new(if pending.is_question {
                                 IconName::CircleHelp
@@ -1477,7 +1533,15 @@ impl ThreadView {
                             Label::new(heading)
                                 .size(LabelSize::Small)
                                 .weight(FontWeight::SEMIBOLD),
-                        ),
+                        )
+                        .when_some(app_name, |this, app_name| {
+                            this.child(
+                                Label::new(app_name)
+                                    .size(LabelSize::Small)
+                                    .color(Color::Muted)
+                                    .truncate(),
+                            )
+                        }),
                 )
                 .when_some(prompt, |this, prompt| {
                     this.child(
@@ -1486,44 +1550,22 @@ impl ThreadView {
                             .py_1()
                             .rounded(scaled(tokens::CONTROL_RADIUS))
                             .bg(palette.background.hsla())
-                            .child(Label::new(prompt).size(LabelSize::Small).buffer_font(cx)),
+                            .child(if elicitation {
+                                Label::new(prompt).size(LabelSize::Small)
+                            } else {
+                                Label::new(prompt).size(LabelSize::Small).buffer_font(cx)
+                            }),
                     )
                 })
-                .children(questions.into_iter().map(|question| {
-                    let picked = answers.get(&question.id).cloned();
-                    v_flex()
-                        .gap_1()
-                        .child(Label::new(question.question.clone()).size(LabelSize::Small))
-                        .child(
-                            h_flex().flex_wrap().gap_1().children(
-                                question.options.iter().enumerate().map(
-                                    |(index, (label, answer))| {
-                                        let selected = picked.as_deref() == Some(answer.as_str());
-                                        let request_id = request_id.clone();
-                                        let question_id = question.id.clone();
-                                        let answer = answer.clone();
-                                        mustr_ui::Chip::new(
-                                            SharedString::from(format!(
-                                                "option-{request_id}-{}-{index}",
-                                                question.id
-                                            )),
-                                            label.clone(),
-                                        )
-                                        .accent(selected)
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
-                                                this.pick_answer(
-                                                    request_id.clone(),
-                                                    question_id.clone(),
-                                                    answer.clone(),
-                                                    cx,
-                                                )
-                                            }),
-                                        )
-                                    },
-                                ),
-                            ),
-                        )
+                .when_some(reason, |this, reason| {
+                    this.child(
+                        Label::new(reason)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                })
+                .children(questions.iter().enumerate().map(|(index, question)| {
+                    self.render_question(&request_id, index, question, cx)
                 }))
                 .when(pending.supports_feedback && pending.can_respond, |this| {
                     this.child(
@@ -1534,18 +1576,16 @@ impl ThreadView {
                         .color(Color::Muted),
                     )
                 })
-                .child(
-                    h_flex()
-                        .gap_1p5()
-                        .children(buttons)
-                        .when(!pending.can_respond, |this| {
-                            this.child(
-                                Label::new("The agent's session ended, so this can't be answered.")
-                                    .size(LabelSize::XSmall)
-                                    .color(Color::Muted),
-                            )
-                        }),
-                ),
+                .child(h_flex().flex_wrap().gap_1p5().children(buttons).when(
+                    !pending.can_respond,
+                    |this| {
+                        this.child(
+                            Label::new("The agent's session ended, so this can't be answered.")
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted),
+                        )
+                    },
+                )),
         )
     }
 
@@ -2081,6 +2121,13 @@ impl ThreadView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        self.deploy_pending_find(window, cx);
+        self.highlight_composer_markdown(cx);
+        let window_height = window.viewport_size().height;
+        let reserved = scaled(px(PENDING_RESERVED_HEIGHT)).to_pixels(window.rem_size());
+        let pending_max_height = (window_height - reserved)
+            .min(window_height * 0.45)
+            .max(window_height * 0.2);
         self.sync_placeholder(window, cx);
         let declines = self.feedback_target().is_some();
         let palette = palette(cx);
@@ -2092,6 +2139,12 @@ impl ThreadView {
         let blocked = self.write_blocked_reason();
         let can_write = blocked.is_none() && (is_draft || state.is_some()) && !self.sending;
         let has_text = !self.composer_text(cx).trim().is_empty();
+        // While the agent waits on a question, the message answers it (`answers.rs`): Next
+        // moves to the next question, and Answer, on the last, answers them all.
+        let answering = self
+            .answer_target()
+            .filter(|_| !is_draft && !declines)
+            .map(|(request_id, questions)| self.answers_complete(&request_id, &questions, cx));
 
         let editing_queued = self.composer_state.editing_queued.is_some();
         let mut buttons: Vec<AnyElement> = Vec::new();
@@ -2137,6 +2190,37 @@ impl ThreadView {
                             .style(MustrButtonStyle::Primary)
                             .disabled(!can_write || !has_text)
                             .tooltip("Decline the request and tell the agent why")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.send(Delivery::Auto, window, cx)
+                            })),
+                    )
+                    .into_any_element(),
+            );
+        } else if let Some(complete) = answering {
+            buttons.push(
+                div()
+                    .debug_selector(|| "thread-stop".into())
+                    .child(
+                        TextButton::new("thread-stop", "Stop")
+                            .disabled(blocked.is_some())
+                            .tooltip("Stop the agent's run")
+                            .on_click(cx.listener(|this, _, window, cx| this.stop(window, cx))),
+                    )
+                    .into_any_element(),
+            );
+            let has_answer = has_text || self.images.has_attachments();
+            buttons.push(
+                div()
+                    .debug_selector(|| "thread-answer".into())
+                    .child(
+                        TextButton::new("thread-answer", if complete { "Answer" } else { "Next" })
+                            .style(MustrButtonStyle::Primary)
+                            .disabled(!can_write || !(has_answer || complete))
+                            .tooltip(if complete {
+                                "Answer the agent's questions"
+                            } else {
+                                "Answer this question, then the next"
+                            })
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.send(Delivery::Auto, window, cx)
                             })),
@@ -2277,6 +2361,8 @@ impl ThreadView {
                 .child(
                     Label::new(if declines {
                         "decline"
+                    } else if let Some(complete) = answering {
+                        if complete { "answer" } else { "next" }
                     } else if running {
                         crate::thread_settings::FollowUpBehavior::get(cx).hint()
                     } else {
@@ -2302,11 +2388,24 @@ impl ThreadView {
                     .w_full()
                     .max_w(scaled(px(CONTENT_MAX_WIDTH)))
                     .gap_2()
-                    .children(
-                        pending
-                            .iter()
-                            .map(|pending| self.render_pending(pending, cx)),
-                    )
+                    // The agent's requests scroll rather than push the timeline and the
+                    // composer out of a small window, or a big zoom.
+                    .when(!pending.is_empty(), |this| {
+                        this.child(
+                            div()
+                                .id("thread-pending-requests")
+                                .w_full()
+                                .max_h(pending_max_height)
+                                .overflow_y_scroll()
+                                .child(
+                                    v_flex().w_full().gap_2().children(
+                                        pending
+                                            .iter()
+                                            .map(|pending| self.render_pending(pending, cx)),
+                                    ),
+                                ),
+                        )
+                    })
                     .children(self.render_goal(cx))
                     .when(!queued.is_empty(), |this| {
                         this.child(self.render_queue(queued, running, cx))
@@ -2382,6 +2481,7 @@ impl ThreadView {
                                 ),
                         )
                     })
+                    .children(self.render_stash(cx))
                     .children(self.render_composer_menu(cx))
                     .child(
                         v_flex()
@@ -2392,6 +2492,10 @@ impl ThreadView {
                             .on_action(cx.listener(Self::on_steer))
                             .on_action(cx.listener(Self::on_stop))
                             .on_action(cx.listener(Self::on_paste_as_text))
+                            .on_action(cx.listener(Self::on_stash_prompt))
+                            .on_action(cx.listener(Self::on_toggle_bold))
+                            .on_action(cx.listener(Self::on_toggle_italic))
+                            .on_action(cx.listener(Self::on_toggle_inline_code))
                             .capture_action(cx.listener(Self::on_paste))
                             .capture_action(cx.listener(Self::on_move_up))
                             .capture_action(cx.listener(Self::on_move_down))

@@ -66,6 +66,19 @@ pub use organize::{
 pub use sidebar::{NextThread, PreviousThread, RowPullRequest};
 pub use snooze::SnoozeThread;
 // WP14, agent setup and T3's settings:
+// WP15, timeline and composer:
+mod answers;
+#[cfg(debug_assertions)]
+mod debug_fixture;
+mod file_links;
+mod formatting;
+mod html_renders;
+mod plan_save;
+pub use find_bar::open_thread_with_find;
+pub use formatting::{ToggleBold, ToggleInlineCode, ToggleItalic};
+mod quote;
+mod stash;
+pub use stash::StashPrompt;
 // WP17, threads, creation and navigation:
 pub mod bulk;
 mod clone;
@@ -215,6 +228,12 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-z", UndoThreadAction, Some("ThreadView")),
         KeyBinding::new("secondary-z", UndoThreadAction, Some("ThreadsSidebar")),
         // WP14, agent setup and T3's settings:
+        // WP15, timeline and composer: T3's `mod+s` stashes the prompt, or brings it back.
+        KeyBinding::new("secondary-s", StashPrompt, composer),
+        // T3's formatting keys: `mod+b` (bold, a selection only), `mod+i` and `mod+e` (code).
+        KeyBinding::new("secondary-b", ToggleBold, composer),
+        KeyBinding::new("secondary-i", ToggleItalic, composer),
+        KeyBinding::new("secondary-e", ToggleInlineCode, composer),
         // WP17, threads, creation and navigation: T3's `mod+Enter` and `mod+alt+Enter` start a
         // draft's thread in the background. On other threads they go on to Send.
         KeyBinding::new("secondary-alt-enter", StartInBackground, composer),

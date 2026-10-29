@@ -1316,9 +1316,16 @@ impl ThreadsSidebar {
         }
         self.clear_selection(cx);
         self.anchor = Some(thread.id.clone());
-        // TODO(WP15): `crate::open_thread_with_find` with `find_query` once it's on m3/next.
-        let _ = find_query;
-        self.open(thread, window, cx);
+        match find_query {
+            Some(query) => crate::open_thread_with_find(
+                thread.id.clone(),
+                query,
+                self.workspace.clone(),
+                window,
+                cx,
+            ),
+            None => self.open(thread, window, cx),
+        }
     }
 
     pub(crate) fn clear_selection(&mut self, cx: &mut Context<Self>) {

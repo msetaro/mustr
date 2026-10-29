@@ -149,6 +149,14 @@ pub enum ItemKind {
         /// How many images the output holds, such as a browser tool's screenshots. They load
         /// by index (`tool-output-image`).
         images: usize,
+        /// The page a preview tool opened, for Open in browser (`html_renders.rs`).
+        link: Option<String>,
+    },
+    /// A page the agent made with T3's `html_render`, kept as an attachment
+    /// (`html_renders.rs`).
+    HtmlRender {
+        attachment_id: String,
+        title: String,
     },
     FileChange {
         path: String,
@@ -162,9 +170,14 @@ pub enum ItemKind {
         request_id: String,
         title: Option<String>,
         prompt: Option<String>,
-        /// What's being approved: `command_execution`, `file_change`, and so on.
+        /// What's being approved: `command`, `file-read`, `file-change`, `mcp-elicitation` (an
+        /// MCP server's question, which T3 asks as an approval), or `permission`.
         request_kind: String,
         options: Vec<ApprovalOption>,
+        /// The app an MCP server's question is for (`appName`).
+        app_name: Option<String>,
+        /// Why the agent asks.
+        reason: Option<String>,
     },
     /// The agent asked the user questions.
     Question {
@@ -212,6 +225,9 @@ pub struct Question {
     pub question: String,
     /// `(label, answer)`: the answer sent back is the option's value, or its label.
     pub options: Vec<(String, String)>,
+    /// Whether a typed answer, and attachments, can answer it (`allowCustomAnswer`, on unless
+    /// T3 says otherwise).
+    pub allow_custom_answer: bool,
 }
 
 /// A file other than an image attached to a user message.
@@ -241,6 +257,8 @@ pub struct FileOperation {
 pub struct ApprovalOption {
     pub decision: ProviderApprovalDecision,
     pub label: String,
+    /// What to know before picking it, such as what "Always allow" means.
+    pub warning: Option<String>,
 }
 
 /// The value of a generated string enum or untagged union as it appears on the wire.
@@ -379,6 +397,7 @@ impl TimelineItem {
                                     (option.label.clone(), answer)
                                 })
                                 .collect(),
+                            allow_custom_answer: question.allow_custom_answer != Some(false),
                         })
                         .collect(),
                 }
@@ -412,6 +431,7 @@ impl TimelineItem {
                     output: non_empty(item.output.as_ref()),
                     output_omitted: item.output_omitted.unwrap_or(false),
                     images: 0,
+                    link: None,
                 }
             ),
             OrchestrationV2TurnItem::FileSearch(item) => item!(
@@ -434,6 +454,7 @@ impl TimelineItem {
                     }),
                     output_omitted: false,
                     images: 0,
+                    link: None,
                 }
             ),
             OrchestrationV2TurnItem::WebSearch(item) => item!(
@@ -451,8 +472,24 @@ impl TimelineItem {
                     output: None,
                     output_omitted: false,
                     images: 0,
+                    link: None,
                 }
             ),
+            OrchestrationV2TurnItem::DynamicTool(item)
+                if item.status == OrchestrationV2TurnItemStatus::Completed
+                    && let Some((attachment_id, title)) = crate::html_renders::html_render_of(
+                        item.tool_name.as_deref(),
+                        item.output.as_ref(),
+                    ) =>
+            {
+                item!(
+                    item,
+                    ItemKind::HtmlRender {
+                        attachment_id,
+                        title
+                    }
+                )
+            }
             OrchestrationV2TurnItem::DynamicTool(item) => item!(
                 item,
                 ItemKind::Tool {
@@ -473,6 +510,10 @@ impl TimelineItem {
                     } else {
                         item.output.as_ref().map_or(0, tool_output_images)
                     },
+                    link: crate::html_renders::preview_link_of(
+                        item.tool_name.as_deref(),
+                        &item.input,
+                    ),
                 }
             ),
             OrchestrationV2TurnItem::Subagent(item) => item!(
@@ -486,6 +527,7 @@ impl TimelineItem {
                         .or_else(|| non_empty(item.progress.as_ref())),
                     output_omitted: false,
                     images: 0,
+                    link: None,
                 }
             ),
             OrchestrationV2TurnItem::ApprovalRequest(item) => item!(
@@ -502,8 +544,11 @@ impl TimelineItem {
                         .map(|option| ApprovalOption {
                             decision: option.decision.clone(),
                             label: option.label.clone(),
+                            warning: non_empty(option.warning.as_ref()),
                         })
                         .collect(),
+                    app_name: non_empty(item.app_name.as_ref()),
+                    reason: non_empty(item.reason.as_ref()),
                 }
             ),
             OrchestrationV2TurnItem::Error(item) => item!(
@@ -932,6 +977,9 @@ pub struct ThreadState {
     checkpoints: Vec<OrchestrationV2Checkpoint>,
     /// The agent sessions the thread holds, which "Restart agent session" detaches.
     provider_sessions: Vec<OrchestrationV2ProviderSession>,
+    /// Whether the debug fixture played on this snapshot (`debug_fixture.rs`).
+    #[cfg(debug_assertions)]
+    pub(crate) debug_fixture_applied: bool,
 }
 
 impl ThreadState {
@@ -955,7 +1003,16 @@ impl ThreadState {
             attempts: projection.attempts,
             checkpoints: projection.checkpoints,
             provider_sessions: projection.provider_sessions,
+            #[cfg(debug_assertions)]
+            debug_fixture_applied: false,
         }
+    }
+
+    /// Applies an event of the debug fixture (`debug_fixture.rs`), without moving the sequence
+    /// the subscription resumes from.
+    #[cfg(debug_assertions)]
+    pub(crate) fn apply_fixture_event(&mut self, event: OrchestrationV2DomainEvent) -> Applied {
+        self.apply_event(event)
     }
 
     /// The thread's subagents and delegated tasks, as T3 last sent them.

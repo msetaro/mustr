@@ -100,7 +100,7 @@ impl ThreadView {
                 let title = commands::title_from_message(&launch.new_thread.text);
                 let mut input = commands::launch(launch.new_thread, LaunchIds::new());
                 self.attach_mention_context(&mut input);
-                self.attach_composer_images(&mut input);
+                self.attach_composer_images(&mut input, cx);
                 let launch_thread = self.backend.launch_thread(input);
                 (launch.model_name, title, launch_thread)
             })
