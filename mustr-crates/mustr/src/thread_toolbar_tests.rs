@@ -498,7 +498,7 @@ fn the_toolbar_keys_beat_zeds_in_a_thread(cx: &mut TestAppContext) {
                         let (bindings, _) = cx
                             .key_bindings()
                             .borrow()
-                            .bindings_for_input(&[keystroke.clone()], stack);
+                            .bindings_for_input(std::slice::from_ref(&keystroke), stack);
                         assert_eq!(
                             bindings.first().map(|binding| binding.action().name()),
                             Some(action),

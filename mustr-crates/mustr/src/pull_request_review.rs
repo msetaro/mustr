@@ -1877,7 +1877,7 @@ mod tests {
         async fn no_linked_threads_show_nothing(cx: &mut TestAppContext) {
             let backend = RecordingBackend::with_shell(shell(Vec::new()));
             backend.respond("pullRequests.linkedThreads", Ok(json!({ "threads": [] })));
-            let (actions, cx) = actions_for(backend.clone(), cx);
+            let (actions, cx) = actions_for(backend, cx);
             assert!(actions.update(cx, |actions, cx| {
                 actions.render_linked_threads(cx).is_none()
             }));
