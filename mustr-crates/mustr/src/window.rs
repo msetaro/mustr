@@ -188,7 +188,10 @@ pub fn open_home_window(app_state: Arc<AppState>, cx: &mut App) {
             log::error!("Failed to open a window: {error:#}");
             eprintln!("mustr failed to open a window: {error:#}");
             cx.update(|cx| cx.quit());
+            return;
         }
+        // Zed has restored the window's docks.
+        cx.update(crate::terminal_panel::finish_launch);
     })
     .detach();
 }
