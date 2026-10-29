@@ -120,6 +120,8 @@ pub struct ComposerState {
     pub(crate) markdown_highlighting: bool,
     /// HTML renders being loaded to open in the browser (`html_renders.rs`).
     pub(crate) opening_renders: collections::HashSet<String>,
+    /// A plan being saved to the thread's folder (`plan_save.rs`).
+    pub(crate) plan_save: crate::plan_save::PlanSaveState,
     _save_draft: Option<gpui::Task<()>>,
 }
 

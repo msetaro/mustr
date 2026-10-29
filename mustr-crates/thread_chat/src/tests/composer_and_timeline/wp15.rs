@@ -716,3 +716,36 @@ async fn an_html_render_opens_in_the_browser(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(cx.opened_url().as_deref(), Some("http://localhost:5173/"));
 }
+
+// Save to workspace.
+
+#[gpui::test]
+async fn a_plan_saves_to_the_threads_folder(cx: &mut TestAppContext) {
+    let folder = std::env::temp_dir().join(format!("mustr-wp15-plan-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let mut projection = super::planned_thread("completed", "default");
+    projection["thread"]["worktreePath"] = json!(folder.display().to_string());
+    let (view, cx) = open_view(super::backend_with(projection), Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(1200.)));
+    cx.run_until_parked();
+
+    let save = cx
+        .debug_bounds("thread-plan-save-i6")
+        .expect("the plan has Save");
+    cx.simulate_click(save.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    // The path starts from the plan's title, as T3's does.
+    assert!(cx.debug_bounds("thread-plan-save-path-i6").is_some());
+    cx.simulate_input("docs/retries.md");
+    let confirm = cx.debug_bounds("thread-plan-save-confirm-i6").unwrap();
+    cx.simulate_click(confirm.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(
+        std::fs::read_to_string(folder.join("docs/retries.md")).unwrap(),
+        super::PLAN_MARKDOWN
+    );
+    assert!(cx.debug_bounds("thread-plan-save-path-i6").is_none());
+    // Nothing went to T3.
+    view.read_with(cx, |view, _| assert_eq!(view.error(), None));
+    std::fs::remove_dir_all(folder).ok();
+}

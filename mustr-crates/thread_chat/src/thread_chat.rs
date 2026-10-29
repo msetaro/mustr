@@ -71,6 +71,7 @@ mod answers;
 mod file_links;
 mod formatting;
 mod html_renders;
+mod plan_save;
 pub use find_bar::open_thread_with_find;
 pub use formatting::{ToggleBold, ToggleInlineCode, ToggleItalic};
 mod quote;

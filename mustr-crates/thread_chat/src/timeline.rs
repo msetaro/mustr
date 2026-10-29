@@ -860,6 +860,7 @@ impl ThreadView {
                 title, markdown, ..
             } => {
                 let actions = self.render_plan_actions(item, cx);
+                let (save, save_row) = self.render_plan_save(&item.id, markdown, cx);
                 let copied = self.composer_state.copied.as_deref() == Some(item.id.as_str());
                 let copy_text = format!("{}\n", markdown.trim_end());
                 let item_id = item.id.clone();
@@ -880,6 +881,7 @@ impl ThreadView {
                                     .weight(FontWeight::SEMIBOLD),
                             )
                             .child(div().flex_1())
+                            .child(save)
                             .child(
                                 div()
                                     .debug_selector(|| format!("thread-plan-copy-{item_id}"))
@@ -905,6 +907,7 @@ impl ThreadView {
                             ),
                     )
                     .child(self.render_markdown(&item.id, false, window, cx))
+                    .children(save_row)
                     .children(actions)
                     .into_any_element()
             }
