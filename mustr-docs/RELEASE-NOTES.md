@@ -3,9 +3,9 @@
 ## 0.1.1
 
 - **Back to the original size.** 0.1.0 started at twice the size of mustr's designs, which was too
-  big on a laptop. The default `ui_font_size` and `buffer_font_size` are 13 again. If you zoomed in
-  0.1.0, mustr keeps your size; ⌘0 goes back to the new default. ⌘= and ⌘- still zoom the whole
-  app, about 10% a step.
+  big on a laptop. The default is the designs' size again (Settings › General › Zoom, 100%). If you
+  zoomed in 0.1.0, mustr keeps your size; ⌘0 or Reset goes back to the new default. ⌘= and ⌘- still
+  zoom the whole app, about 10% a step.
 - **Settings, all in the app.** ⌘, (or mustr › Settings…, or the gear at the bottom of the rail)
   opens one Settings page instead of a settings file. Its sections: General (theme, zoom, code
   size, fonts, what closing the last window does), Editor, Terminal, Agents and threads, Connection,
