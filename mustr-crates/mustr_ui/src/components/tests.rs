@@ -2,8 +2,8 @@ use super::*;
 use crate::tokens;
 use crate::{COLORBLIND_SAFE_THEME_NAME, DARK_THEME_NAME, LIGHT_THEME_NAME};
 use gpui::{
-    Context, IntoElement, Modifiers, ParentElement as _, Pixels, Render, Styled as _,
-    TestAppContext, UpdateGlobal as _, VisualTestContext, Window, div, px,
+    Context, InteractiveElement as _, IntoElement, Modifiers, ParentElement as _, Pixels, Render,
+    Styled as _, TestAppContext, UpdateGlobal as _, VisualTestContext, Window, div, px,
 };
 use settings::{SettingsStore, ThemeName, ThemeSelection};
 use std::{cell::RefCell, rc::Rc};
@@ -214,4 +214,64 @@ fn key_labels() {
         key_label(&Modifiers::alt(), "f12", KeyStyle::Words),
         "Alt+F12"
     );
+}
+
+/// A button that opens a menu when `opens_menu`, as mustr's Run ▾ and the title bar's
+/// connection chip do: the click marks the menu open.
+struct MenuButton {
+    opens_menu: bool,
+    menu_open: bool,
+}
+
+impl Render for MenuButton {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        ui::h_flex().p_4().child(
+            div().debug_selector(|| "run".into()).child(
+                TextButton::new("run", "Run ▾")
+                    .tooltip("Run a script")
+                    .menu_open(self.menu_open)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.menu_open = this.opens_menu;
+                        cx.notify();
+                    })),
+            ),
+        )
+    }
+}
+
+/// How many tooltips show after the pointer rests on the button briefly, then clicks it and
+/// stays: GPUI shows a tooltip that was pending when the click came, after its delay.
+fn tooltips_after_a_quick_click(opens_menu: bool, cx: &mut TestAppContext) -> usize {
+    let tooltips = Rc::new(std::cell::Cell::new(0));
+    cx.update(|cx| {
+        let tooltips = tooltips.clone();
+        cx.observe_new(move |_: &mut ui::Tooltip, _, _| tooltips.set(tooltips.get() + 1))
+            .detach();
+    });
+    let (_, cx) = cx.add_window_view(|_, _| MenuButton {
+        opens_menu,
+        menu_open: false,
+    });
+    cx.run_until_parked();
+    let center = cx.debug_bounds("run").expect("the button renders").center();
+    cx.simulate_mouse_move(center, None, Modifiers::none());
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(100));
+    cx.simulate_click(center, Modifiers::none());
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(2));
+    cx.run_until_parked();
+    tooltips.get()
+}
+
+#[gpui::test]
+fn a_pending_tooltip_shows_after_a_click_that_opens_nothing(cx: &mut TestAppContext) {
+    init_test(cx);
+    assert_eq!(tooltips_after_a_quick_click(false, cx), 1);
+}
+
+#[gpui::test]
+fn a_pending_tooltip_stays_off_the_menu_its_button_opened(cx: &mut TestAppContext) {
+    init_test(cx);
+    assert_eq!(tooltips_after_a_quick_click(true, cx), 0);
 }

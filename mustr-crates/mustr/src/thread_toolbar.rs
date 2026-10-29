@@ -1132,6 +1132,7 @@ impl ThreadToolbar {
                      (T3's context handoff)",
                 pending.from, pending.to
             ))
+            .menu_open(self.menu.is_open())
             .on_click(
                 cx.listener(|this, event, window, cx| this.deploy_handoff_menu(event, window, cx)),
             )
@@ -1143,6 +1144,7 @@ impl ThreadToolbar {
                 } else {
                     "This agent can't hand its conversation to another now"
                 })
+                .menu_open(self.menu.is_open())
                 .on_click(cx.listener(|this, event, window, cx| {
                     this.deploy_handoff_menu(event, window, cx)
                 }))
@@ -1214,6 +1216,7 @@ impl ThreadToolbar {
             .dot(palette.ok.hsla())
             .menu_indicator(true)
             .tooltip(tooltip)
+            .menu_open(self.menu.is_open())
             .on_click(
                 cx.listener(|this, event, window, cx| this.deploy_servers_menu(event, window, cx)),
             )
@@ -1599,7 +1602,10 @@ impl ThreadToolbar {
         let status = thread.pull_request.read(cx);
         let menu_button = IconButton::new("thread-pull-request-menu", IconName::ChevronDown)
             .icon_size(IconSize::XSmall)
-            .tooltip(Tooltip::text("Link, unlink, or watch pull requests"))
+            // A tooltip that was pending when the click came would cover the menu.
+            .when(!self.menu.is_open(), |this| {
+                this.tooltip(Tooltip::text("Link, unlink, or watch pull requests"))
+            })
             .on_click(cx.listener(|this, event, window, cx| {
                 this.deploy_pull_request_menu(event, window, cx)
             }));
@@ -2053,6 +2059,7 @@ impl Render for ThreadToolbar {
                         overflow::more_button(
                             "thread-toolbar-more",
                             "More of the thread's actions",
+                            self.menu.is_open(),
                         )
                         .on_click(cx.listener(
                             |this, event, window, cx| this.deploy_overflow_menu(event, window, cx),

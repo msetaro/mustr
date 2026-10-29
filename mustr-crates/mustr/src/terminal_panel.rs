@@ -1561,6 +1561,7 @@ impl ThreadTerminalPanel {
                 this.child(
                     TextButton::new("thread-terminal-scripts", "Run ▾")
                         .tooltip("Run one of the project's scripts in a new terminal")
+                        .menu_open(self.menu.is_open())
                         .on_click(cx.listener(|_, event, window, cx| {
                             // After the click's own focus changes (the dock focuses its
                             // terminal), which would close a menu opened now.

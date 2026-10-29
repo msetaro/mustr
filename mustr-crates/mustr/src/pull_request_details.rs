@@ -626,6 +626,7 @@ impl PullRequestDetails {
                 "Stack #{}: the pull requests stacked on {}",
                 stack.number, stack.base
             ))
+            .menu_open(self.menu.is_open())
             .on_click(
                 cx.listener(|this, event, window, cx| this.deploy_stack_menu(event, window, cx)),
             )

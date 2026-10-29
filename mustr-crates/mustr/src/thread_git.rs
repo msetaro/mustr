@@ -1763,6 +1763,12 @@ impl MenuSlot {
         cx.notify();
     }
 
+    /// Whether a menu is open. The buttons that open it leave out their tooltips while it is,
+    /// since GPUI shows a tooltip that was pending when the click came, over the menu.
+    pub fn is_open(&self) -> bool {
+        self.0.is_some()
+    }
+
     pub fn render(&self) -> Option<AnyElement> {
         let (menu, position, _) = self.0.as_ref()?;
         Some(
@@ -2065,6 +2071,7 @@ impl Render for ThreadGitControls {
         let notice = self.render_notice(cx);
         let this = cx.weak_entity();
         let menu_this = this.clone();
+        let menu_open = self.menu.is_open();
         let editor_this = this.clone();
         let git = self.git.clone();
 
@@ -2080,6 +2087,7 @@ impl Render for ThreadGitControls {
                         }),
                 )
                 .menu_tooltip("Choose an editor")
+                .menu_open(menu_open)
                 .on_click(move |_, _, cx| git.update(cx, |git, cx| git.open_in_editor(None, cx)))
                 .on_menu_click(move |event, window, cx| {
                     editor_this
@@ -2101,6 +2109,7 @@ impl Render for ThreadGitControls {
             .disabled(!has_checkout || (main_disabled && self.git.read(cx).is_busy()))
             .tooltip(main_tooltip)
             .menu_tooltip("More git actions")
+            .menu_open(menu_open)
             .on_click(move |_, window, cx| {
                 if main_disabled {
                     return;

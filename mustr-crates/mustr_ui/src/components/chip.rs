@@ -17,6 +17,7 @@ pub struct Chip {
     menu_indicator: bool,
     truncate: bool,
     tooltip: Option<SharedString>,
+    menu_open: bool,
     on_click: Option<ClickHandler>,
 }
 
@@ -30,6 +31,7 @@ impl Chip {
             menu_indicator: false,
             truncate: false,
             tooltip: None,
+            menu_open: false,
             on_click: None,
         }
     }
@@ -61,6 +63,13 @@ impl Chip {
 
     pub fn tooltip(mut self, tooltip: impl Into<SharedString>) -> Self {
         self.tooltip = Some(tooltip.into());
+        self
+    }
+
+    /// Whether the menu the chip opens is open: its tooltip doesn't show then, so one that was
+    /// pending when the click came doesn't cover the menu.
+    pub fn menu_open(mut self, menu_open: bool) -> Self {
+        self.menu_open = menu_open;
         self
     }
 
@@ -142,7 +151,7 @@ impl RenderOnce for Chip {
                 }
             })
             .when(self.menu_indicator, |this| this.child("▾"))
-            .when_some(self.tooltip, |this, tooltip| {
+            .when_some(self.tooltip.filter(|_| !self.menu_open), |this, tooltip| {
                 this.tooltip(Tooltip::text(tooltip))
             })
             .when_some(self.on_click, |this, on_click| {

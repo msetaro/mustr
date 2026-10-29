@@ -54,6 +54,7 @@ pub struct TextButton {
     count: Option<SharedString>,
     disabled: bool,
     tooltip: Option<SharedString>,
+    menu_open: bool,
     on_click: Option<ClickHandler>,
 }
 
@@ -66,6 +67,7 @@ impl TextButton {
             count: None,
             disabled: false,
             tooltip: None,
+            menu_open: false,
             on_click: None,
         }
     }
@@ -90,6 +92,13 @@ impl TextButton {
         self
     }
 
+    /// Whether the menu the button opens is open: its tooltip doesn't show then, so one that
+    /// was pending when the click came doesn't cover the menu.
+    pub fn menu_open(mut self, menu_open: bool) -> Self {
+        self.menu_open = menu_open;
+        self
+    }
+
     pub fn on_click(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -103,9 +112,10 @@ impl RenderOnce for TextButton {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = self.style.colors(palette(cx));
         let content = button_content(self.label, self.count, &colors);
+        let tooltip = self.tooltip.filter(|_| !self.menu_open);
         button_frame(self.style, &colors)
             .child(
-                clickable_part(self.id, &colors, self.disabled, self.tooltip, self.on_click)
+                clickable_part(self.id, &colors, self.disabled, tooltip, self.on_click)
                     .px(scaled(px(10.)))
                     .child(content),
             )
@@ -124,6 +134,7 @@ pub struct SplitButton {
     disabled: bool,
     tooltip: Option<SharedString>,
     menu_tooltip: Option<SharedString>,
+    menu_open: bool,
     on_click: Option<ClickHandler>,
     on_menu_click: Option<ClickHandler>,
 }
@@ -138,6 +149,7 @@ impl SplitButton {
             disabled: false,
             tooltip: None,
             menu_tooltip: None,
+            menu_open: false,
             on_click: None,
             on_menu_click: None,
         }
@@ -168,6 +180,13 @@ impl SplitButton {
         self
     }
 
+    /// Whether the `▾`'s menu is open: the button's tooltips don't show then, so one that was
+    /// pending when the click came doesn't cover the menu.
+    pub fn menu_open(mut self, menu_open: bool) -> Self {
+        self.menu_open = menu_open;
+        self
+    }
+
     /// The main action.
     pub fn on_click(
         mut self,
@@ -192,9 +211,14 @@ impl RenderOnce for SplitButton {
         let colors = self.style.colors(palette(cx));
         let content = button_content(self.label, self.count, &colors);
         let menu_id = ElementId::NamedChild(self.id.clone().into(), "menu".into());
+        let (tooltip, menu_tooltip) = if self.menu_open {
+            (None, None)
+        } else {
+            (self.tooltip, self.menu_tooltip)
+        };
         button_frame(self.style, &colors)
             .child(
-                clickable_part(self.id, &colors, self.disabled, self.tooltip, self.on_click)
+                clickable_part(self.id, &colors, self.disabled, tooltip, self.on_click)
                     .debug_selector(|| "split-button-main".into())
                     .pl(scaled(px(10.)))
                     .pr(scaled(px(8.)))
@@ -206,7 +230,7 @@ impl RenderOnce for SplitButton {
                     menu_id,
                     &colors,
                     self.disabled,
-                    self.menu_tooltip,
+                    menu_tooltip,
                     self.on_menu_click,
                 )
                 .debug_selector(|| "split-button-menu".into())
