@@ -18,7 +18,7 @@ use gpui::{
     IntoElement, ParentElement as _, Render, SharedString, Styled as _, WeakEntity, Window,
     actions, div, px,
 };
-use mustr_ui::{palette, tokens, tokens::scaled};
+use mustr_ui::{MustrIcon, palette, tokens, tokens::scaled};
 use ui::{
     Color, Icon, IconButton, IconName, IconSize, Label, LabelCommon as _, LabelSize, Tooltip,
     prelude::*,
@@ -143,11 +143,11 @@ pub(crate) fn thread_details(
 }
 
 /// One line of the card: an icon and a muted text.
-fn line(icon: IconName, text: impl Into<SharedString>) -> impl IntoElement {
+fn line(icon: impl Into<Icon>, text: impl Into<SharedString>) -> impl IntoElement {
     h_flex()
         .min_w_0()
         .gap_2()
-        .child(Icon::new(icon).size(IconSize::XSmall).color(Color::Muted))
+        .child(icon.into().size(IconSize::XSmall).color(Color::Muted))
         .child(
             div().min_w_0().child(
                 Label::new(text.into())
@@ -194,7 +194,7 @@ impl Render for ThreadHoverCard {
                         this.child(line(IconName::GitBranch, branch))
                     })
                     .when(!details.model.is_empty(), |this| {
-                        this.child(line(IconName::ZedAgent, details.model.clone()))
+                        this.child(line(MustrIcon::Agent.icon(), details.model.clone()))
                     })
                     .when_some(details.status.clone(), |this, status| {
                         let updated = details
