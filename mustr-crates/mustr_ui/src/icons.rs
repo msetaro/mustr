@@ -12,9 +12,12 @@ const ICON_DIR: &str = "icons/mustr/";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MustrIcon {
     Agent,
+    /// A program, for one mustr has no icon of (Open in's fallback).
+    App,
     Inbox,
     PullRequest,
     Settings,
+    Terminal,
     /// A dashed ring: an agent at work (T3's `CircleDashed`).
     CircleDashed,
     /// A dashed ring around a dot: an agent waiting (T3's `CircleDotDashed`).
@@ -24,11 +27,13 @@ pub enum MustrIcon {
 }
 
 impl MustrIcon {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 9] = [
         Self::Agent,
+        Self::App,
         Self::Inbox,
         Self::PullRequest,
         Self::Settings,
+        Self::Terminal,
         Self::CircleDashed,
         Self::CircleDotDashed,
         Self::Bot,
@@ -37,9 +42,11 @@ impl MustrIcon {
     pub fn path(self) -> &'static str {
         match self {
             Self::Agent => "icons/mustr/agent.svg",
+            Self::App => "icons/mustr/app.svg",
             Self::Inbox => "icons/mustr/inbox.svg",
             Self::PullRequest => "icons/mustr/pull_request.svg",
             Self::Settings => "icons/mustr/settings.svg",
+            Self::Terminal => "icons/mustr/terminal.svg",
             Self::CircleDashed => "icons/mustr/circle_dashed.svg",
             Self::CircleDotDashed => "icons/mustr/circle_dot_dashed.svg",
             Self::Bot => "icons/mustr/bot.svg",
@@ -49,9 +56,11 @@ impl MustrIcon {
     fn svg(self) -> &'static str {
         match self {
             Self::Agent => include_str!("../assets/icons/agent.svg"),
+            Self::App => include_str!("../assets/icons/app.svg"),
             Self::Inbox => include_str!("../assets/icons/inbox.svg"),
             Self::PullRequest => include_str!("../assets/icons/pull_request.svg"),
             Self::Settings => include_str!("../assets/icons/settings.svg"),
+            Self::Terminal => include_str!("../assets/icons/terminal.svg"),
             Self::CircleDashed => include_str!("../assets/icons/circle_dashed.svg"),
             Self::CircleDotDashed => include_str!("../assets/icons/circle_dot_dashed.svg"),
             Self::Bot => include_str!("../assets/icons/bot.svg"),
@@ -61,6 +70,15 @@ impl MustrIcon {
     pub fn icon(self) -> Icon {
         Icon::from_path(self.path())
     }
+}
+
+/// Every SVG mustr serves: its icons, and the one-color program icons Open in draws in the text
+/// color ([`crate::app_icons`]).
+fn served() -> impl Iterator<Item = (&'static str, &'static str)> {
+    MustrIcon::ALL
+        .into_iter()
+        .map(|icon| (icon.path(), icon.svg()))
+        .chain(crate::app_icons::served_svgs())
 }
 
 /// Serves mustr's icons, and everything else from `fallback` (Zed's assets).
@@ -76,8 +94,8 @@ impl<A: AssetSource> MustrAssets<A> {
 
 impl<A: AssetSource> AssetSource for MustrAssets<A> {
     fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
-        match MustrIcon::ALL.into_iter().find(|icon| icon.path() == path) {
-            Some(icon) => Ok(Some(Cow::Borrowed(icon.svg().as_bytes()))),
+        match served().find(|(served, _)| *served == path) {
+            Some((_, svg)) => Ok(Some(Cow::Borrowed(svg.as_bytes()))),
             None => self.fallback.load(path),
         }
     }
@@ -86,9 +104,8 @@ impl<A: AssetSource> AssetSource for MustrAssets<A> {
         let mut paths = self.fallback.list(path)?;
         if ICON_DIR.starts_with(path) || path.starts_with(ICON_DIR) {
             paths.extend(
-                MustrIcon::ALL
-                    .into_iter()
-                    .map(MustrIcon::path)
+                served()
+                    .map(|(icon_path, _)| icon_path)
                     .filter(|icon_path| icon_path.starts_with(path))
                     .map(SharedString::from),
             );
@@ -116,13 +133,15 @@ mod tests {
     #[test]
     fn serves_mustr_icons_and_falls_back_for_the_rest() {
         let assets = MustrAssets::new(NoAssets);
-        for icon in MustrIcon::ALL {
-            let svg = assets.load(icon.path()).unwrap().unwrap();
-            assert!(svg.starts_with(b"<svg"), "{icon:?}");
+        for (path, _) in served() {
+            let svg = assets.load(path).unwrap().unwrap();
+            assert!(svg.starts_with(b"<svg"), "{path}");
         }
         assert!(assets.load("icons/file.svg").unwrap().is_none());
-        assert_eq!(assets.list("icons/").unwrap().len(), MustrIcon::ALL.len());
-        assert_eq!(assets.list("icons/mustr/a").unwrap().len(), 1);
+        assert_eq!(assets.list("icons/").unwrap().len(), served().count());
+        assert_eq!(assets.list("icons/mustr/ag").unwrap().len(), 1);
+        // Cursor's, Trae's and Zed's, which are one color.
+        assert_eq!(assets.list("icons/mustr/apps/").unwrap().len(), 3);
         assert!(assets.list("fonts/").unwrap().is_empty());
     }
 }

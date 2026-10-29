@@ -39,13 +39,13 @@ engine. Every P0 and P1 row is done, and 33 of the 38 P2 rows (the counts are at
   and by message; find in a thread; cloning a repository as a project.
 - **Composer and timeline:** images, files and big pastes; `@`, `#`, `/` and `$`; drafts, the
   prompt stash, quotes and Markdown formatting; approvals, questions (with attachments), MCP
-  requests and secrets; the queue; Edit from here, Fork, Compact, hand off to another agent; file
+  requests and secrets; the queue; Edit from here, Fork, Compact; file
   links, HTML renders and plans saved to the folder.
 - **Reviewing agent work:** the whole thread's changes, its uncommitted changes, and each turn,
   with comments sent back to the agent.
 - **Settings and accounts:** T3's settings, the agents page (installing, signing in, several
   accounts, ACP agents), source control accounts, project settings, the usage dashboard, and
-  saved servers switched from the title bar.
+  saved servers switched in Settings › Connection.
 - **The app:** notifications and the Dock badge, the command palette's thread and project
   actions, zoom, macOS menus, and a self-updating app bundle (`mustr-docs/RELEASING.md`). Since
   0.1.1, one Settings page (`mustr/src/settings_page.rs`) holds every setting, T3's included, and
@@ -65,7 +65,7 @@ zoomed to twice that (26). §3 lists what's left after v0.1.0.
 | Pair with a local T3 | Exchanges a pairing credential for a bearer token, then opens the WebSocket | `/.well-known/t3/environment`, `POST /oauth/token`, `POST /api/auth/websocket-ticket`, `/ws` | Done (`mustr/src/t3_connection.rs`) | — | P0 |
 | Run the engine in-app | The desktop app bundles and runs the server (`apps/desktop`) | `t3 serve`, `t3 auth pairing create` | Done (`mustr/src/t3_engine.rs`, `t3_runtime/`): the installed T3, mustr's own engine (also the fallback), or a server at a URL | — | P0 |
 | Version skew, server update | Warns on mismatch and updates the server (`versionSkew.ts`, `components/ServerUpdateAction.tsx`) | `server.updateServerWithProgress`, `subscribeServerLifecycle` | Done (`mustr/src/t3_engine.rs`, `mustr/src/home.rs`): the protocol is checked on connect, and Home offers Update T3 Code (`t3 update`) for an older installed T3: as a prompt for an older protocol, and as a quiet "T3 Code 0.1.3 is available." for an older version on the same protocol; the embedded engine is pinned | — | P2 |
-| Several environments at once | One client, many servers; picks a host for each new thread (`environments/`, `settings/AddEnvironmentDialog.tsx`) | One `/ws` per environment, `server.getHostResources` | Partial (`mustr/src/servers.rs`): saved servers by name and URL, switched from the title bar's connection chip or Home's Servers… (this computer's T3 Code, mustr's own engine, or a saved one), each with its own token, the last pick kept for the next launch. One connected at a time; the embedded engine keeps running when mustr switches away | L (the rest) | P2 |
+| Several environments at once | One client, many servers; picks a host for each new thread (`environments/`, `settings/AddEnvironmentDialog.tsx`) | One `/ws` per environment, `server.getHostResources` | Partial (`mustr/src/servers.rs`): saved servers by name and URL, switched in Settings › Connection or Home's Servers… (this computer's T3 Code, mustr's own engine, or a saved one), each with its own token, the last pick kept for the next launch. One connected at a time; the embedded engine keeps running when mustr switches away | L (the rest) | P2 |
 | Remote access (SSH, Tailscale, T3 Connect) | Reach a home machine's server from elsewhere (`packages/ssh`, `packages/tailscale`, `cloud/`) | `/api/connect/*`, `cloud.*` | Missing | L | P2: T3's own remote setup keeps working |
 | Paired clients, pairing links | List and revoke sessions (`settings/AuthorizedClientsSettings.tsx`) | `/api/auth/clients*`, `/api/auth/pairing-links*`, `subscribeAuthAccess` | Missing | S | Skip: needs `access:*` scopes, which mustr never asks for (PLAN §4); use `t3 auth` |
 
@@ -161,8 +161,8 @@ zoomed to twice that (26). §3 lists what's left after v0.1.0.
 |---|---|---|---|---|---|
 | Edit from here, revert | Rewinds to before a message, keeping or restoring files (`chat/useTimelineRewind.ts`) | `checkpoint.rollback` `{checkpointId, restoreFiles}` | Done (`thread_chat/src/history.rs`) | — | P1 |
 | Fork a thread | "Fork from this response" on an assistant message (`chat/TimelineAssistantRows.tsx`) | `thread.fork` | Done (`history.rs`): forks and opens the fork | — | P1 |
-| Merge back | Brings a fork's result back to its parent | `thread.merge_back` | Done (`mustr/src/thread_handoff.rs`): Merge back in a fork's toolbar, from its latest finished run into the thread it came from, which then opens; T3 hands the work over with the parent's next message | — | P2 |
-| Hand off to another provider | Moves context to a new provider (`docs/user/portable-handoffs.md`) | `provider.switch`, `thread.fork` with `portable_context` | Done (`thread_handoff.rs`): the toolbar's Hand off ▾ switches the thread to another agent (`thread.model-selection.set`, as T3's model picker does) when its agent can hand off, and says the next message's handoff is pending until it's sent | — | P2 |
+| Merge back | Brings a fork's result back to its parent | `thread.merge_back` | Done (`mustr/src/merge_back.rs`): Merge back in a fork's toolbar, from its latest finished run into the thread it came from, which then opens; T3 hands the work over with the parent's next message | — | P2 |
+| Hand off to another provider | Moves context to a new provider (`docs/user/portable-handoffs.md`) | `provider.switch`, `thread.fork` with `portable_context` | Removed in 0.1.1, at the user's request: 0.1.0's Hand off ▾ in the thread toolbar. Switching a thread's agent in its settings bar still makes T3 hand the conversation over with the next message | — | P2 |
 
 ### 2.9 Diffs and reviewing agent work
 
@@ -205,7 +205,7 @@ zoomed to twice that (26). §3 lists what's left after v0.1.0.
 
 | Feature | What T3 Code does | T3 API | mustr status | Effort | Priority |
 |---|---|---|---|---|---|
-| Open in editor | Cursor, VS Code, Zed and others for the thread's folder (`chat/OpenInPicker.tsx`) | `shell.openInEditor`; editors from `server.getConfig` | Done (`thread_git.rs`: Open in ▾ in the thread toolbar and the agent review header, `mod+o`) | — | P0: the way out for anything mustr lacks |
+| Open in editor | Cursor, VS Code, Zed and others for the thread's folder (`chat/OpenInPicker.tsx`) | `shell.openInEditor`; editors from `server.getConfig` | Done (`thread_git.rs`, `editor_icons.rs`: Open in ▾ in the thread toolbar and the agent review header, `mod+o`, showing each program's icon: the app's own on macOS when T3 runs on the Mac, else T3's) | — | P0: the way out for anything mustr lacks |
 | Terminal per thread | A drawer in the thread's worktree that stays open (`components/ThreadTerminalDrawer.tsx`, `components/PersistentThreadTerminals.tsx`) | `terminal.open/attach/write/resize/close`, `subscribeTerminalEvents` (`terminal:*` scopes) | Done (`mustr/src/terminal_panel.rs`, `remote_terminal.rs`): Zed terminals in the thread's worktree, kept per thread, `mod+j`; on a T3 on another machine, T3's terminals (`terminal.attach`, `write`, `resize`, `close`) in the same panel, found again while T3 runs them, with mouse reports to full-screen programs and an IME's text | — | P0: user's must-have |
 | Terminal excerpt to the composer | `chat/TerminalContextInlineChip.tsx` | `message.dispatch.context` (terminal) | Done (`terminal_panel.rs`): Add to chat on a selection (`mod+>`) adds T3's terminal record to the thread's composer as a chip | — | P2 |
 

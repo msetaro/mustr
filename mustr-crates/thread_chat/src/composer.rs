@@ -17,7 +17,8 @@ use gpui::{
     Styled as _, StyledImage as _, Subscription, Window, actions, div, img, px, relative,
 };
 use mustr_ui::{
-    ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens, tokens::scaled,
+    ButtonStyle as MustrButtonStyle, Card, TextButton, corners::inner_radius, palette, tokens,
+    tokens::scaled,
 };
 use t3_api::types::ProviderApprovalDecision;
 use t3_api::types::ProviderInteractionMode;
@@ -1992,6 +1993,9 @@ impl ThreadView {
         };
         let name: SharedString = image.name.clone().into();
         let thumbnail = image.image.clone();
+        // The image and its overlays fill the tile, so they round its corners: GPUI clips them
+        // to a rectangle, not to the tile's rounded border (`mustr_ui::corners`).
+        let inner = inner_radius(tokens::scaled_pixels(tokens::CORNER_RADIUS, cx));
         let small_button = |id: SharedString, icon: IconName| {
             div()
                 .id(id)
@@ -2035,6 +2039,7 @@ impl ThreadView {
             .child(
                 img(image.image.clone())
                     .size_full()
+                    .rounded(inner)
                     .object_fit(ObjectFit::Cover),
             )
             .when_some(progress, |this, progress| {
@@ -2042,6 +2047,7 @@ impl ThreadView {
                     div()
                         .absolute()
                         .inset_0()
+                        .rounded(inner)
                         .bg(gpui::black().opacity(0.35))
                         .flex()
                         .items_end()
@@ -2078,10 +2084,11 @@ impl ThreadView {
             })
             .when(failed.is_some(), |this| {
                 this.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .bg(cx.theme().status().error.opacity(0.25)),
+                    div().absolute().inset_0().rounded(inner).bg(cx
+                        .theme()
+                        .status()
+                        .error
+                        .opacity(0.25)),
                 )
                 .child(
                     div()

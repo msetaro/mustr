@@ -155,6 +155,48 @@ fn closing_a_window_tab_does_not_activate_it(cx: &mut TestAppContext) {
     assert_eq!(*log.borrow(), ["close"]);
 }
 
+/// A segmented control in `width`, counting its view's renders.
+struct Segments {
+    width: Pixels,
+    renders: Rc<std::cell::Cell<usize>>,
+}
+
+impl Render for Segments {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        ui::h_flex().w(self.width).child(
+            SegmentedControl::new("theme")
+                .segment("Dark")
+                .segment("Light")
+                .segment("Colorblind-safe")
+                .segment("Match system")
+                .selected(3),
+        )
+    }
+}
+
+/// How many times the view renders before it settles, and whether the segments wrapped.
+fn segments_in(width: Pixels, cx: &mut TestAppContext) -> (usize, bool) {
+    let renders = Rc::new(std::cell::Cell::new(0));
+    let (_, cx) = cx.add_window_view({
+        let renders = renders.clone();
+        move |_, _| Segments { width, renders }
+    });
+    cx.run_until_parked();
+    let first = cx.debug_bounds("segment-Dark").unwrap();
+    let last = cx.debug_bounds("segment-Match system").unwrap();
+    (renders.get(), last.top() > first.top())
+}
+
+/// The selected segment's fill rounds the corners of the control it touches. On one line those
+/// are the ends; a control whose segments wrap measures where they went and draws once more.
+#[gpui::test]
+fn a_segmented_control_draws_again_only_when_its_segments_wrap(cx: &mut TestAppContext) {
+    init_test(cx);
+    assert_eq!(segments_in(px(1000.), cx), (1, false));
+    assert_eq!(segments_in(px(120.), cx), (2, true));
+}
+
 /// mustr's components are drawn in rems of `ui_font_size` (`tokens::scaled`), so at twice the
 /// font size each one is twice as big, as when a web page zooms. Line heights round to whole
 /// pixels and hairline borders stay 1px, so allow a pixel or two.
@@ -274,4 +316,76 @@ fn a_pending_tooltip_shows_after_a_click_that_opens_nothing(cx: &mut TestAppCont
 fn a_pending_tooltip_stays_off_the_menu_its_button_opened(cx: &mut TestAppContext) {
     init_test(cx);
     assert_eq!(tooltips_after_a_quick_click(true, cx), 0);
+}
+
+/// A toolbar's buttons in a row: labelled, icon-only, and quiet.
+struct ToolbarRow;
+
+impl Render for ToolbarRow {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let icon = || crate::MustrIcon::Terminal.icon().size(ui::IconSize::Small);
+        let noop = |_: &gpui::ClickEvent, _: &mut Window, _: &mut gpui::App| {};
+        ui::h_flex()
+            .p_4()
+            .gap_2()
+            .child(
+                div()
+                    .debug_selector(|| "text".into())
+                    .child(TextButton::new("text", "Review changes").on_click(noop)),
+            )
+            .child(
+                div().debug_selector(|| "split".into()).child(
+                    SplitButton::new("split", "Commit")
+                        .style(ButtonStyle::Primary)
+                        .on_click(noop)
+                        .on_menu_click(noop),
+                ),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "icon".into())
+                    .child(IconOnlyButton::new("icon", icon()).on_click(noop)),
+            )
+            .child(
+                div().debug_selector(|| "icon-split".into()).child(
+                    IconSplitButton::new("icon-split", icon())
+                        .on_click(noop)
+                        .on_menu_click(noop),
+                ),
+            )
+            .child(
+                div().debug_selector(|| "quiet".into()).child(
+                    QuietButton::new("quiet", "main")
+                        .count("3")
+                        .menu_indicator(true)
+                        .on_click(noop),
+                ),
+            )
+    }
+}
+
+/// Icon-only and quiet buttons are exactly as tall as labelled ones, at mustr's design size and
+/// zoomed, so a toolbar of them lines up.
+#[gpui::test]
+fn toolbar_buttons_are_one_height(cx: &mut TestAppContext) {
+    init_test(cx);
+    let (_, cx) = cx.add_window_view(|_, _| ToolbarRow);
+    for rem_size in [13., 26.] {
+        cx.update(|window, _| {
+            window.set_rem_size(px(rem_size));
+            window.refresh();
+        });
+        cx.run_until_parked();
+        let mut height = |selector: &'static str| {
+            cx.debug_bounds(selector)
+                .unwrap_or_else(|| panic!("{selector} should be rendered"))
+                .size
+                .height
+        };
+        let text = height("text");
+        assert!(text > px(rem_size), "{text:?} at {rem_size}");
+        for selector in ["split", "icon", "icon-split", "quiet"] {
+            assert_eq!(height(selector), text, "{selector} at {rem_size}");
+        }
+    }
 }

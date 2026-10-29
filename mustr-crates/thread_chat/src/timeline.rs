@@ -20,7 +20,8 @@ use gpui::{
 };
 use markdown::{Markdown, MarkdownElement, MarkdownStyle};
 use mustr_ui::{
-    ButtonStyle as MustrButtonStyle, Card, TextButton, palette, tokens, tokens::scaled,
+    ButtonStyle as MustrButtonStyle, Card, TextButton, corners::inner_radius, palette, tokens,
+    tokens::scaled,
 };
 use t3_api::{
     rpc,
@@ -1569,7 +1570,17 @@ impl ThreadView {
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_image_preview(name.clone(), preview.clone(), window, cx)
                     }))
-                    .child(img(image).size_full().object_fit(fit))
+                    // The image rounds the frame's corners: GPUI clips it to a rectangle, not
+                    // to the frame's rounded border (`mustr_ui::corners`).
+                    .child(
+                        img(image)
+                            .size_full()
+                            .rounded(inner_radius(tokens::scaled_pixels(
+                                tokens::CONTROL_RADIUS,
+                                cx,
+                            )))
+                            .object_fit(fit),
+                    )
                     .into_any_element()
             }
             AssetState::Loading => frame

@@ -107,8 +107,15 @@ image.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
-# The Dock badge and notification sounds (`src/notifications.rs`).
-objc2-app-kit = { workspace = true, features = ["NSDockTile", "NSSound"] }
+# The Dock badge and notification sounds (`src/notifications.rs`), and apps' icons for Open in
+# (`src/editor_icons.rs`).
+objc2-app-kit = { workspace = true, features = [
+    "NSBitmapImageRep",
+    "NSDockTile",
+    "NSGraphicsContext",
+    "NSImageRep",
+    "NSSound",
+] }
 objc2-foundation.workspace = true
 
 [dev-dependencies]

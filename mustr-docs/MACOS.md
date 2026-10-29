@@ -49,7 +49,7 @@ A checklist for the first launch of a release, such as on a work laptop.
 1. **Install** in Terminal, then open mustr from Applications or Spotlight:
    `curl -fsSL https://github.com/msetaro/mustr/releases/latest/download/install.sh | sh`
 2. **With T3 Code installed** (its `t3` command and background service): within a few seconds
-   Home says "Connected to <your Mac's name>", and the title bar's chip shows `T3 · <name>`.
+   Home says "Connected to <your Mac's name>", and the status bar says "Synced".
    - mustr pairs by itself: it runs `t3 auth pairing create` for `orchestration:read`,
      `orchestration:operate`, `source-control:write`, `filesystem:read`, `terminal:read`,
      `terminal:operate`, `settings:write`, `providers:manage` and `diagnostics:read`, and the
@@ -254,7 +254,9 @@ looked at on a Mac yet.
 
 - **Not checked on a Mac:** the Dock icon, the About panel, the menu bar, the title bar's layout
   around the traffic lights and their moving when you zoom, the zoom keys (only their bindings are
-  tested, on Linux), keychain prompts, and mustr's tests on macOS. Nor are the installer (its logic
+  tested, on Linux), keychain prompts, Open in's app icons (found by bundle identifier with
+  `NSWorkspace` and drawn by `iconForFile:`; on Linux mustr draws T3's icons instead), and mustr's
+  tests on macOS. Nor are the installer (its logic
   ran on Linux with stand-ins for `ditto`, `plutil`, and `osascript`) and the updater's `ditto`,
   `codesign`, and relaunch steps (its download, checks, and bundle swap ran in tests with stand-in
   bundles). The launch agent and `t3` command handling was reviewed against T3's

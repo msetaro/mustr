@@ -11,14 +11,16 @@ use editor::{
     display_map::{BlockPlacement, BlockProperties, BlockStyle},
 };
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, EventEmitter, FontWeight, IntoElement,
+    AnyElement, App, AppContext as _, Axis, Context, Entity, EventEmitter, FontWeight, IntoElement,
     MouseButton, ParentElement as _, Render, SharedString, Styled as _, Subscription, Task,
     TextStyleRefinement, Window, px, relative,
 };
 use language::{Buffer, LanguageRegistry, Point};
 use markdown::{Markdown, MarkdownElement, MarkdownStyle};
 use multi_buffer::Anchor;
-use mustr_ui::{tokens, tokens::scaled_pixels};
+use mustr_ui::{
+    ChildPosition, RoundedCorners as _, corners::inner_radius, tokens, tokens::scaled_pixels,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::{OffsetDateTime, UtcOffset};
@@ -856,6 +858,15 @@ impl Render for ThreadCard {
             format!("{count} comments")
         };
         let not_loaded = count.saturating_sub(thread.comments.len());
+        // The title's hover fill rounds the card's corners it touches: the top ones, and the
+        // bottom ones too while nothing is below it.
+        let card_radius = scaled_pixels(tokens::CORNER_RADIUS, cx);
+        let below = !comments.is_empty() || actions.is_some() || (expanded && not_loaded > 0);
+        let title_position = if below {
+            ChildPosition::First
+        } else {
+            ChildPosition::Only
+        };
 
         let title = h_flex()
             .id("thread-card-title")
@@ -863,6 +874,7 @@ impl Render for ThreadCard {
             .px_2()
             .py_1()
             .gap_1p5()
+            .rounded_at(title_position, Axis::Vertical, inner_radius(card_radius))
             .cursor_pointer()
             .hover(|style| style.bg(colors.element_hover))
             .on_click(cx.listener(|this, _, _, cx| {
@@ -930,7 +942,7 @@ impl Render for ThreadCard {
 
         v_flex()
             .w_full()
-            .rounded(scaled_pixels(tokens::CORNER_RADIUS, cx))
+            .rounded(card_radius)
             .border(tokens::BORDER_WIDTH)
             .border_color(colors.border)
             .bg(colors.surface_background)
@@ -996,9 +1008,10 @@ impl Render for OutdatedThreads {
         let colors = cx.theme().colors();
         let expanded = self.expanded;
         let count = self.cards.len();
+        let card_radius = scaled_pixels(tokens::CORNER_RADIUS, cx);
         v_flex()
             .w_full()
-            .rounded(scaled_pixels(tokens::CORNER_RADIUS, cx))
+            .rounded(card_radius)
             .border(tokens::BORDER_WIDTH)
             .border_color(colors.border)
             .bg(colors.surface_background)
@@ -1012,6 +1025,15 @@ impl Render for OutdatedThreads {
                     .px_2()
                     .py_1()
                     .gap_1p5()
+                    .rounded_at(
+                        if expanded {
+                            ChildPosition::First
+                        } else {
+                            ChildPosition::Only
+                        },
+                        Axis::Vertical,
+                        inner_radius(card_radius),
+                    )
                     .cursor_pointer()
                     .hover(|style| style.bg(colors.element_hover))
                     .on_click(cx.listener(|this, _, _, cx| {
