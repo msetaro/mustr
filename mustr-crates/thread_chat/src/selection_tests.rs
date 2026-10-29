@@ -123,7 +123,7 @@ fn click(
 ) {
     sidebar.update_in(cx, |sidebar, window, cx| {
         let thread = sidebar.thread_list().find(thread_id).cloned().unwrap();
-        sidebar.click_row(&thread, modifiers, window, cx);
+        sidebar.click_row(&thread, None, modifiers, window, cx);
     });
     cx.run_until_parked();
 }
@@ -241,4 +241,67 @@ async fn the_selection_menu_acts_on_every_selected_thread(cx: &mut TestAppContex
             json!({ "type": "thread.delete", "threadId": "c" }),
         ]
     );
+}
+
+/// Zed's keymap, then mustr's after it, as the app binds them.
+fn bind_zed_then_mustr_keys(cx: &mut VisualTestContext) {
+    cx.update(|_, cx| {
+        let content = util::asset_str::<settings::SettingsAssets>(settings::DEFAULT_KEYMAP_PATH);
+        let bindings = match settings::KeymapFile::load(&content, cx) {
+            settings::KeymapFileLoadResult::Success { key_bindings }
+            | settings::KeymapFileLoadResult::SomeFailedToLoad { key_bindings, .. } => key_bindings,
+            settings::KeymapFileLoadResult::JsonParseFailure { error } => {
+                panic!("Zed's keymap doesn't parse: {error}")
+            }
+        };
+        cx.clear_key_bindings();
+        cx.bind_keys(bindings);
+        cx.bind_keys(crate::key_bindings());
+    });
+}
+
+fn focused_composer(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) {
+    let composer = workspace.read_with(cx, |workspace, cx| {
+        let view = workspace.active_item(cx)?.downcast::<ThreadView>()?;
+        Some(view.read(cx).composer().clone())
+    });
+    cx.focus(&composer.unwrap());
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+async fn mod_z_in_an_empty_composer_undoes_a_settle(cx: &mut TestAppContext) {
+    let backend = recorder();
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    bind_zed_then_mustr_keys(cx);
+    open(&workspace, "a", cx);
+    focused_composer(&workspace, cx);
+    cx.simulate_keystrokes("ctrl-shift-s");
+    cx.run_until_parked();
+    // Settling moved on to the next thread, whose composer has focus.
+    assert_eq!(shown_thread(&workspace, cx), Some("c".to_string()));
+    focused_composer(&workspace, cx);
+    cx.simulate_keystrokes("ctrl-z");
+    cx.run_until_parked();
+    assert_eq!(
+        backend.commands(),
+        [
+            json!({ "type": "thread.settle", "threadId": "a" }),
+            json!({ "type": "thread.unsettle", "threadId": "a", "reason": "user" }),
+        ]
+    );
+
+    // With text in the composer, `mod+z` is the editor's undo.
+    cx.simulate_keystrokes("ctrl-shift-s");
+    cx.run_until_parked();
+    focused_composer(&workspace, cx);
+    cx.simulate_input("x");
+    cx.simulate_keystrokes("ctrl-z");
+    cx.run_until_parked();
+    assert_eq!(backend.commands().len(), 3);
+    let composer_text = workspace.read_with(cx, |workspace, cx| {
+        let view = workspace.active_item(cx)?.downcast::<ThreadView>()?;
+        Some(view.read(cx).composer().read(cx).text(cx))
+    });
+    assert_eq!(composer_text, Some(String::new()));
 }

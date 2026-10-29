@@ -210,6 +210,9 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         // draft's thread in the background. On other threads they go on to Send.
         KeyBinding::new("secondary-enter", StartInBackground, composer),
         KeyBinding::new("secondary-alt-enter", StartInBackground, composer),
+        // `mod+z` undoes a settle, unpin or snooze from an empty composer too, as the next
+        // thread's composer has focus after settling. With text in it, it's the editor's undo.
+        KeyBinding::new("secondary-z", UndoThreadAction, composer),
     ]
 }
 

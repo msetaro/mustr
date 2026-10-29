@@ -1272,10 +1272,12 @@ impl ThreadsSidebar {
 
     /// A click on a row (`handleThreadClick` in T3's sidebar): mod-click adds it to the selection
     /// or takes it out, shift-click selects the rows from the last one clicked, and a plain click
-    /// opens the thread and clears the selection.
+    /// opens the thread and clears the selection. A message match's row has the search's
+    /// `find_query`, to open the thread with find on it.
     pub(crate) fn click_row(
         &mut self,
         thread: &ThreadEntry,
+        find_query: Option<String>,
         modifiers: gpui::Modifiers,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1314,6 +1316,8 @@ impl ThreadsSidebar {
         }
         self.clear_selection(cx);
         self.anchor = Some(thread.id.clone());
+        // TODO(WP15): `crate::open_thread_with_find` with `find_query` once it's on m3/next.
+        let _ = find_query;
         self.open(thread, window, cx);
     }
 
@@ -2173,6 +2177,8 @@ impl ThreadsSidebar {
         if found {
             details = format!("{} · {details}", thread.section.label());
         }
+        // A message match opens the thread with find on the query (WP15).
+        let find_query = snippet.is_some().then(|| self.messages.query.clone());
         let details_line = match snippet {
             Some(snippet) => {
                 let snippet = focus_snippet(&snippet, &self.messages.query);
@@ -2242,7 +2248,13 @@ impl ThreadsSidebar {
         };
         row.on_click(
             cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
-                this.click_row(&open_thread, event.modifiers(), window, cx)
+                this.click_row(
+                    &open_thread,
+                    find_query.clone(),
+                    event.modifiers(),
+                    window,
+                    cx,
+                )
             }),
         )
         .on_mouse_down(

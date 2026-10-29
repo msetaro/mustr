@@ -862,8 +862,16 @@ fn register(workspace: &mut Workspace) {
             unpin_thread(&thread_id, workspace.weak_handle(), cx);
         }
     });
-    workspace.register_action(|_, _: &UndoThreadAction, _, cx| {
-        if !undo_latest(cx) {
+    workspace.register_action(|workspace, _: &UndoThreadAction, window, cx| {
+        // In a composer that holds text, `mod+z` is the editor's own undo (WP17).
+        let typing = workspace
+            .active_item(cx)
+            .and_then(|item| item.downcast::<ThreadView>())
+            .is_some_and(|view| {
+                let composer = view.read(cx).composer().read(cx);
+                composer.focus_handle(cx).is_focused(window) && !composer.is_empty(cx)
+            });
+        if typing || !undo_latest(cx) {
             cx.propagate();
         }
     });
