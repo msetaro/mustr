@@ -23,6 +23,14 @@
   but you change them in Settings. If one of them can't be read, Settings says why and can start it
   over from mustr's defaults, keeping the old file next to it as `.bak`.
 - **A gear** for Settings on the rail, in place of the icon that looked like a sun.
+- **Syntax highlighting in more languages, and on deleted lines.** Reviews (and the editor) now
+  highlight C# (with `.csproj`, `.props`, `.targets`, `.slnx` and `.config` files), SQL including
+  T-SQL (procedures, `@variables`, `[bracketed]` names, `GO`, `MERGE`, `TRY … CATCH`), HTML, TOML,
+  Java, Kotlin, Swift, Ruby, PHP, Lua, Dockerfile, Makefile, XML, Scala, Zig, Elixir, Dart, Vue,
+  Svelte, GraphQL, HCL and Terraform, Protobuf, Nix, Haskell and OCaml, which 0.1.0 showed as plain
+  white text. In reviews of a worktree on your Mac, deleted lines (the left side of a split diff)
+  are highlighted like the rest, and changed words keep their colors instead of being lightened
+  over their highlight: a review looks like the file in the editor, in whichever theme you pick.
 
 ## 0.1.0
 
