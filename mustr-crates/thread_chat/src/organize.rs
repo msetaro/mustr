@@ -1442,6 +1442,14 @@ pub(crate) fn thread_menu(
             );
         }
         menu = menu.separator();
+        // WP18: the project's settings (`mustr/src/project_settings.rs`).
+        menu = menu.item({
+            let action = crate::OpenProjectSettings {
+                project_id: thread.project_id.clone(),
+            };
+            entry("Project Settings…", IconName::Settings)
+                .handler(move |window, cx| window.dispatch_action(Box::new(action.clone()), cx))
+        });
         let copy = |label: &str, text: String| {
             entry(label, IconName::Copy).handler(move |_, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))

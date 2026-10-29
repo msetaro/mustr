@@ -99,9 +99,20 @@ impl FakeBackend {
         self.calls
             .lock()
             .iter()
-            .filter(|call| call.tag != "subscribeServerConfig")
+            // The source control section asks for its own (`source_control.rs`).
+            .filter(|call| {
+                call.tag != "subscribeServerConfig" && call.tag != "server.discoverSourceControl"
+            })
             .cloned()
             .collect()
+    }
+
+    fn discovered(&self) -> bool {
+        self.calls.lock().contains(&RawCall {
+            tag: "server.discoverSourceControl".into(),
+            payload: json!({}),
+            access: Access::Read,
+        })
     }
 
     fn updates(&self) -> Vec<RawCall> {
@@ -273,6 +284,7 @@ async fn the_page_reads_and_changes_t3s_settings(cx: &mut TestAppContext) {
             access: Access::Read,
         }]
     );
+    assert!(backend.discovered());
     view.read_with(cx, |view, cx| {
         assert_eq!(view.prefix.read(cx).text(cx), "t3");
     });
@@ -654,4 +666,35 @@ fn live_settings_and_project_conflicts_on_a_temporary_engine() -> Result<()> {
         process.stop(engine::STOP_GRACE, &sleep).await;
         result
     })
+}
+
+#[gpui::test]
+async fn the_writing_style_is_sent_whole(cx: &mut TestAppContext) {
+    let backend = FakeBackend::new();
+    let (view, cx) = open_page(backend.clone(), cx);
+    click("segment-Conventional", cx);
+    click("t3-settings-writing-templates", cx);
+    click("segment-Instructions", cx);
+    view.update_in(cx, |view, window, cx| {
+        view.writing.update(cx, |editor, cx| {
+            editor.set_text("Imperative subjects, under 60 characters.", window, cx)
+        })
+    });
+    cx.run_until_parked();
+    click("t3-settings-save-writing", cx);
+    let style = |mode: &str, instructions: &str, templates: bool| {
+        update(json!({ "sourceControlWritingStyle": {
+            "mode": mode, "customInstructions": instructions,
+            "followChangeRequestTemplates": templates
+        } }))
+    };
+    assert_eq!(
+        backend.updates(),
+        [
+            style("conventional_commits", "", true),
+            style("conventional_commits", "", false),
+            style("custom", "", false),
+            style("custom", "Imperative subjects, under 60 characters.", false),
+        ]
+    );
 }

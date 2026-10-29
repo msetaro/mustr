@@ -62,13 +62,16 @@ pub enum Access {
     /// Needs `providers:manage`: installs, signs in to, signs out of, and removes agents
     /// (`provider.install.*`, `provider.auth.*`).
     ProvidersManage,
+    /// Needs `diagnostics:read`: T3's usage summary (`server.getUsageSummary`) and its process
+    /// diagnostics. A read, so dry runs let it through.
+    DiagnosticsRead,
 }
 
 impl Access {
     /// Whether dry runs refuse calls that need this.
     pub fn is_write(self) -> bool {
         match self {
-            Self::Read | Self::FilesystemRead | Self::TerminalRead => false,
+            Self::Read | Self::FilesystemRead | Self::TerminalRead | Self::DiagnosticsRead => false,
             Self::Operate
             | Self::SourceControlWrite
             | Self::TerminalOperate

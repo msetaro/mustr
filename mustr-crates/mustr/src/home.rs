@@ -450,7 +450,13 @@ impl HomeView {
                         ),
                         EngineKind::External => (
                             Color::Success,
-                            format!("Connected to {environment}").into(),
+                            format!(
+                                "Connected to {}",
+                                crate::servers::saved_name(cx)
+                                    .as_deref()
+                                    .unwrap_or(environment)
+                            )
+                            .into(),
                             Some(format!("{version} at {server}").into()),
                         ),
                     }
@@ -614,6 +620,19 @@ impl HomeView {
                     .child(Indicator::dot().color(color))
                     .child(Label::new(title).weight(gpui::FontWeight::MEDIUM))
                     .child(div().flex_1())
+                    .child(
+                        div().debug_selector(|| "home-servers".into()).child(
+                            Button::new("home-servers", "Servers…")
+                                .style(ButtonStyle::Subtle)
+                                .label_size(LabelSize::Small)
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(
+                                        Box::new(crate::servers::ManageServers),
+                                        cx,
+                                    )
+                                }),
+                        ),
+                    )
                     .when(can_retry, |this| {
                         this.child(
                             Button::new("reconnect", retry_label)
@@ -758,8 +777,11 @@ impl HomeView {
             }
             (projects, true, _) => {
                 let selected_background = cx.theme().colors().element_selected;
-                body = body.children(projects.iter().map(|project| {
+                body = body.children(projects.iter().enumerate().map(|(index, project)| {
                     let selected = self.selected_project.as_ref() == Some(&project.id);
+                    let settings = thread_chat::OpenProjectSettings {
+                        project_id: project.id.clone(),
+                    };
                     h_flex()
                         .w_full()
                         .gap_3()
@@ -785,6 +807,25 @@ impl HomeView {
                                             .truncate(),
                                     )
                                 }),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .debug_selector(move || format!("home-project-settings-{index}"))
+                                .child(
+                                    IconButton::new(
+                                        ("home-project-settings", index),
+                                        IconName::Settings,
+                                    )
+                                    .icon_size(IconSize::Small)
+                                    .icon_color(Color::Muted)
+                                    .tooltip(ui::Tooltip::text("Project settings"))
+                                    .on_click(
+                                        move |_, window, cx| {
+                                            window.dispatch_action(Box::new(settings.clone()), cx)
+                                        },
+                                    ),
+                                ),
                         )
                 }))
             }
