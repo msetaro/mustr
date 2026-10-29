@@ -70,6 +70,8 @@ pub struct ComposerState {
     pub(crate) menu: crate::mentions::ComposerMenu,
     /// Whether the placeholder says the message declines an approval.
     feedback_placeholder: bool,
+    /// Where the timeline's "new since your last visit" line goes (`timeline.rs`).
+    pub(crate) visit: crate::timeline::VisitLine,
     _save_draft: Option<gpui::Task<()>>,
 }
 
@@ -153,8 +155,11 @@ fn saved_draft_context(thread_id: &str, cx: &App) -> Vec<(String, serde_json::Va
 }
 
 impl ThreadView {
-    /// Puts back the draft saved for this thread, if the composer is empty.
+    /// Puts back the draft saved for this thread, if the composer is empty. As the view opens
+    /// for a thread, it also notes the thread's last visit for the timeline's last-visit line,
+    /// before this view's own visit moves it.
     pub(crate) fn restore_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.note_last_visit(cx);
         let Some(thread_id) = self.thread_id.as_deref() else {
             return;
         };

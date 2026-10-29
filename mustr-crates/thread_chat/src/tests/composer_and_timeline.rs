@@ -1310,3 +1310,5 @@ mod files;
 mod context;
 // Declining an approval with a reason.
 mod feedback;
+// Find in thread and the last-visit line.
+mod find_and_visits;

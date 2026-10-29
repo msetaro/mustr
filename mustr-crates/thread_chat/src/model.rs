@@ -33,6 +33,12 @@ use t3_api::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimelineItem {
     pub id: String,
+    /// What T3's find in thread names the item by (`entryId` in `orchestration.searchThread`):
+    /// a message's id for user and agent messages, the item's own id otherwise.
+    pub entry_id: String,
+    /// When the item began (`startedAt`, else when T3 first sent it), as T3 writes times. The
+    /// timeline's "new since your last visit" line compares it with the thread's last visit.
+    pub time: String,
     pub ordinal: i64,
     pub run_id: Option<String>,
     pub status: ItemStatus,
@@ -276,9 +282,14 @@ fn non_empty(text: Option<&String>) -> Option<String> {
 impl TimelineItem {
     pub fn from_turn_item(item: &OrchestrationV2TurnItem) -> Option<Self> {
         macro_rules! item {
-            ($item:expr, $kind:expr) => {
+            ($item:expr, $entry_id:expr, $kind:expr) => {
                 Self {
                     id: $item.id.clone(),
+                    entry_id: $entry_id,
+                    time: $item
+                        .started_at
+                        .clone()
+                        .unwrap_or_else(|| $item.updated_at.clone()),
                     ordinal: $item.ordinal,
                     run_id: $item.run_id.clone(),
                     status: ItemStatus::from_wire(&$item.status),
@@ -287,11 +298,15 @@ impl TimelineItem {
                     kind: $kind,
                 }
             };
+            ($item:expr, $kind:expr) => {
+                item!($item, $item.id.clone(), $kind)
+            };
         }
         let notice = |text: String| ItemKind::Notice { text };
         Some(match item {
             OrchestrationV2TurnItem::UserMessage(item) => item!(
                 item,
+                item.message_id.clone(),
                 ItemKind::UserMessage {
                     text: item.text.clone(),
                     queued: item.input_intent == OrchestrationV2UserMessageInputIntent::QueuedTurn,
@@ -306,6 +321,7 @@ impl TimelineItem {
             ),
             OrchestrationV2TurnItem::AssistantMessage(item) => item!(
                 item,
+                item.message_id.clone(),
                 ItemKind::AssistantMessage {
                     text: item.text.clone(),
                     streaming: item.streaming,
@@ -1009,6 +1025,11 @@ impl ThreadState {
             .items
             .iter()
             .rposition(|existing| existing.id == item.id);
+        let mut item = item;
+        if let Some(index) = existing {
+            // An item without a start time keeps the time T3 first sent it at.
+            item.time = self.items[index].time.clone();
+        }
         if let Some(index) = existing
             && !self.items[index].inherited
             && self.items[index].ordinal == item.ordinal

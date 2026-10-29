@@ -142,6 +142,12 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         // WP11, terminals, worktrees and the PR flow:
         // WP12, composer and timeline: T3's `mod+shift+v` pastes text as text, however big.
         KeyBinding::new("secondary-shift-v", composer::PasteAsText, composer),
+        // Find in thread: Zed binds `mod+f` in full editors only, and the composer isn't one.
+        KeyBinding::new(
+            "secondary-f",
+            zed_actions::buffer_search::Deploy::find(),
+            Some("ThreadView"),
+        ),
         // WP13, thread list and navigation:
         // WP14, agent setup and T3's settings:
     ]
