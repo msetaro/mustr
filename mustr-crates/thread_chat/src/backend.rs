@@ -46,12 +46,35 @@ pub enum Access {
     /// Needs `filesystem:read`: searches the files on T3's machine, for the composer's `@` on a
     /// thread whose folder isn't on this one. A read, so dry runs let it through.
     FilesystemRead,
+    /// Needs `terminal:read`: follows T3's terminals (`subscribeTerminalEvents`,
+    /// `subscribeTerminalMetadata`, `terminal.observe`). A read, so dry runs let it through.
+    TerminalRead,
+    /// Needs `terminal:operate`: opens, attaches to, types in, resizes, clears, restarts, and
+    /// closes T3's terminals.
+    TerminalOperate,
+    /// Needs `settings:write`: changes T3's settings (`server.updateSettings`) and keybindings,
+    /// and a project's scripts (`projects.mutate`, with `orchestration:operate`). A settings
+    /// patch that touches `providers`, `providerInstances`, or `usageLimitSources` needs
+    /// [`Access::ProvidersManage`] instead, or as well when it changes other settings too
+    /// (`requiredScopesForServerSettingsPatch` in T3's `contracts/src/settings.ts`): check
+    /// [`ThreadBackend::blocked_reason`] for each.
+    SettingsWrite,
+    /// Needs `providers:manage`: installs, signs in to, signs out of, and removes agents
+    /// (`provider.install.*`, `provider.auth.*`).
+    ProvidersManage,
 }
 
 impl Access {
     /// Whether dry runs refuse calls that need this.
     pub fn is_write(self) -> bool {
-        matches!(self, Self::Operate | Self::SourceControlWrite)
+        match self {
+            Self::Read | Self::FilesystemRead | Self::TerminalRead => false,
+            Self::Operate
+            | Self::SourceControlWrite
+            | Self::TerminalOperate
+            | Self::SettingsWrite
+            | Self::ProvidersManage => true,
+        }
     }
 }
 

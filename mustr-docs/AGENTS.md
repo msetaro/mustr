@@ -32,7 +32,7 @@ Ignore the rest of `.rules`, which is for Zed's own repository: the README banne
 - Never request `access:write` or `relay:*` scopes.
 - **Engine modes** (`"t3": {"mode": …}` in mustr's settings, `--t3-mode`, or `MUSTR_T3_MODE`). The code is in `mustr-crates/mustr/src/t3_engine.rs`; `mustr-docs/PLAN.md` §4 describes the design.
   - `installed`, the default: the user's own T3 Code, in `$T3CODE_HOME` or `~/.t3`.
-    - mustr pairs through its `t3` CLI, asking for `orchestration:read`, `orchestration:operate` (driving agent threads), `source-control:write`, and `filesystem:read` (the composer's `@` on a thread whose folder is on T3's machine) (`SCOPES` in `mustr-crates/mustr/src/t3_connection.rs`). It keeps the token in the OS keychain.
+    - mustr pairs through its `t3` CLI, asking for `orchestration:read`, `orchestration:operate` (driving agent threads), `source-control:write`, `filesystem:read` (the composer's `@` on a thread whose folder is on T3's machine), `terminal:read` and `terminal:operate` (T3's terminals), `settings:write` (T3's settings), and `providers:manage` (installing and signing in to agents) (`SCOPES` in `mustr-crates/mustr/src/t3_connection.rs`). It keeps the token in the OS keychain, and pairs again when a stored token lacks one of them.
     - It starts an installed but stopped service once (`t3 service restart`).
     - From the home view it offers to install T3 Code, to set up its service (`t3 service install`), or to update it (`t3 update`).
   - `embedded`: mustr's own engine, in `<data dir>/t3-runtime/<V>` and `<data dir>/t3-home`, on a free loopback port. Its log is `<data dir>/logs/t3-engine.log`.

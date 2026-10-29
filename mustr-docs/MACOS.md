@@ -147,7 +147,9 @@ threads as T3 Code's own app.
    offers `t3 update`. If it speaks a newer one, mustr needs updating.
 3. **Pairing.** mustr finds T3's `t3` command and asks it for a one-time credential:
    `t3 auth pairing create --scope orchestration:read --scope orchestration:operate --scope
-   source-control:write --scope filesystem:read --ttl 5m --label mustr --json`.
+   source-control:write --scope filesystem:read --scope terminal:read --scope terminal:operate
+   --scope settings:write --scope providers:manage --ttl 5m --label mustr --json`. A token from an
+   older mustr that lacks one of these is replaced by pairing again the same way.
    - It looks for the runtime that matches the server's version in `~/.t3/runtime/versions/`
      first, then `t3` on your `PATH`, then the newest runtime.
    - It exchanges the credential for a token, which lasts about 30 days. The session shows as

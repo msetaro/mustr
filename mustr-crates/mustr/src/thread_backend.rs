@@ -7,7 +7,7 @@
 
 use crate::{
     review_backend::{DRY_RUN_ENV, dry_run_requested},
-    t3_connection::{CurrentSession, T3Connection, T3Session},
+    t3_connection::{CurrentSession, T3Connection, T3Session, missing_scope_reason},
 };
 use anyhow::{Context as _, Result, anyhow, bail};
 use futures::{FutureExt as _, StreamExt as _, future::BoxFuture, stream::BoxStream};
@@ -17,7 +17,7 @@ use parking_lot::Mutex;
 use serde_json::Value;
 use std::sync::Arc;
 use t3_client::{
-    RpcError,
+    RpcError, Scope,
     t3_api::{
         http, rpc,
         tagged::{
@@ -295,13 +295,26 @@ impl ThreadBackend for T3ThreadBackend {
 
     fn blocked_reason(&self, access: Access) -> Option<String> {
         let session = self.session.get()?;
-        match access {
-            Access::Read => None,
-            Access::Operate => session.operate_blocked_reason(),
-            Access::SourceControlWrite => session.write_blocked_reason(),
-            Access::FilesystemRead => session.filesystem_blocked_reason(),
-        }
+        blocked_reason(&session.missing_scopes(), access)
     }
+}
+
+/// Why calls that need `access` are refused before they're sent, when mustr's pairing lacks the
+/// `missing` scopes: T3 would refuse them.
+fn blocked_reason(missing: &[Scope], access: Access) -> Option<String> {
+    let (scope, what) = match access {
+        Access::Read => return None,
+        Access::Operate => (Scope::OrchestrationOperate, "drive agents"),
+        Access::SourceControlWrite => (Scope::SourceControlWrite, "write to pull requests"),
+        Access::FilesystemRead => (Scope::FilesystemRead, "read files on T3's machine"),
+        Access::TerminalRead => (Scope::TerminalRead, "show T3's terminals"),
+        Access::TerminalOperate => (Scope::TerminalOperate, "use T3's terminals"),
+        Access::SettingsWrite => (Scope::SettingsWrite, "change T3's settings"),
+        Access::ProvidersManage => (Scope::ProvidersManage, "set up agents"),
+    };
+    missing
+        .contains(&scope)
+        .then(|| missing_scope_reason(scope, what))
 }
 
 #[cfg(test)]
@@ -493,5 +506,75 @@ mod tests {
         );
         // Without a session there's no pairing to lack a scope.
         assert_eq!(backend.blocked_reason(Access::SourceControlWrite), None);
+    }
+
+    #[test]
+    fn calls_are_refused_for_the_scope_t3_checks() {
+        let all = [
+            Access::Read,
+            Access::Operate,
+            Access::SourceControlWrite,
+            Access::FilesystemRead,
+            Access::TerminalRead,
+            Access::TerminalOperate,
+            Access::SettingsWrite,
+            Access::ProvidersManage,
+        ];
+        // A full pairing refuses nothing.
+        for access in all {
+            assert_eq!(blocked_reason(&[], access), None, "{access:?}");
+        }
+        // A pairing from before wave 3 still reads, drives agents, and writes to pull requests.
+        let wave_2 = [
+            Scope::TerminalRead,
+            Scope::TerminalOperate,
+            Scope::SettingsWrite,
+            Scope::ProvidersManage,
+        ];
+        let refused = all
+            .into_iter()
+            .filter_map(|access| Some((access, blocked_reason(&wave_2, access)?)))
+            .collect::<Vec<_>>();
+        let reason = |what: &str, scope: &str| {
+            format!(
+                "mustr's pairing with T3 can't {what} (it lacks {scope}). Pair again from the \
+                 home view: {}",
+                crate::t3_connection::pairing_command()
+            )
+        };
+        assert_eq!(
+            refused,
+            [
+                (
+                    Access::TerminalRead,
+                    reason("show T3's terminals", "terminal:read")
+                ),
+                (
+                    Access::TerminalOperate,
+                    reason("use T3's terminals", "terminal:operate")
+                ),
+                (
+                    Access::SettingsWrite,
+                    reason("change T3's settings", "settings:write")
+                ),
+                (
+                    Access::ProvidersManage,
+                    reason("set up agents", "providers:manage")
+                ),
+            ]
+        );
+        // A read-only pairing reads only.
+        let read_only = crate::t3_connection::missing_scopes(["orchestration:read"]);
+        for access in all {
+            assert_eq!(
+                blocked_reason(&read_only, access).is_none(),
+                access == Access::Read,
+                "{access:?}"
+            );
+        }
+        assert_eq!(
+            blocked_reason(&read_only, Access::SourceControlWrite),
+            Some(reason("write to pull requests", "source-control:write"))
+        );
     }
 }

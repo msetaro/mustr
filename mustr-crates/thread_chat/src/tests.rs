@@ -1414,6 +1414,9 @@ async fn a_read_only_backend_refuses_raw_writes_and_uploads(_cx: &mut TestAppCon
     let _status = backend
         .subscribe_raw("subscribeVcsStatus", json!({}), Access::Read)
         .unwrap();
+    let _terminal = backend
+        .subscribe_raw("subscribeTerminalEvents", json!({}), Access::TerminalRead)
+        .unwrap();
 
     let progress = Arc::new(Mutex::new(Vec::new()));
     let refused = [
@@ -1438,6 +1441,27 @@ async fn a_read_only_backend_refuses_raw_writes_and_uploads(_cx: &mut TestAppCon
                 Access::SourceControlWrite,
             )
             .map(|_| Value::Null),
+        backend
+            .call_raw(
+                "terminal.write",
+                json!({ "threadId": THREAD, "terminalId": "default", "data": "ls\r" }),
+                Access::TerminalOperate,
+            )
+            .await,
+        backend
+            .call_raw(
+                "server.updateSettings",
+                json!({ "patch": { "branchNameInstructions": "Use t3/<topic>" } }),
+                Access::SettingsWrite,
+            )
+            .await,
+        backend
+            .call_raw(
+                "provider.install.start",
+                json!({ "instanceId": "claudeAgent" }),
+                Access::ProvidersManage,
+            )
+            .await,
         backend
             .upload(AttachmentUpload {
                 relative_url: "/api/attachments/upload/token.signature".into(),
@@ -1464,13 +1488,35 @@ async fn a_read_only_backend_refuses_raw_writes_and_uploads(_cx: &mut TestAppCon
             .iter()
             .map(|call| call.tag.as_str())
             .collect::<Vec<_>>(),
-        ["server.getSettings", "subscribeVcsStatus"]
+        [
+            "server.getSettings",
+            "subscribeVcsStatus",
+            "subscribeTerminalEvents"
+        ]
+    );
+    assert_eq!(
+        recording.raw_calls.lock()[2],
+        RawCall {
+            tag: "subscribeTerminalEvents".into(),
+            payload: json!({}),
+            access: Access::TerminalRead,
+        }
     );
     assert!(recording.uploads.lock().is_empty());
     assert!(progress.lock().is_empty());
 
-    assert_eq!(backend.blocked_reason(Access::Read), None);
-    for access in [Access::Operate, Access::SourceControlWrite] {
+    for access in [Access::Read, Access::FilesystemRead, Access::TerminalRead] {
+        assert!(!access.is_write(), "{access:?}");
+        assert_eq!(backend.blocked_reason(access), None, "{access:?}");
+    }
+    for access in [
+        Access::Operate,
+        Access::SourceControlWrite,
+        Access::TerminalOperate,
+        Access::SettingsWrite,
+        Access::ProvidersManage,
+    ] {
+        assert!(access.is_write(), "{access:?}");
         assert_eq!(
             backend.blocked_reason(access).as_deref(),
             Some("MUSTR_DRY_RUN_WRITES is set")

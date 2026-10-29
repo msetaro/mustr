@@ -37,6 +37,8 @@ pub enum Scope {
     TerminalRead,
     TerminalOperate,
     FilesystemRead,
+    SettingsWrite,
+    ProvidersManage,
 }
 
 impl Scope {
@@ -48,6 +50,8 @@ impl Scope {
             Scope::TerminalRead => "terminal:read",
             Scope::TerminalOperate => "terminal:operate",
             Scope::FilesystemRead => "filesystem:read",
+            Scope::SettingsWrite => "settings:write",
+            Scope::ProvidersManage => "providers:manage",
         }
     }
 }
@@ -250,7 +254,14 @@ mod tests {
             Scope::TerminalRead,
             Scope::TerminalOperate,
             Scope::FilesystemRead,
+            Scope::SettingsWrite,
+            Scope::ProvidersManage,
         ] {
+            assert!(
+                t3_api::types::AuthGrantScope::KNOWN_VALUES.contains(&scope.as_str()),
+                "T3 can't grant {:?}",
+                scope.as_str()
+            );
             assert!(
                 t3_api::types::AuthEnvironmentScope::KNOWN_VALUES.contains(&scope.as_str()),
                 "T3 has no scope {:?}",
