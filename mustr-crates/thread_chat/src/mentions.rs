@@ -1007,6 +1007,20 @@ pub(crate) struct ServerInfo {
     pub providers: Vec<t3_api::types::ServerProvider>,
     /// Whether it takes files besides images (`attachments.rs`).
     pub file_uploads: crate::attachments::FileUploads,
+    /// Its T3 Code version (`environment.serverVersion`), such as `0.1.3`.
+    pub server_version: Option<String>,
+}
+
+/// Whether a T3 Code version is `major.minor.patch` or later; a pre-release counts as its
+/// release.
+pub(crate) fn version_at_least(version: &str, at_least: (u64, u64, u64)) -> bool {
+    let core = version.trim().trim_start_matches('v');
+    let core = core.split(['-', '+']).next().unwrap_or_default();
+    let mut parts = core.split('.').map(|part| part.parse::<u64>());
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch))) => (major, minor, patch) >= at_least,
+        _ => false,
+    }
 }
 
 impl ServerInfo {
@@ -1014,6 +1028,9 @@ impl ServerInfo {
     fn from_config(config: &Value) -> Self {
         Self {
             file_uploads: crate::attachments::FileUploads::from_config(config),
+            server_version: config["environment"]["serverVersion"]
+                .as_str()
+                .map(str::to_string),
             environment_id: config["environment"]["environmentId"]
                 .as_str()
                 .filter(|id| !id.trim().is_empty())
@@ -1157,6 +1174,24 @@ impl ComposerMenu {
     pub(crate) fn set_file_uploads(&mut self, file_uploads: crate::attachments::FileUploads) {
         let server = ServerInfo {
             file_uploads,
+            ..ServerInfo::default()
+        };
+        self.server = Some((server, Instant::now()));
+    }
+
+    /// Whether the server has `queued-run.start` (T3 0.1.3), once its config is read.
+    pub(crate) fn server_has_queued_start(&self) -> bool {
+        self.server
+            .as_ref()
+            .and_then(|(server, _)| server.server_version.as_deref())
+            .is_some_and(|version| version_at_least(version, (0, 1, 3)))
+    }
+
+    /// Has the menu read a config of a T3 Code version, for tests.
+    #[cfg(test)]
+    pub(crate) fn set_server_version(&mut self, version: &str) {
+        let server = ServerInfo {
+            server_version: Some(version.to_string()),
             ..ServerInfo::default()
         };
         self.server = Some((server, Instant::now()));
@@ -1553,7 +1588,7 @@ impl ThreadView {
     }
 
     /// Reads T3's config for the commands, skills and environment id, unless it's fresh.
-    fn load_server_info(&mut self, refresh: bool, cx: &mut Context<Self>) {
+    pub(crate) fn load_server_info(&mut self, refresh: bool, cx: &mut Context<Self>) {
         let menu = &mut self.composer_state.menu;
         let stale = menu
             .server

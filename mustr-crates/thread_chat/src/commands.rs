@@ -18,8 +18,8 @@ use t3_api::{
     },
     types::{
         ChatFileAttachment, ChatFileAttachmentType, ChatImageAttachment, ChatImageAttachmentType,
-        ModelSelection, OrchestrationMessageContext,
-        OrchestrationV2Actor, OrchestrationV2CommandDispatchModeQueueAfterActive,
+        ModelSelection, OrchestrationMessageContext, OrchestrationV2Actor,
+        OrchestrationV2CommandDispatchModeQueueAfterActive,
         OrchestrationV2CommandDispatchModeQueueAfterActiveType,
         OrchestrationV2CommandDispatchModeStartImmediately,
         OrchestrationV2CommandDispatchModeStartImmediatelyType,
@@ -30,6 +30,8 @@ use t3_api::{
         OrchestrationV2CommandQueuedMessagePromoteToSteerType,
         OrchestrationV2CommandQueuedRunCancel, OrchestrationV2CommandQueuedRunCancelType,
         OrchestrationV2CommandQueuedRunEdit, OrchestrationV2CommandQueuedRunEditType,
+        OrchestrationV2CommandQueuedRunReorder, OrchestrationV2CommandQueuedRunReorderType,
+        OrchestrationV2CommandQueuedRunStart, OrchestrationV2CommandQueuedRunStartType,
         OrchestrationV2CommandRuntimeRequestRespond,
         OrchestrationV2CommandRuntimeRequestRespondType, OrchestrationV2CommandThreadCreate,
         OrchestrationV2CommandThreadCreateType, OrchestrationV2CommandThreadDelete,
@@ -43,8 +45,8 @@ use t3_api::{
         OrchestrationV2ThreadLaunchWorkspaceStrategyRoot,
         OrchestrationV2ThreadLaunchWorkspaceStrategyRootType,
         OrchestrationV2ThreadLaunchWorkspaceStrategyWorktree,
-        OrchestrationV2ThreadLaunchWorkspaceStrategyWorktreeType, ProviderApprovalDecision,
-        PastedTextAttachmentSource, PastedTextAttachmentSourceTag, ProviderInteractionMode,
+        OrchestrationV2ThreadLaunchWorkspaceStrategyWorktreeType, PastedTextAttachmentSource,
+        PastedTextAttachmentSourceTag, ProviderApprovalDecision, ProviderInteractionMode,
         ProviderUserInputAnswers, RuntimeMode, SecretRequestAnswerInput,
         SecretRequestAnswerInputAnswerDecline, SecretRequestAnswerInputAnswerDeclineType,
         SecretRequestAnswerInputAnswerSave, SecretRequestAnswerInputAnswerSaveType,
@@ -544,6 +546,38 @@ pub fn cancel_queued(
         run_id: queued_run_id.to_string(),
         thread_id: thread_id.to_string(),
         type_: OrchestrationV2CommandQueuedRunCancelType::QueuedRunCancel,
+    })
+}
+
+/// Moves a queued message before another (`queued-run.reorder`), or to the end with `None`, as
+/// T3's queue does when a row is dragged.
+pub fn reorder_queued(
+    thread_id: &str,
+    queued_run_id: &str,
+    before_run_id: Option<&str>,
+    command_id: String,
+) -> OrchestrationV2Command {
+    OrchestrationV2Command::QueuedRunReorder(OrchestrationV2CommandQueuedRunReorder {
+        before_run_id: before_run_id.map(str::to_string),
+        command_id,
+        run_id: queued_run_id.to_string(),
+        thread_id: thread_id.to_string(),
+        type_: OrchestrationV2CommandQueuedRunReorderType::QueuedRunReorder,
+    })
+}
+
+/// Starts a queued message's run now, while no other run is active (`queued-run.start`, T3
+/// 0.1.3's Send now).
+pub fn start_queued(
+    thread_id: &str,
+    queued_run_id: &str,
+    command_id: String,
+) -> OrchestrationV2Command {
+    OrchestrationV2Command::QueuedRunStart(OrchestrationV2CommandQueuedRunStart {
+        command_id,
+        run_id: queued_run_id.to_string(),
+        thread_id: thread_id.to_string(),
+        type_: OrchestrationV2CommandQueuedRunStartType::QueuedRunStart,
     })
 }
 

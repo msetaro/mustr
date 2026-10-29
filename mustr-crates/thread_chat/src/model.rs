@@ -17,7 +17,8 @@ use t3_api::{
         OrchestrationV2AppThread, OrchestrationV2Checkpoint, OrchestrationV2CheckpointStatus,
         OrchestrationV2ConversationMessage, OrchestrationV2DomainEvent,
         OrchestrationV2NativeRefStrength, OrchestrationV2PlanArtifactProposedPlanStatus,
-        OrchestrationV2ProviderCapabilities, OrchestrationV2ProviderSession,
+        OrchestrationV2ProviderCapabilities, OrchestrationV2ProviderGoal,
+        OrchestrationV2ProviderGoalStatus, OrchestrationV2ProviderSession,
         OrchestrationV2ProviderSessionStatus, OrchestrationV2ProviderThread,
         OrchestrationV2ProviderTurn, OrchestrationV2Run, OrchestrationV2RunAttempt,
         OrchestrationV2RunStatus, OrchestrationV2RuntimeRequest, OrchestrationV2RuntimeRequestKind,
@@ -783,6 +784,86 @@ pub struct Resumable {
     pub held_queue: bool,
 }
 
+/// What the goal line says (`presentProviderGoal` in T3's
+/// `client-runtime/src/state/threadExecution.ts`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GoalLine {
+    pub title: String,
+    pub objective: String,
+    /// What the goal has used so far: tokens, time, and checks.
+    pub usage: Option<String>,
+    /// Whether `/goal resume` would pick it up again.
+    pub can_resume: bool,
+}
+
+impl GoalLine {
+    pub fn new(goal: &OrchestrationV2ProviderGoal, working: bool) -> Self {
+        use OrchestrationV2ProviderGoalStatus as Status;
+        let mut usage = Vec::new();
+        if let Some(tokens) = goal.tokens_used.filter(|tokens| *tokens > 0) {
+            usage.push(match goal.token_budget {
+                Some(budget) => format!(
+                    "{} / {} tokens",
+                    format_goal_tokens(tokens),
+                    format_goal_tokens(budget)
+                ),
+                None => format!("{} tokens", format_goal_tokens(tokens)),
+            });
+        }
+        if let Some(seconds) = goal.time_used_seconds.filter(|seconds| *seconds >= 60) {
+            usage.push(format_duration(seconds));
+        }
+        if let Some(checks) = goal.checks.filter(|checks| *checks > 0) {
+            usage.push(format!(
+                "{checks} {}",
+                if checks == 1 { "check" } else { "checks" }
+            ));
+        }
+        let title = match &goal.status {
+            Status::Active if !working => "Goal set",
+            Status::Active => "Pursuing goal",
+            Status::Paused => "Goal paused",
+            Status::Blocked => "Goal blocked",
+            Status::UsageLimited => "Goal hit a usage limit",
+            Status::BudgetLimited => "Goal reached its token budget",
+            Status::Complete => "Goal complete",
+            Status::Unrecognized(_) => "Goal",
+        };
+        Self {
+            title: title.to_string(),
+            objective: goal.objective.trim().to_string(),
+            usage: (!usage.is_empty()).then(|| usage.join(" · ")),
+            can_resume: !matches!(goal.status, Status::Active | Status::Complete),
+        }
+    }
+}
+
+/// "800", "12k", "1.5m" (`formatGoalTokens` in T3).
+fn format_goal_tokens(tokens: i64) -> String {
+    if tokens < 1_000 {
+        tokens.to_string()
+    } else if tokens < 1_000_000 {
+        format!("{}k", (tokens as f64 / 1_000.).round())
+    } else {
+        let millions = format!("{:.1}", tokens as f64 / 1_000_000.);
+        format!("{}m", millions.trim_end_matches(".0"))
+    }
+}
+
+/// "5m", "1h 2m 3s", for a minute or more (`formatDuration` in T3's
+/// `packages/shared/src/orchestrationTiming.ts`).
+fn format_duration(seconds: i64) -> String {
+    let hours = seconds / 3_600;
+    let minutes = (seconds % 3_600) / 60;
+    let seconds = seconds % 60;
+    [(hours, "h"), (minutes, "m"), (seconds, "s")]
+        .into_iter()
+        .filter(|(amount, _)| *amount > 0)
+        .map(|(amount, unit)| format!("{amount}{unit}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// What changed when an event was applied.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Applied {
@@ -1142,6 +1223,29 @@ impl ThreadState {
                     .unwrap_or_default(),
             })
             .collect()
+    }
+
+    /// Whether the queue can be put in another order (`queued-run.reorder`): the agent's session
+    /// takes queued messages (`canReorder` in T3's `client-runtime/src/state/threadWorkflows.ts`).
+    pub fn can_reorder_queue(&self) -> bool {
+        self.provider_session()
+            .is_some_and(|session| session.capabilities.turns.supports_queued_messages)
+    }
+
+    /// Whether a queued message can start a run now (`queued-run.start`): no run is active and
+    /// the thread is neither archived nor deleted (`canSendNow` in T3).
+    pub fn can_start_queued(&self) -> bool {
+        !self.is_running() && self.thread.archived_at.is_none() && self.thread.deleted_at.is_none()
+    }
+
+    /// The goal the agent works toward (`/goal`), from the thread's provider thread.
+    pub fn goal(&self) -> Option<&OrchestrationV2ProviderGoal> {
+        let provider_thread_id = self.thread.active_provider_thread_id.as_deref()?;
+        self.provider_threads
+            .iter()
+            .find(|thread| thread.id == provider_thread_id)?
+            .goal
+            .as_ref()
     }
 
     /// Whether a run is active, so a new message can queue or steer.

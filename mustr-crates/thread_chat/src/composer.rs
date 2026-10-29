@@ -5,7 +5,7 @@ use crate::{
     attachments::{ComposerFile, ComposerImage, UploadState, has_image_extension},
     backend::ThreadBackendExt as _,
     commands::{self, CommandIds, Delivery, Message, PlanRef},
-    model::{ItemKind, PendingRequest, QueuedMessage, ThreadState},
+    model::{GoalLine, ItemKind, PendingRequest, QueuedMessage, ThreadState},
     thread_view::{CONTENT_MAX_WIDTH, Loadable, ThreadView},
     timeline::truncate,
 };
@@ -48,6 +48,43 @@ const FEEDBACK_PLACEHOLDER: &str = "Send feedback to decline this request";
 const IMAGE_TILE_SIZE: f32 = 64.;
 /// A file's tile is as tall, and wide enough for its name.
 const FILE_TILE_WIDTH: f32 = 200.;
+
+/// A queued message being dragged to another place in the queue.
+#[derive(Clone)]
+struct DraggedQueued {
+    index: usize,
+    text: SharedString,
+}
+
+impl gpui::Render for DraggedQueued {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = palette(cx);
+        h_flex()
+            .gap_2()
+            .px_2()
+            .py_1()
+            .max_w(scaled(px(320.)))
+            .rounded(scaled(tokens::CONTROL_RADIUS))
+            .border(tokens::BORDER_WIDTH)
+            .border_color(palette.accent.hsla())
+            .bg(palette.surface.hsla())
+            .shadow_md()
+            .child(
+                Icon::new(IconName::QueueMessage)
+                    .size(IconSize::XSmall)
+                    .color(Color::Muted),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
+                    .child(self.text.clone()),
+            )
+    }
+}
 
 /// The composer's and timeline's state besides their images.
 #[derive(Default)]
@@ -1094,6 +1131,144 @@ impl ThreadView {
         self.dispatch(command, None, window, cx);
     }
 
+    /// Moves a queued message from `from` to `to` in the queue (`queued-run.reorder`), as
+    /// dragging it or its arrows do: before the message now at `to`, or last.
+    pub(crate) fn move_queued(
+        &mut self,
+        from: usize,
+        to: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(state) = self.thread_state() else {
+            return;
+        };
+        let queued = state.queued_messages();
+        if from == to || from >= queued.len() || to >= queued.len() {
+            return;
+        }
+        // Moving down lands after the target, so before the one after it.
+        let before = if to > from {
+            queued.get(to + 1)
+        } else {
+            queued.get(to)
+        };
+        let command = commands::reorder_queued(
+            state.thread_id(),
+            &queued[from].run_id,
+            before.map(|message| message.run_id.as_str()),
+            commands::new_id(),
+        );
+        self.dispatch(command, None, window, cx);
+    }
+
+    /// Send now: starts a queued message's run while nothing runs (`queued-run.start`, T3
+    /// 0.1.3).
+    pub(crate) fn start_queued(
+        &mut self,
+        run_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(thread_id) = self.thread_id.clone() else {
+            return;
+        };
+        let command = commands::start_queued(&thread_id, &run_id, commands::new_id());
+        self.dispatch(command, None, window, cx);
+    }
+
+    /// Sends one of T3's `/goal` commands, as its goal line's Resume and Clear do.
+    fn send_goal_command(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(state) = self.thread_state() else {
+            return;
+        };
+        let command = commands::message(
+            state.thread_id(),
+            Message {
+                model_selection: Some(state.thread.model_selection.clone()),
+                ..Message::text(text)
+            },
+            Delivery::Auto,
+            CommandIds::new(),
+        );
+        self.dispatch(command, None, window, cx);
+    }
+
+    /// The goal the agent works toward, above the composer as T3 shows it at the end of the
+    /// timeline: its status, what it has used, its objective, and Resume and Clear.
+    fn render_goal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let state = self.thread_state()?;
+        let goal = GoalLine::new(state.goal()?, state.is_running());
+        let palette = palette(cx);
+        let blocked = self.write_blocked_reason().is_some() || self.sending;
+        let title = match &goal.usage {
+            Some(usage) => format!("{} · {usage}", goal.title),
+            None => goal.title.clone(),
+        };
+        Some(
+            h_flex()
+                .debug_selector(|| "thread-goal".into())
+                .gap_2()
+                .px_2()
+                .py_1()
+                .rounded(scaled(tokens::CONTROL_RADIUS))
+                .border(tokens::BORDER_WIDTH)
+                .border_color(palette.border.hsla())
+                .bg(palette.surface.hsla())
+                .child(
+                    Icon::new(IconName::Crosshair)
+                        .size(IconSize::XSmall)
+                        .color(Color::Accent),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            Label::new(title)
+                                .size(LabelSize::Small)
+                                .weight(FontWeight::MEDIUM),
+                        )
+                        .when(!goal.objective.is_empty(), |this| {
+                            this.child(
+                                div()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .text_size(tokens::text_size(tokens::TEXT_SIZE_XSMALL))
+                                    .text_color(palette.text_muted.hsla())
+                                    .child(goal.objective.clone()),
+                            )
+                        }),
+                )
+                // Resume would stop unrelated work, so it waits for the run to end, as T3's does.
+                .when(goal.can_resume && !state.is_running(), |this| {
+                    this.child(
+                        div().debug_selector(|| "thread-goal-resume".into()).child(
+                            TextButton::new("thread-goal-resume", "Resume")
+                                .disabled(blocked)
+                                .tooltip("Work toward the goal again (/goal resume)")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.send_goal_command("/goal resume", window, cx)
+                                })),
+                        ),
+                    )
+                })
+                .child(
+                    div().debug_selector(|| "thread-goal-clear".into()).child(
+                        TextButton::new("thread-goal-clear", "Clear")
+                            .disabled(blocked)
+                            .tooltip("Stop working toward the goal (/goal clear)")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.send_goal_command("/goal clear", window, cx)
+                            })),
+                    ),
+                )
+                .into_any_element(),
+        )
+    }
+
     pub(crate) fn cancel_queued(
         &mut self,
         run_id: String,
@@ -1374,25 +1549,43 @@ impl ThreadView {
         )
     }
 
+    /// The queued messages, in the order they'll run, as T3's "Up next" shows them: each can be
+    /// edited, removed, steered into the running agent, or, while nothing runs on a server that
+    /// has it, sent now; and when the agent takes its queue in another order, dragged or moved
+    /// with its arrows.
     fn render_queue(
-        &self,
+        &mut self,
         queued: Vec<QueuedMessage>,
-        can_steer: bool,
+        running: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let palette = palette(cx);
         let blocked = self.write_blocked_reason().is_some();
+        let state = self.thread_state();
+        let can_reorder = queued.len() > 1 && state.is_some_and(ThreadState::can_reorder_queue);
+        let can_start = state.is_some_and(ThreadState::can_start_queued);
+        if can_start {
+            // Whether the server has `queued-run.start` is in its config.
+            self.load_server_info(false, cx);
+        }
+        let can_start = can_start && self.composer_state.menu.server_has_queued_start();
+        let count = queued.len();
         v_flex()
             .gap_1()
             .child(
-                Label::new(format!("Queued ({})", queued.len()))
+                Label::new(format!("Queued ({count})"))
                     .size(LabelSize::XSmall)
                     .color(Color::Muted),
             )
-            .children(queued.into_iter().map(|message| {
+            .children(queued.into_iter().enumerate().map(|(index, message)| {
                 let run_id = message.run_id.clone();
                 let selector = format!("thread-queued-{run_id}");
+                let dragged = DraggedQueued {
+                    index,
+                    text: truncate(&message.text, 80).into(),
+                };
                 h_flex()
+                    .id(SharedString::from(format!("queued-{run_id}")))
                     .debug_selector(|| selector)
                     .gap_2()
                     .px_2()
@@ -1401,6 +1594,26 @@ impl ThreadView {
                     .border_1()
                     .border_dashed()
                     .border_color(palette.border.hsla())
+                    .when(can_reorder && !blocked, |this| {
+                        this.cursor_grab()
+                            .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                            .drag_over::<DraggedQueued>(move |style, dragged, _, cx| {
+                                let palette = mustr_ui::palette(cx);
+                                let style = style
+                                    .border_color(palette.accent.hsla())
+                                    .bg(palette.accent_soft.hsla());
+                                if dragged.index < index {
+                                    style.border_b_2()
+                                } else {
+                                    style.border_t_2()
+                                }
+                            })
+                            .on_drop(cx.listener(
+                                move |this, dragged: &DraggedQueued, window, cx| {
+                                    this.move_queued(dragged.index, index, window, cx)
+                                },
+                            ))
+                    })
                     .child(
                         Icon::new(IconName::QueueMessage)
                             .size(IconSize::XSmall)
@@ -1416,6 +1629,52 @@ impl ThreadView {
                             .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
                             .child(truncate(&message.text, 200)),
                     )
+                    .when(can_reorder, |this| {
+                        this.child(
+                            div()
+                                .debug_selector({
+                                    let run_id = run_id.clone();
+                                    move || format!("thread-queued-up-{run_id}")
+                                })
+                                .child(
+                                    IconButton::new(
+                                        SharedString::from(format!("queued-up-{run_id}")),
+                                        IconName::ArrowUp,
+                                    )
+                                    .icon_size(IconSize::XSmall)
+                                    .icon_color(Color::Muted)
+                                    .disabled(blocked || index == 0)
+                                    .tooltip(Tooltip::text("Run this one earlier"))
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            this.move_queued(index, index - 1, window, cx)
+                                        },
+                                    )),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .debug_selector({
+                                    let run_id = run_id.clone();
+                                    move || format!("thread-queued-down-{run_id}")
+                                })
+                                .child(
+                                    IconButton::new(
+                                        SharedString::from(format!("queued-down-{run_id}")),
+                                        IconName::ArrowDown,
+                                    )
+                                    .icon_size(IconSize::XSmall)
+                                    .icon_color(Color::Muted)
+                                    .disabled(blocked || index + 1 == count)
+                                    .tooltip(Tooltip::text("Run this one later"))
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            this.move_queued(index, index + 1, window, cx)
+                                        },
+                                    )),
+                                ),
+                        )
+                    })
                     .child(
                         div()
                             .debug_selector({
@@ -1437,20 +1696,45 @@ impl ThreadView {
                                 })),
                             ),
                     )
-                    .child(
-                        TextButton::new(
-                            SharedString::from(format!("steer-queued-{run_id}")),
-                            "Steer now",
+                    .when(running, |this| {
+                        this.child(
+                            TextButton::new(
+                                SharedString::from(format!("steer-queued-{run_id}")),
+                                "Steer now",
+                            )
+                            .disabled(blocked)
+                            .tooltip("Hand this message to the running agent now")
+                            .on_click(cx.listener({
+                                let run_id = run_id.clone();
+                                move |this, _, window, cx| {
+                                    this.steer_with_queued(run_id.clone(), window, cx)
+                                }
+                            })),
                         )
-                        .disabled(blocked || !can_steer)
-                        .tooltip("Hand this message to the running agent now")
-                        .on_click(cx.listener({
-                            let run_id = run_id.clone();
-                            move |this, _, window, cx| {
-                                this.steer_with_queued(run_id.clone(), window, cx)
-                            }
-                        })),
-                    )
+                    })
+                    .when(can_start, |this| {
+                        this.child(
+                            div()
+                                .debug_selector({
+                                    let run_id = run_id.clone();
+                                    move || format!("thread-start-queued-{run_id}")
+                                })
+                                .child(
+                                    TextButton::new(
+                                        SharedString::from(format!("start-queued-{run_id}")),
+                                        "Send now",
+                                    )
+                                    .disabled(blocked)
+                                    .tooltip("Start a run with this message now")
+                                    .on_click(cx.listener({
+                                        let run_id = run_id.clone();
+                                        move |this, _, window, cx| {
+                                            this.start_queued(run_id.clone(), window, cx)
+                                        }
+                                    })),
+                                ),
+                        )
+                    })
                     .child(
                         TextButton::new(
                             SharedString::from(format!("cancel-queued-{run_id}")),
@@ -2023,6 +2307,7 @@ impl ThreadView {
                             .iter()
                             .map(|pending| self.render_pending(pending, cx)),
                     )
+                    .children(self.render_goal(cx))
                     .when(!queued.is_empty(), |this| {
                         this.child(self.render_queue(queued, running, cx))
                     })
