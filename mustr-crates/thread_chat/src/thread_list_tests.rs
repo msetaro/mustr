@@ -295,6 +295,151 @@ fn rows_show_t3s_status_pills() {
         status(json!({ "interactionMode": "plan", "hasActionableProposedPlan": true })),
         (Some(ShellStatus::PlanReady), false)
     );
+    // The last run completed, but the agent waits on background work: Waiting, as in T3.
+    assert_eq!(
+        status(json!({
+            "latestRunCompletedAt": "2026-10-27T11:00:00.000Z",
+            "lastVisitedAt": "2026-10-27T10:00:00.000Z",
+            "pendingBackgroundTasks": [{
+                "taskId": "task-1", "kind": "background_task",
+                "description": "Watching pull request #80"
+            }]
+        })),
+        (Some(ShellStatus::Waiting), false)
+    );
+}
+
+fn pull_request(number: i64, state: &str, head: &str, base: &str) -> Value {
+    json!({
+        "host": "github.com", "repository": "acme/api", "number": number,
+        "url": format!("https://github.com/acme/api/pull/{number}"),
+        "linkedAt": "2026-10-20T00:00:00.000Z", "source": "agent", "stack": null,
+        "snapshot": {
+            "baseBranch": base, "headBranch": head, "isDraft": false, "state": state,
+            "title": format!("PR {number}"), "syncedAt": NOW_ISO, "updatedAt": NOW_ISO
+        }
+    })
+}
+
+#[test]
+fn pull_request_badges_count_as_t3s() {
+    use t3_api::types::PullRequestState;
+    let badge = |pull_requests: Vec<Value>| {
+        let list = ThreadList::from_shell(
+            &shell(vec![thread(
+                "t",
+                "T",
+                json!({ "pullRequests": pull_requests }),
+            )]),
+            &Default::default(),
+            NOW,
+        );
+        let badge = list.find("t").unwrap().pull_request_badge.clone().unwrap();
+        (badge.text, badge.stack, badge.state)
+    };
+    // One pull request: its number.
+    assert_eq!(
+        badge(vec![pull_request(80, "open", "t3/a", "main")]),
+        ("#80".into(), false, Some(PullRequestState::Open))
+    );
+    // Three that aren't one stack: "+3", open while any is.
+    assert_eq!(
+        badge(vec![
+            pull_request(80, "open", "t3/a", "main"),
+            pull_request(81, "merged", "t3/b", "main"),
+            pull_request(82, "closed", "t3/c", "main"),
+        ]),
+        ("+3".into(), false, Some(PullRequestState::Open))
+    );
+    // Merged when every one is.
+    assert_eq!(
+        badge(vec![
+            pull_request(24, "merged", "t3/a", "main"),
+            pull_request(25, "merged", "t3/b", "main"),
+        ]),
+        ("+2".into(), false, Some(PullRequestState::Merged))
+    );
+    // Each on the one before: a stack, by its size.
+    assert_eq!(
+        badge(vec![
+            pull_request(90, "open", "t3/base", "main"),
+            pull_request(91, "open", "t3/middle", "t3/base"),
+            pull_request(92, "open", "t3/top", "t3/middle"),
+        ]),
+        ("3".into(), true, Some(PullRequestState::Open))
+    );
+}
+
+#[gpui::test]
+async fn rows_read_like_t3s(cx: &mut TestAppContext) {
+    let backend = Recorder::new(vec![
+        thread(
+            "working",
+            "Fix the flaky test",
+            json!({
+                "status": "running", "branch": "t3/flaky",
+                "activityRunStartedAt": "2026-10-27T11:59:56.000Z"
+            }),
+        ),
+        thread(
+            "waiting",
+            "Audit Dial Hard Alert Noise",
+            json!({
+                "latestRunId": "run-1",
+                "latestRunCompletedAt": "2026-10-27T11:00:00.000Z",
+                "lastVisitedAt": "2026-10-27T11:30:00.000Z",
+                "pullRequests": [
+                    pull_request(80, "open", "t3/a", "main"),
+                    pull_request(81, "merged", "t3/b", "main"),
+                    pull_request(82, "merged", "t3/c", "main"),
+                ],
+                "pendingBackgroundTasks": [{
+                    "taskId": "task-1", "kind": "background_task",
+                    "description": "Watching pull request #80"
+                }]
+            }),
+        ),
+        thread("idle", "Stress test questions", json!({})),
+    ]);
+    let (workspace, cx) = workspace(backend.clone(), cx).await;
+    let weak = workspace.downgrade();
+    let window = cx
+        .cx
+        .add_window(|window, cx| ThreadsSidebar::new(weak, window, cx));
+    let sidebar_cx = &mut VisualTestContext::from_window(window.into(), &cx.cx);
+    sidebar_cx.simulate_resize(gpui::size(gpui::px(420.), gpui::px(900.)));
+    sidebar_cx.run_until_parked();
+
+    // Each row's status is T3's, in its words; an idle row shows when it was last active.
+    assert!(
+        sidebar_cx
+            .debug_bounds("sidebar-status-working-Working")
+            .is_some()
+    );
+    assert!(
+        sidebar_cx
+            .debug_bounds("sidebar-status-waiting-Waiting")
+            .is_some()
+    );
+    assert!(
+        sidebar_cx
+            .debug_bounds("sidebar-status-idle-Completed")
+            .is_none()
+    );
+    // Rows are as tall as each other, with corners of their own inset from the panel's edges.
+    let rows = ["working", "waiting", "idle"].map(|id| {
+        sidebar_cx
+            .debug_bounds(Box::leak(format!("sidebar-row-{id}").into_boxed_str()))
+            .unwrap()
+    });
+    assert!(
+        rows.iter()
+            .all(|row| row.size.height == rows[0].size.height)
+    );
+    assert!(rows[0].size.height > gpui::px(60.));
+    assert!(rows[0].left() > gpui::px(0.));
+    assert!(rows[0].right() < gpui::px(420.));
+
 }
 
 #[test]

@@ -18,6 +18,7 @@ mod new_thread;
 mod settings_bar;
 pub mod shell;
 mod sidebar;
+pub mod status;
 mod thread_view;
 mod timeline;
 

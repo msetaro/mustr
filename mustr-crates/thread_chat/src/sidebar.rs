@@ -18,12 +18,15 @@
 //! Mod-click and shift-click select rows, as in T3, and right-clicking one of them, or the
 //! selection's "…", acts on them all (`bulk.rs`).
 
+pub use crate::status::ShellStatus;
 use crate::{
+    agent_badge::{instance_driver, provider_icon_element},
     backend::{Access, ThreadBackendExt as _},
     commands::new_id,
     organize::{self, DropPlan, DropSource, DropTarget, SettleThread, ShowArchivedThreads},
     projects::AddProject,
     shell::{Shell, ThreadShells},
+    status::{has_unseen_completion, millis, relative_time, short_duration},
     thread_view::{NewThread, ThreadView},
 };
 use collections::{HashMap, HashSet};
@@ -34,17 +37,18 @@ use gpui::{
     MouseDownEvent, ParentElement as _, Pixels, Point, Render, SharedString, Styled as _,
     Subscription, Task, WeakEntity, Window, actions, anchored, deferred, div, list, px,
 };
-use mustr_ui::{Chip, Pill, palette, tokens, tokens::scaled};
+use mustr_ui::{Chip, palette, tokens, tokens::scaled};
 use std::{cell::RefCell, cmp::Reverse, time::Duration};
 use t3_api::types::{
     OrchestrationV2AppThreadLineageRelationshipToParent, OrchestrationV2SearchThreadsInput,
-    OrchestrationV2ThreadShell, OrchestrationV2ThreadShellSettledOverride, ProviderInteractionMode,
-    PullRequestState, ThreadPullRequestLinkSource,
+    OrchestrationV2ThreadShell, OrchestrationV2ThreadShellSettledOverride, PullRequestState,
+    ThreadPullRequestLinkSource,
 };
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use time::OffsetDateTime;
 use ui::{
-    Color, ContextMenu, HighlightedLabel, Icon, IconButton, IconName, IconPosition, IconSize,
-    Indicator, Label, LabelCommon as _, LabelSize, PopoverMenu, Tooltip, prelude::*,
+    Color, CommonAnimationExt as _, ContextMenu, HighlightedLabel, Icon, IconButton, IconName,
+    IconPosition, IconSize, Indicator, Label, LabelCommon as _, LabelSize, PopoverMenu, Tooltip,
+    prelude::*,
 };
 use workspace::Workspace;
 
@@ -81,7 +85,10 @@ const SETTLED_FIRST_PAGE: usize = 10;
 const SETTLED_PAGE: usize = 25;
 /// How often the list is rebuilt when nothing changed, so snoozed threads wake on time.
 const CLOCK_TICK: Duration = Duration::from_secs(30);
-const ROW_HEIGHT: Pixels = px(44.);
+/// How often rows that show a working or waiting agent's time redraw.
+const TIMER_TICK: Duration = Duration::from_secs(1);
+/// A thread row's height at mustr's design size: three lines, as T3's rows have.
+const ROW_HEIGHT: Pixels = px(66.);
 
 /// A section of the sidebar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -113,127 +120,6 @@ impl Section {
     fn folds(self) -> bool {
         matches!(self, Self::Snoozed | Self::Settled)
     }
-}
-
-/// A thread's status pill, as T3's sidebar picks it (`resolveThreadStatusPill`). A thread with
-/// nothing to say has none.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ShellStatus {
-    PendingApproval,
-    AwaitingInput,
-    Working,
-    Connecting,
-    /// Blocked on another thread or on background work.
-    Waiting,
-    /// The last run failed, and the user hasn't seen it.
-    Failed,
-    PlanReady,
-    /// The last run finished, and the user hasn't seen it.
-    Completed,
-}
-
-impl ShellStatus {
-    pub fn from_shell(thread: &OrchestrationV2ThreadShell) -> Option<Self> {
-        if let Some(request) = &thread.pending_runtime_request {
-            let kind = crate::model::wire_string(&request.kind);
-            return Some(if kind == "user_input" {
-                Self::AwaitingInput
-            } else {
-                Self::PendingApproval
-            });
-        }
-        let status = crate::model::wire_string(&thread.status);
-        let blocked = thread.blocked_on_thread_wait == Some(true);
-        match status.as_str() {
-            "running" if !blocked => return Some(Self::Working),
-            "waiting" => return Some(Self::Working),
-            "preparing" | "starting" | "queued" => return Some(Self::Connecting),
-            "running" => return Some(Self::Waiting),
-            _ => {}
-        }
-        if background_work_holds_completion(thread) {
-            return Some(Self::Waiting);
-        }
-        let completed_at = millis(thread.latest_run_completed_at.as_deref());
-        let visited_at = millis(thread.last_visited_at.as_deref());
-        if status == "failed" {
-            let unseen = match (completed_at, visited_at) {
-                (Some(completed), Some(visited)) => completed > visited,
-                _ => true,
-            };
-            if unseen {
-                return Some(Self::Failed);
-            }
-        }
-        if thread.interaction_mode == ProviderInteractionMode::Plan
-            && thread.has_actionable_proposed_plan
-        {
-            return Some(Self::PlanReady);
-        }
-        if has_unseen_completion(thread) {
-            return Some(Self::Completed);
-        }
-        None
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::PendingApproval => "Pending approval",
-            Self::AwaitingInput => "Awaiting input",
-            Self::Working => "Working",
-            Self::Connecting => "Connecting",
-            Self::Waiting => "Waiting",
-            Self::Failed => "Failed",
-            Self::PlanReady => "Plan ready",
-            Self::Completed => "Completed",
-        }
-    }
-
-    fn color(self, cx: &App) -> Hsla {
-        let palette = palette(cx);
-        match self {
-            Self::PendingApproval => palette.warning.hsla(),
-            Self::AwaitingInput => palette.pending.hsla(),
-            Self::Working | Self::Connecting => palette.accent.hsla(),
-            Self::Waiting => palette.text_muted.hsla(),
-            Self::Failed => cx.theme().status().error,
-            Self::PlanReady => palette.agent.hsla(),
-            Self::Completed => palette.ok.hsla(),
-        }
-    }
-}
-
-/// Whether the agent is waiting on a subagent or background task to finish
-/// (`backgroundWorkHoldsCompletion` in T3's shared package). Commands and monitors count only
-/// when the agent waits on them, since they're often dev servers.
-fn background_work_holds_completion(thread: &OrchestrationV2ThreadShell) -> bool {
-    thread
-        .pending_background_tasks
-        .iter()
-        .flatten()
-        .any(|task| {
-            let task = serde_json::to_value(task).unwrap_or_default();
-            task["awaited"] == serde_json::Value::Bool(true)
-                || matches!(task["kind"].as_str(), Some("subagent" | "background_task"))
-        })
-}
-
-/// Whether the thread's last run finished after the user last looked (`hasUnseenCompletion`).
-/// A thread never opened in T3 has no visit, and doesn't count.
-fn has_unseen_completion(thread: &OrchestrationV2ThreadShell) -> bool {
-    match (
-        millis(thread.latest_run_completed_at.as_deref()),
-        millis(thread.last_visited_at.as_deref()),
-    ) {
-        (Some(completed), Some(visited)) => completed > visited,
-        _ => false,
-    }
-}
-
-/// Milliseconds since the epoch of one of T3's ISO 8601 timestamps.
-fn millis(timestamp: Option<&str>) -> Option<i128> {
-    let timestamp = OffsetDateTime::parse(timestamp?, &Rfc3339).ok()?;
-    Some(timestamp.unix_timestamp_nanos() / 1_000_000)
 }
 
 /// The time the list is built for: snoozes end by it.
@@ -304,6 +190,14 @@ pub struct ThreadEntry {
     pub pull_requests: Vec<i64>,
     /// The pull request its row shows, if it has one.
     pub pull_request: Option<RowPullRequest>,
+    /// T3's pull request badge for the row: the number, "+3", or a stack.
+    pub pull_request_badge: Option<PullRequestBadge>,
+    /// The agent it runs on (T3's provider instance), for the row's icon.
+    pub provider_instance_id: String,
+    /// When its status began: the working run's start, or when it began waiting.
+    pub status_since: Option<String>,
+    /// When it was last active, for an idle row's time (`threadTimeTimestamp` in T3).
+    pub activity_at: String,
     /// Pinned, even when it shows elsewhere (snoozed or settled).
     pub pinned: bool,
     /// Settled, even when it shows elsewhere (snoozed).
@@ -380,17 +274,123 @@ impl RowPullRequest {
             Some(_) => "Open",
         }
     }
+}
 
-    /// The colors of the thread toolbar's chip (`mustr/src/thread_toolbar.rs`).
-    fn color(&self, cx: &App) -> Hsla {
-        let palette = palette(cx);
-        match &self.state {
-            None => palette.text_muted.hsla(),
-            Some(PullRequestState::Open) if self.is_draft => palette.text_muted.hsla(),
-            Some(PullRequestState::Closed) => cx.theme().status().error,
-            Some(PullRequestState::Merged) => palette.pending.hsla(),
-            Some(_) => palette.ok.hsla(),
+/// T3's pull request badge on a row (`resolveThreadPullRequestBadge` and
+/// `ThreadPullRequestBadgeControl`): one pull request's number, a stack's size, or, for several
+/// that aren't one stack, "+" and how many there are ("+3" for three).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PullRequestBadge {
+    pub text: String,
+    /// They're the layers of one stack.
+    pub stack: bool,
+    /// Their state together: open if any is, merged if all are, draft if all are open drafts,
+    /// else closed; `None` for one T3 hasn't read yet.
+    pub state: Option<PullRequestState>,
+    pub is_draft: bool,
+    pub count: usize,
+}
+
+impl PullRequestBadge {
+    pub fn of(thread: &OrchestrationV2ThreadShell) -> Option<Self> {
+        let links = thread
+            .pull_requests
+            .iter()
+            .flatten()
+            .filter(|link| link.source != ThreadPullRequestLinkSource::StackDismissed)
+            .collect::<Vec<_>>();
+        if links.len() <= 1 {
+            let single = RowPullRequest::of(thread)?;
+            return Some(Self {
+                text: format!("#{}", single.number),
+                stack: false,
+                state: single.state,
+                is_draft: single.is_draft,
+                count: 1,
+            });
         }
+        let state_of = |link: &&t3_api::types::ThreadPullRequestLink| {
+            link.snapshot
+                .as_ref()
+                .map_or(PullRequestState::Open, |snapshot| snapshot.state.clone())
+        };
+        let is_draft = links.iter().all(|link| {
+            link.snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot.state == PullRequestState::Open && snapshot.is_draft
+            })
+        });
+        let state = if is_draft
+            || links
+                .iter()
+                .any(|link| state_of(link) == PullRequestState::Open)
+        {
+            PullRequestState::Open
+        } else if links
+            .iter()
+            .all(|link| state_of(link) == PullRequestState::Merged)
+        {
+            PullRequestState::Merged
+        } else {
+            PullRequestState::Closed
+        };
+        let stack = chain_count(&links) == 1;
+        Some(Self {
+            text: if stack {
+                links.len().to_string()
+            } else {
+                format!("+{}", links.len())
+            },
+            stack,
+            state: Some(state),
+            is_draft,
+            count: links.len(),
+        })
+    }
+}
+
+/// How many chains a thread's pull requests make (`resolveThreadPullRequestChains`): each
+/// native stack is one, and of the rest, each that isn't based on another's head branch starts
+/// one.
+fn chain_count(links: &[&t3_api::types::ThreadPullRequestLink]) -> usize {
+    let mut stacks = links
+        .iter()
+        .filter_map(|link| link.stack.as_ref().map(|stack| stack.id.as_str()))
+        .collect::<Vec<_>>();
+    stacks.sort_unstable();
+    stacks.dedup();
+    let rest = links
+        .iter()
+        .filter(|link| link.stack.is_none())
+        .collect::<Vec<_>>();
+    let heads = rest
+        .iter()
+        .filter_map(|link| {
+            let snapshot = link.snapshot.as_ref()?;
+            Some((link.repository.as_str(), snapshot.head_branch.as_str()))
+        })
+        .collect::<Vec<_>>();
+    let roots = rest
+        .iter()
+        .filter(|link| {
+            link.snapshot.as_ref().is_none_or(|snapshot| {
+                let base = (link.repository.as_str(), snapshot.base_branch.as_str());
+                heads.iter().filter(|head| **head == base).count() != 1
+                    || snapshot.base_branch == snapshot.head_branch
+            })
+        })
+        .count();
+    stacks.len() + roots
+}
+
+/// A pull request state's color: the thread toolbar's (`mustr/src/thread_toolbar.rs`).
+fn pull_request_color(state: Option<&PullRequestState>, is_draft: bool, cx: &App) -> Hsla {
+    let palette = palette(cx);
+    match state {
+        None => palette.text_muted.hsla(),
+        Some(PullRequestState::Open) if is_draft => palette.text_muted.hsla(),
+        Some(PullRequestState::Closed) => cx.theme().status().error,
+        Some(PullRequestState::Merged) => palette.pending.hsla(),
+        Some(_) => palette.ok.hsla(),
     }
 }
 
@@ -423,6 +423,15 @@ impl ThreadEntry {
             snoozed_until: thread.snoozed_until.clone(),
             pull_requests,
             pull_request: RowPullRequest::of(thread),
+            pull_request_badge: PullRequestBadge::of(thread),
+            provider_instance_id: thread.provider_instance_id.clone(),
+            status_since: status
+                .and_then(|status| status.since(thread))
+                .map(str::to_string),
+            activity_at: thread
+                .latest_user_message_at
+                .clone()
+                .unwrap_or_else(|| thread.updated_at.clone()),
             pinned: thread.pinned_at.is_some(),
             settled: is_settled(thread),
             auto_settle: thread.auto_settle_disabled_at.is_none(),
@@ -1196,10 +1205,22 @@ impl ThreadsSidebar {
                 }
             }),
         ];
+        // The list is rebuilt every CLOCK_TICK, and redrawn every second while a row shows how
+        // long its agent has been working or waiting.
         let clock = cx.spawn(async move |this, cx| {
+            let mut since_rebuild = Duration::ZERO;
             loop {
-                cx.background_executor().timer(CLOCK_TICK).await;
-                if this.update(cx, |this, cx| this.rebuild(cx)).is_err() {
+                cx.background_executor().timer(TIMER_TICK).await;
+                since_rebuild += TIMER_TICK;
+                let ticked = this.update(cx, |this, cx| {
+                    if since_rebuild >= CLOCK_TICK {
+                        since_rebuild = Duration::ZERO;
+                        this.rebuild(cx);
+                    } else if this.shows_timers() {
+                        cx.notify();
+                    }
+                });
+                if ticked.is_err() {
                     return;
                 }
             }
@@ -1667,6 +1688,16 @@ impl ThreadsSidebar {
                     this.drop_thread(&dragged.id, index, window, cx)
                 }),
             )
+    }
+
+    /// Whether a row shows a time that runs: an agent working or waiting.
+    fn shows_timers(&self) -> bool {
+        self.items.iter().any(|item| match item {
+            Item::Thread(section, row) | Item::Found(section, row) => self
+                .thread(*section, *row)
+                .is_some_and(|thread| thread.status_since.is_some()),
+            _ => false,
+        })
     }
 
     /// Highlights the thread the workspace shows, and tells T3 the user is looking at it.
@@ -2154,8 +2185,9 @@ impl ThreadsSidebar {
             .into_any_element()
     }
 
-    /// A thread's row. `snippet`, for a message match, takes the place of its project and
-    /// branch.
+    /// A thread's row, as T3's (`SidebarThreadRow.tsx`): the project and the thread's status
+    /// (or how long ago it was active), its title, then its branch with its pull requests and
+    /// its agent's icon. `snippet`, for a message match, takes the place of the branch.
     fn render_thread(
         &self,
         index: usize,
@@ -2169,47 +2201,62 @@ impl ThreadsSidebar {
         let active = self.active_thread_id.as_deref() == Some(thread.id.as_str());
         let selected = self.selected.contains(&thread.id);
         let settled = thread.section == Section::Settled;
-        let dot = match thread.status {
-            Some(status) => status.color(cx),
-            None => palette.text_muted.hsla().opacity(0.5),
-        };
-        let mut details = [thread.project.as_deref(), thread.branch.as_deref()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(" · ");
-        if details.is_empty() {
-            details = "No project".to_string();
-        }
+        let now = now();
+        let mut project = thread
+            .project
+            .clone()
+            .unwrap_or_else(|| "No project".to_string());
         if found {
-            details = format!("{} · {details}", thread.section.label());
+            project = format!("{} · {project}", thread.section.label());
         }
         // A message match opens the thread with find on the query (WP15).
         let find_query = snippet.is_some().then(|| self.messages.query.clone());
-        let details_line = match snippet {
+        let meta_line = match snippet {
             Some(snippet) => {
                 let snippet = focus_snippet(&snippet, &self.messages.query);
                 let highlighted = highlights(&snippet, &self.messages.query);
-                HighlightedLabel::new(snippet, highlighted)
-                    .size(LabelSize::XSmall)
-                    .color(Color::Muted)
-                    .truncate()
-                    .into_any_element()
+                Some(
+                    HighlightedLabel::new(snippet, highlighted)
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted)
+                        .truncate()
+                        .into_any_element(),
+                )
             }
-            None => Label::new(details)
-                .size(LabelSize::XSmall)
-                .color(Color::Muted)
-                .truncate()
-                .into_any_element(),
+            None => thread.branch.clone().map(|branch| {
+                h_flex()
+                    .min_w_0()
+                    .gap_1()
+                    .child(
+                        Icon::new(if thread.worktree_path.is_some() {
+                            IconName::GitBranchPlus
+                        } else {
+                            IconName::GitBranch
+                        })
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                    )
+                    .child(
+                        div().min_w_0().child(
+                            Label::new(branch)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted)
+                                .truncate(),
+                        ),
+                    )
+                    .into_any_element()
+            }),
         };
         let snoozed = thread
             .snoozed_until
             .as_deref()
             .filter(|_| thread.section == Section::Snoozed)
-            .and_then(|until| wake_label(until, now()));
+            .and_then(|until| wake_label(until, now));
+        let status = self.render_row_status(index, &thread, snoozed, now, cx);
         let group = SharedString::from(format!("thread-row-{index}"));
         let can_write = organize::blocked_reason(cx).is_none();
-        let pull_request = thread.pull_request.clone();
+        let badge = thread.pull_request_badge.clone();
+        let driver = instance_driver(&thread.provider_instance_id, cx);
         let action_thread = thread.clone();
         let menu_thread = thread.clone();
         let open_thread = thread.clone();
@@ -2219,18 +2266,23 @@ impl ThreadsSidebar {
             title: thread.title.clone().into(),
         });
         let sidebar = cx.entity().downgrade();
+        // Inset from the panel's edges, with corners of its own, as T3's rows are.
         let row = div()
             .id(("thread", index))
+            .debug_selector({
+                let id = thread.id.clone();
+                move || format!("sidebar-row-{id}")
+            })
             .group(group.clone())
             .w_full()
             .h(scaled(ROW_HEIGHT))
-            .px_2()
-            .py_1()
-            .rounded(scaled(tokens::CONTROL_RADIUS))
+            .px(scaled(px(10.)))
+            .py(scaled(px(7.)))
+            .rounded(scaled(tokens::CORNER_RADIUS))
             .cursor_pointer()
             .border_1()
             .border_color(gpui::transparent_black())
-            .when(active, |this| this.bg(palette.accent_soft.hsla()))
+            .when(active, |this| this.bg(palette.surface_2.hsla()))
             .when(selected, |this| {
                 this.bg(palette.accent.hsla().opacity(0.14))
                     .border_color(palette.accent.hsla().opacity(0.6))
@@ -2253,7 +2305,7 @@ impl ThreadsSidebar {
         let quiet = self.context_menu.is_some() || self.dragging.is_some();
         let row = row.when(!quiet, |row| {
             row.tooltip(move |_, cx| {
-                let details = crate::details::thread_details(&hover_thread.id, now(), cx)
+                let details = crate::details::thread_details(&hover_thread.id, now, cx)
                     .unwrap_or_else(|| crate::details::ThreadDetails::of_row(&hover_thread));
                 cx.new(|_| crate::details::ThreadHoverCard { details })
                     .into()
@@ -2264,109 +2316,206 @@ impl ThreadsSidebar {
         } else {
             self.drop_zone(row, index, cx)
         };
-        row.on_click(
-            cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
-                this.click_row(
-                    &open_thread,
-                    find_query.clone(),
-                    event.modifiers(),
-                    window,
-                    cx,
-                )
-            }),
-        )
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                this.deploy_context_menu(event.position, menu_thread.clone(), window, cx)
-            }),
-        )
-        .child(
-            v_flex()
-                .min_w_0()
+        let settle = can_write.then(|| {
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right_0()
+                .flex()
+                .items_center()
+                .visible_on_hover(group.clone())
                 .child(
-                    h_flex()
-                        .gap_1p5()
-                        .map(|this| {
-                            if selected {
-                                this.child(
-                                    Icon::new(IconName::Check)
-                                        .size(IconSize::XSmall)
-                                        .color(Color::Accent),
-                                )
+                    IconButton::new(
+                        ("settle", index),
+                        if settled {
+                            IconName::Undo
+                        } else {
+                            IconName::Check
+                        },
+                    )
+                    .icon_size(IconSize::XSmall)
+                    .icon_color(Color::Muted)
+                    .tooltip(move |_, cx| {
+                        if settled {
+                            Tooltip::simple("Un-settle", cx)
+                        } else {
+                            Tooltip::for_action("Settle", &SettleThread, cx)
+                        }
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.settle_or_unsettle(&action_thread, window, cx)
+                    })),
+                )
+        });
+        let row = row
+            .on_click(
+                cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+                    this.click_row(
+                        &open_thread,
+                        find_query.clone(),
+                        event.modifiers(),
+                        window,
+                        cx,
+                    )
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.deploy_context_menu(event.position, menu_thread.clone(), window, cx)
+                }),
+            )
+            .child(
+                v_flex()
+                    .size_full()
+                    .min_w_0()
+                    .justify_between()
+                    .child(
+                        h_flex()
+                            .relative()
+                            .h(scaled(px(18.)))
+                            .min_w_0()
+                            .gap_1p5()
+                            .child(if selected {
+                                Icon::new(IconName::Check)
+                                    .size(IconSize::Small)
+                                    .color(Color::Accent)
                             } else {
-                                this.child(Indicator::dot().color(Color::Custom(dot)))
-                            }
-                        })
-                        .child(
-                            div().flex_1().min_w_0().child(
-                                Label::new(thread.title.clone())
-                                    .size(LabelSize::Small)
-                                    .when(thread.unread, |label| label.weight(FontWeight::SEMIBOLD))
-                                    .when(settled && !active, |label| label.color(Color::Muted))
-                                    .truncate(),
-                            ),
-                        )
-                        .when(can_write, |this| {
-                            this.child(
-                                div().visible_on_hover(group.clone()).child(
-                                    IconButton::new(
-                                        ("settle", index),
-                                        if settled {
-                                            IconName::Undo
-                                        } else {
-                                            IconName::Check
-                                        },
-                                    )
-                                    .icon_size(IconSize::XSmall)
-                                    .icon_color(Color::Muted)
-                                    .tooltip(move |_, cx| {
-                                        if settled {
-                                            Tooltip::simple("Un-settle", cx)
-                                        } else {
-                                            Tooltip::for_action("Settle", &SettleThread, cx)
-                                        }
-                                    })
-                                    .on_click(cx.listener(
-                                        move |this, _, window, cx| {
-                                            this.settle_or_unsettle(&action_thread, window, cx)
-                                        },
-                                    )),
+                                Icon::new(IconName::Folder)
+                                    .size(IconSize::Small)
+                                    .color(Color::Muted)
+                            })
+                            .when(thread.pinned, |this| {
+                                this.child(
+                                    Icon::new(IconName::Pin)
+                                        .size(IconSize::XSmall)
+                                        .color(Color::Muted),
+                                )
+                            })
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Label::new(project)
+                                        .size(LabelSize::Small)
+                                        .color(Color::Muted)
+                                        .truncate(),
                                 ),
                             )
-                        }),
-                )
-                .child(
-                    h_flex()
-                        .gap_1p5()
-                        .pl(scaled(px(12.)))
-                        .child(div().flex_1().min_w_0().child(details_line))
-                        .when_some(pull_request, |this, pull_request| {
-                            this.child(pull_request_chip(index, &pull_request, cx))
-                        })
-                        .when_some(snoozed, |this, until| {
-                            this.child(
-                                h_flex()
-                                    .gap_0p5()
-                                    .child(
-                                        Icon::new(IconName::Clock)
-                                            .size(IconSize::XSmall)
-                                            .color(Color::Muted),
-                                    )
-                                    .child(
-                                        Label::new(until)
-                                            .size(LabelSize::XSmall)
-                                            .color(Color::Muted),
-                                    ),
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .when(can_write, |this| {
+                                        this.group_hover(group.clone(), |style| style.invisible())
+                                    })
+                                    .child(status),
                             )
-                        })
-                        .when_some(thread.status, |this, status| {
-                            this.child(Pill::tinted(status.label(), status.color(cx)))
-                        }),
-                ),
-        )
-        .into_any_element()
+                            .children(settle),
+                    )
+                    .child(
+                        h_flex()
+                            .min_w_0()
+                            .gap_1p5()
+                            .when(thread.unread && !active, |this| {
+                                this.child(Indicator::dot().color(Color::Accent))
+                            })
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Label::new(thread.title.clone())
+                                        .when(thread.unread, |label| {
+                                            label.weight(FontWeight::SEMIBOLD)
+                                        })
+                                        .when(settled && !active, |label| label.color(Color::Muted))
+                                        .truncate(),
+                                ),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .h(scaled(px(16.)))
+                            .min_w_0()
+                            .gap_1p5()
+                            .child(div().flex_1().min_w_0().children(meta_line))
+                            .children(
+                                badge.map(|badge| pull_request_badge(index, &thread, &badge, cx)),
+                            )
+                            .child(div().flex_none().opacity(0.75).child(provider_icon_element(
+                                &driver,
+                                IconSize::XSmall,
+                                cx,
+                            ))),
+                    ),
+            );
+        div()
+            .w_full()
+            .px(scaled(px(6.)))
+            .py(scaled(px(1.)))
+            .child(row)
+            .into_any_element()
+    }
+
+    /// The top right of a row: the thread's status in T3's icon and color, with how long it's
+    /// been working or waiting, or, with nothing to say, when it wakes or was last active.
+    fn render_row_status(
+        &self,
+        index: usize,
+        thread: &ThreadEntry,
+        snoozed: Option<String>,
+        now: OffsetDateTime,
+        cx: &App,
+    ) -> AnyElement {
+        if let Some(status) = thread.status {
+            let color = status.color(cx);
+            let elapsed = thread
+                .status_since
+                .as_deref()
+                .and_then(|since| millis(Some(since)))
+                .map(|since| short_duration(now.unix_timestamp_nanos() / 1_000_000 - since));
+            let icon = status
+                .icon()
+                .size(IconSize::Small)
+                .color(Color::Custom(color));
+            return h_flex()
+                .debug_selector({
+                    let id = thread.id.clone();
+                    let label = status.label();
+                    move || format!("sidebar-status-{id}-{label}")
+                })
+                .gap_1()
+                .child(if status.spins() {
+                    icon.with_keyed_rotate_animation(("sidebar-status-spin", index), 3)
+                        .into_any_element()
+                } else {
+                    icon.into_any_element()
+                })
+                .child(
+                    Label::new(status.label())
+                        .size(LabelSize::Small)
+                        .weight(FontWeight::MEDIUM)
+                        .color(Color::Custom(color)),
+                )
+                .children(elapsed.map(|elapsed| {
+                    Label::new(elapsed)
+                        .size(LabelSize::Small)
+                        .color(Color::Custom(color))
+                }))
+                .into_any_element();
+        }
+        if let Some(until) = snoozed {
+            return h_flex()
+                .gap_0p5()
+                .child(
+                    Icon::new(IconName::Clock)
+                        .size(IconSize::XSmall)
+                        .color(Color::Muted),
+                )
+                .child(Label::new(until).size(LabelSize::Small).color(Color::Muted))
+                .into_any_element();
+        }
+        Label::new(relative_time(&thread.activity_at, now).unwrap_or_default())
+            .size(LabelSize::Small)
+            .color(Color::Muted)
+            .into_any_element()
     }
 
     /// While rows are selected: how many, the actions for them all, and Clear.
@@ -2479,17 +2628,26 @@ impl ThreadsSidebar {
     }
 }
 
-/// A row's pull request: its number, in its state's color, with its title and state on hover
-/// (T3's `ThreadSearchPullRequestNumber` and the sidebar's PR indicator).
-fn pull_request_chip(index: usize, pull_request: &RowPullRequest, cx: &App) -> AnyElement {
-    let color = pull_request.color(cx);
-    let tooltip = match &pull_request.title {
-        Some(title) => format!(
-            "#{} {title} ({})",
-            pull_request.number,
-            pull_request.state_label()
-        ),
-        None => format!("Pull request #{}", pull_request.number),
+/// A row's pull request badge, in its state's color, with the pull request's title and state,
+/// or how many there are, on hover.
+fn pull_request_badge(
+    index: usize,
+    thread: &ThreadEntry,
+    badge: &PullRequestBadge,
+    cx: &App,
+) -> AnyElement {
+    let color = pull_request_color(badge.state.as_ref(), badge.is_draft, cx);
+    let tooltip = match (&thread.pull_request, badge.count) {
+        (Some(pull_request), 1) => match &pull_request.title {
+            Some(title) => format!(
+                "#{} {title} ({})",
+                pull_request.number,
+                pull_request.state_label()
+            ),
+            None => format!("Pull request #{}", pull_request.number),
+        },
+        (_, count) if badge.stack => format!("A stack of {count} pull requests"),
+        (_, count) => format!("{count} pull requests"),
     };
     h_flex()
         .id(("thread-pull-request", index))
@@ -2501,7 +2659,7 @@ fn pull_request_chip(index: usize, pull_request: &RowPullRequest, cx: &App) -> A
                 .color(Color::Custom(color)),
         )
         .child(
-            Label::new(format!("#{}", pull_request.number))
+            Label::new(badge.text.clone())
                 .size(LabelSize::XSmall)
                 .color(Color::Custom(color)),
         )
