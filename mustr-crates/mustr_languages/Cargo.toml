@@ -1,0 +1,61 @@
+[package]
+name = "mustr_languages"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+license = "GPL-3.0-or-later"
+description = "Languages mustr compiles in beyond Zed's built-in ones, with the grammars and queries Zed's extensions use: highlighting, brackets, indentation, outlines and injections, no language servers"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/mustr_languages.rs"
+doctest = false
+
+[build-dependencies]
+cc = "1.2"
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+language.workspace = true
+log.workspace = true
+tree-sitter.workspace = true
+util.workspace = true
+
+# Grammars, at the revisions Zed's extensions pin or the closest release with the same node types
+# (`THIRD_PARTY_NOTICES.md` credits each). Dart's, Dockerfile's and Vue's are vendored in
+# `grammars/` and compiled by `build.rs`, because no crate of their pinned revisions works with
+# Zed's tree-sitter.
+tree-sitter-c-sharp = "0.23.5"
+tree-sitter-elixir.workspace = true
+tree-sitter-graphql = "0.3.0"
+tree-sitter-haskell = "=0.23.1"
+tree-sitter-hcl = "1.1.0"
+tree-sitter-html.workspace = true
+tree-sitter-java = "0.23.5"
+tree-sitter-kotlin-sg = "0.4.1"
+tree-sitter-language = "0.1"
+tree-sitter-lua = "0.5.0"
+tree-sitter-make = "1.1.1"
+tree-sitter-nix = "0.3.0"
+tree-sitter-ocaml = "=0.24.0"
+tree-sitter-php = "0.25.1"
+tree-sitter-proto = "=0.3.0"
+tree-sitter-ruby.workspace = true
+tree-sitter-scala = "=0.24.0"
+tree-sitter-mssql = "0.2.3"
+tree-sitter-svelte-ng = { git = "https://github.com/tree-sitter-grammars/tree-sitter-svelte", rev = "3f06f705410683adb17d146b5eca28c62fe81ba6" }
+tree-sitter-swift = "=0.7.0"
+tree-sitter-toml-ng = "0.7.0"
+tree-sitter-xml = "0.7.0"
+tree-sitter-zig = "1.1.2"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+language = { workspace = true, features = ["test-support"] }
+mustr_ui = { path = "../mustr_ui" }
+settings = { workspace = true, features = ["test-support"] }
+theme.workspace = true
+theme_settings.workspace = true

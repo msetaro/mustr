@@ -1,0 +1,299 @@
+; Variables
+[
+  (identifier)
+  (global_variable)
+] @variable
+
+(constant) @type
+
+((constant) @constant
+  (#match? @constant "^[A-Z\\d_]+$"))
+
+; Keywords — definition
+[
+  "alias"
+  "class"
+  "def"
+  "module"
+  "undef"
+] @keyword.function
+
+; Keywords — conditional
+[
+  "case"
+  "else"
+  "elsif"
+  "if"
+  "then"
+  "unless"
+  "when"
+] @keyword.control.conditional
+
+; Keywords — loop
+[
+  "for"
+  "redo"
+  "until"
+  "while"
+] @keyword.control.repeat
+
+(do
+  "do" @keyword.control.repeat)
+
+; Keywords — flow return/jump
+[
+  "break"
+  "next"
+  "retry"
+  "return"
+  "yield"
+] @keyword.control.return
+
+; Keywords — exception handling
+[
+  "begin"
+  "ensure"
+  "rescue"
+] @keyword.exception
+
+; Keywords — operator
+[
+  "and"
+  "in"
+  "not"
+  "or"
+] @keyword.operator
+
+; Keywords — general
+[
+  "BEGIN"
+  "END"
+  "end"
+] @keyword
+
+(do_block
+  "do" @keyword)
+
+((identifier) @keyword
+  (#any-of? @keyword "private" "protected" "public"))
+
+; Function calls
+(call
+  method: [
+    (identifier)
+    (constant)
+  ] @function.method)
+
+((identifier) @keyword.import
+  (#any-of? @keyword.import "require" "require_relative" "load"))
+
+"defined?" @function.method.builtin
+
+; Function definitions
+(alias
+  (identifier) @function.method.definition)
+
+(setter
+  (identifier) @function.method.definition)
+
+(method
+  name: [
+    (identifier)
+    (constant)
+  ] @function.method.definition)
+
+(singleton_method
+  name: [
+    (identifier)
+    (constant)
+  ] @function.method.definition)
+
+(method_parameters
+  (identifier) @variable.parameter)
+
+(block_parameters
+  (identifier) @variable.parameter)
+
+(lambda_parameters
+  (identifier) @variable.parameter)
+
+(optional_parameter
+  name: (identifier) @variable.parameter)
+
+(keyword_parameter
+  name: (identifier) @variable.parameter.keyword
+  ":" @variable.parameter.keyword)
+
+; Identifiers
+((identifier) @constant.builtin
+  (#any-of? @constant.builtin "__FILE__" "__LINE__" "__ENCODING__"))
+
+(file) @constant.builtin
+
+(line) @constant.builtin
+
+(encoding) @constant.builtin
+
+(hash_splat_nil
+  "nil" @constant.builtin)
+
+(superclass
+  (constant) @type.super)
+
+(superclass
+  (scope_resolution
+    (constant) @type.super))
+
+(superclass
+  (scope_resolution
+    (scope_resolution
+      (constant) @type.super)))
+
+(self) @variable.special
+
+(super) @variable.special
+
+(class_variable) @variable.special.class
+
+(instance_variable) @variable.special.instance
+
+((call
+  !receiver
+  method: (identifier) @function.builtin)
+  (#any-of? @function.builtin "include" "extend" "prepend" "refine" "using"))
+
+((identifier) @keyword.exception
+  (#any-of? @keyword.exception "raise" "fail" "catch" "throw"))
+
+; Literals
+[
+  (string)
+  (bare_string)
+  (subshell)
+  (heredoc_body)
+  (heredoc_beginning)
+] @string
+
+[
+  (simple_symbol)
+  (delimited_symbol)
+  (hash_key_symbol)
+  (bare_symbol)
+] @string.special.symbol
+
+(pair
+  key: (_) @string.special.symbol
+  ":" @string.special.symbol)
+
+(keyword_pattern
+  key: (_) @string.special.symbol
+  ":" @string.special.symbol)
+
+(regex) @string.regex
+
+(escape_sequence) @string.escape
+
+[
+  (integer)
+  (float)
+  (rational)
+  (complex)
+] @number
+
+(character) @string
+
+[
+  (true)
+  (false)
+] @boolean
+
+(nil) @constant.builtin
+
+; ERB strict locals are injected as Ruby, but their parameter list is not a
+; valid standalone Ruby program. Match the parser's recovery shape so the
+; first required local and the remaining keyword locals are highlighted alike.
+((call
+  method: (identifier) @_locals
+  arguments: (argument_list
+    (parenthesized_statements
+      (call
+        method: (identifier) @variable.parameter.keyword))))
+  (#eq? @_locals "locals"))
+
+((call
+  method: (identifier) @_locals
+  arguments: (argument_list
+    (parenthesized_statements
+      (call
+        arguments: (argument_list
+          [
+            (pair
+              key: (_) @_key @variable.parameter.keyword)
+            (pair
+              ":" @variable.parameter.keyword)
+          ])))))
+  (#eq? @_locals "locals")
+  (#not-eq? @_key ""))
+
+; Regular comments (exclude RBS inline comments)
+((comment) @comment
+  (#not-match? @comment "^\\s*#[:|]")
+  (#not-match? @comment "^\\s*#\\s*(@rbs|\\|)"))
+
+; Operators
+[
+  "*"
+  "**"
+  "&"
+  "^"
+  ".."
+  "..."
+  "="
+  "=>"
+  (operator)
+] @operator
+
+(lambda
+  "->" @operator)
+
+(singleton_class
+  "<<" @operator)
+
+(superclass
+  "<" @operator)
+
+(alternative_pattern
+  "|" @operator)
+
+(conditional
+  "?" @operator
+  ":" @operator)
+
+(_
+  operator: _ @operator
+  (#not-any-of? @operator "and" "or" "not" "defined?" "." "::"))
+
+[
+  ","
+  ";"
+  "."
+  "::"
+] @punctuation.delimiter
+
+[
+  "("
+  ")"
+  "["
+  "]"
+  "{"
+  "}"
+  "%w("
+  "%i("
+] @punctuation.bracket
+
+(block_parameters
+  "|" @punctuation.bracket)
+
+(interpolation
+  "#{" @punctuation.special
+  "}" @punctuation.special) @embedded
