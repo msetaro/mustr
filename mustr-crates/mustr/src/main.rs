@@ -50,6 +50,10 @@ mod remote_terminal;
 // WP14, agent setup and T3's settings:
 mod agent_setup;
 mod t3_settings;
+// WP18, settings, usage, accounts and servers:
+#[cfg(test)]
+mod fake_t3;
+mod usage_page;
 // Zoom:
 mod zoom;
 // Releases and self-update:
@@ -482,6 +486,8 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     // WP14, agent setup and T3's settings:
     agent_setup::init(cx);
     t3_settings::init(cx);
+    // WP18, settings, usage, accounts and servers:
+    usage_page::init(cx);
     // Zoom:
     zoom::init(cx);
     // Releases and self-update:

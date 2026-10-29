@@ -796,6 +796,12 @@ impl T3Connection {
         cx.global::<GlobalT3Connection>().0.clone()
     }
 
+    /// The app's connection, once [`init`] has made it (tests may not).
+    pub fn try_global(cx: &App) -> Option<Entity<Self>> {
+        cx.try_global::<GlobalT3Connection>()
+            .map(|global| global.0.clone())
+    }
+
     fn new(mode: T3Mode, external_url: Result<Url>) -> Self {
         Self {
             mode,
