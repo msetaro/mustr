@@ -1987,7 +1987,22 @@ impl ThreadGitControls {
         let available = editors.available().to_vec();
         let preferred = editors.preferred();
         let git = self.git.clone();
+        // mustr's own editor, when the checkout is on this machine (`edit_area.rs`).
+        let here = git
+            .read(cx)
+            .checkout()
+            .and_then(|checkout| crate::edit_area::local_folder(&checkout.cwd, cx));
         let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            if let Some(path) = here {
+                menu = menu
+                    .entry("Open in mustr's editor", None, move |window, cx| {
+                        window.dispatch_action(
+                            Box::new(crate::edit_area::OpenFolderInEdit { path: path.clone() }),
+                            cx,
+                        )
+                    })
+                    .separator();
+            }
             if available.is_empty() {
                 return menu.label("T3 found no editors");
             }

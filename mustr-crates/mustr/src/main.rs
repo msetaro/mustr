@@ -73,6 +73,11 @@ mod updates;
 mod worktree_trust;
 // Settings in the UI: one Settings page, with T3's settings.
 mod settings_page;
+// The rail's four areas: Inbox, Edit, Review and Agents, one view at a time outside Edit.
+mod areas;
+mod edit_area;
+mod review_page;
+mod review_sections;
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
@@ -550,4 +555,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     updates::init(cx);
     // Worktree trust: T3's worktrees inherit their project's trust.
     worktree_trust::init(cx);
+    // The rail's four areas:
+    review_sections::init(cx);
 }

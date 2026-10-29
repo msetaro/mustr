@@ -25,7 +25,6 @@ use crate::{
         AddAgentDialog, is_default_instance, mutate_instances, registry_agent_of, remove_payload,
     },
     auth_terminal::{AuthTerminal, SendInput, SendSize},
-    nav_panel::register_rail_entry,
 };
 use anyhow::Result;
 use editor::Editor;
@@ -97,16 +96,8 @@ gpui::actions!(
     ]
 );
 
-/// Adds the page's rail entry and actions. Call once at startup, before windows open.
+/// Adds the page's actions (Agents' sidebar and Settings link to the page). Call once at startup, before windows open.
 pub fn init(cx: &mut App) {
-    register_rail_entry(
-        "agent-setup",
-        Icon::new(IconName::Blocks),
-        "Agents: install and sign in",
-        OpenAgents,
-        |item| item.downcast::<AgentSetupView>().is_some(),
-        cx,
-    );
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, _: &OpenAgents, window, cx| {
             show(workspace, None, window, cx)

@@ -1,5 +1,6 @@
-//! mustr's title bar: a tab per open item (home, pull requests), the command search box, the T3
-//! connection, and the window controls.
+//! mustr's title bar: back and forward, what's on screen (outside Edit, the view's title; in
+//! Edit, a tab per open file), the command search box, the T3 connection, and the window
+//! controls.
 //!
 //! Zed's `title_bar` crate is collab-centric (sign-in, calls, project and branch pickers), so
 //! mustr draws the bar the way Zed's `PlatformTitleBar`
@@ -20,13 +21,13 @@
 //!   draws the macOS window tabs under the bar (`SystemWindowTabs` is private to its crate), at
 //!   Zed's height.
 //!
-//! The tabs replace Zed's pane tab bar, which mustr's default settings hide
-//! (`tab_bar.show: false`). They show the items of the workspace's active pane, and switch and
-//! close them through Zed's pane API.
+//! Edit's tabs replace Zed's pane tab bar, which mustr's default settings hide
+//! (`tab_bar.show: false`). They show Edit's files (`areas::edit_items`), and switch and close
+//! them through Zed's pane API. The other areas show one view at a time (`areas.rs`), so there
+//! are no tabs for them.
 
 use crate::{
-    home::HomeView,
-    navigation,
+    areas::{self, Area, Areas, ViewKind},
     t3_connection::{ConnectionStatus, EngineKind, EngineSetup, T3Connection},
     t3_engine::T3Mode,
     thread_git::{MenuSlot, menu_position},
@@ -46,8 +47,8 @@ use settings::{RegisterSetting, Settings, SettingsContent};
 use theme::ActiveTheme as _;
 use theme_settings::ThemeSettings;
 use ui::{
-    ButtonCommon as _, Clickable as _, Color, FluentBuilder as _, IconButton, IconName, IconSize,
-    PlatformStyle, Tooltip, h_flex, utils::TRAFFIC_LIGHT_PADDING,
+    ButtonCommon as _, Clickable as _, Color, Disableable as _, FluentBuilder as _, IconButton,
+    IconName, IconSize, PlatformStyle, Tooltip, h_flex, utils::TRAFFIC_LIGHT_PADDING,
 };
 use workspace::{Pane, SaveIntent, Workspace, WorkspaceSettings};
 
@@ -111,7 +112,8 @@ pub fn init(cx: &mut App) {
         };
         let workspace_handle = cx.entity();
         let pane = workspace.active_pane().clone();
-        let title_bar = cx.new(|cx| MustrTitleBar::new(&workspace_handle, pane, window, cx));
+        let areas = areas::ensure(workspace, window, cx);
+        let title_bar = cx.new(|cx| MustrTitleBar::new(&workspace_handle, pane, areas, window, cx));
         workspace.set_titlebar_item(title_bar.into(), window, cx);
     })
     .detach();
@@ -142,7 +144,9 @@ pub struct MustrTitleBar {
     should_move: bool,
     connection: Entity<T3Connection>,
     workspace: WeakEntity<Workspace>,
-    /// The pane whose items are shown as tabs: the workspace's active pane.
+    /// The window's areas: what's on screen, and the history.
+    areas: Entity<Areas>,
+    /// The pane whose files are shown as tabs in Edit: the workspace's active pane.
     pane: Entity<Pane>,
     /// Measures the tabs' row, which they share.
     tabs_row: OverflowRow,
@@ -161,12 +165,14 @@ impl MustrTitleBar {
     fn new(
         workspace: &Entity<Workspace>,
         pane: Entity<Pane>,
+        areas: Entity<Areas>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let connection = T3Connection::global(cx);
         let subscriptions = vec![
             cx.observe(&connection, |_, _, cx| cx.notify()),
+            cx.observe(&areas, |_, _, cx| cx.notify()),
             cx.observe_button_layout_changed(window, |_, _, cx| cx.notify()),
             cx.subscribe(workspace, |this, workspace, event, cx| {
                 if let workspace::Event::ActiveItemChanged
@@ -193,6 +199,7 @@ impl MustrTitleBar {
             should_move: false,
             connection,
             workspace: workspace.downgrade(),
+            areas,
             _pane_subscriptions: Self::watch_pane(&pane, cx),
             pane,
             tabs_row: OverflowRow::new(),
@@ -225,12 +232,24 @@ impl MustrTitleBar {
         ]
     }
 
-    /// The tabs, sharing the row's width, down to a few letters each; then the row scrolls.
+    /// Edit's files, the active one's index among them.
+    fn edit_tabs(&self, cx: &App) -> (Vec<Box<dyn workspace::ItemHandle>>, Option<usize>) {
+        let items = self
+            .workspace
+            .upgrade()
+            .map(|workspace| areas::edit_items(workspace.read(cx), cx))
+            .unwrap_or_default();
+        let active = self.pane.read(cx).active_item().map(|item| item.item_id());
+        let active_index = items.iter().position(|item| Some(item.item_id()) == active);
+        (items, active_index)
+    }
+
+    /// Edit's tabs, sharing the row's width, down to a few letters each; then the row scrolls.
     fn render_tabs(&self, window: &Window, cx: &App) -> Vec<AnyElement> {
-        let pane = self.pane.read(cx);
-        let active_index = pane.active_item_index();
+        let (items, active_index) = self.edit_tabs(cx);
+        let active_index = active_index.unwrap_or(usize::MAX);
         let rem_size = window.rem_size();
-        let count = pane.items_len().max(1);
+        let count = items.len().max(1);
         // The room left by the new tab button and the gaps.
         let room = self
             .tabs_row
@@ -249,19 +268,14 @@ impl MustrTitleBar {
             let others = ((room - active) / (count - 1) as f32).min(max).max(min);
             (active, others)
         });
-        pane.items()
+        items
+            .iter()
             .enumerate()
             .map(|(index, item)| {
                 let item_id = item.item_id();
-                // Home is always there, so it can't be closed from its tab.
-                let closable = item.downcast::<HomeView>().is_none();
+                let closable = true;
                 let weak_pane = self.pane.downgrade();
-                // Pull requests are labeled `owner/repo#123`, as in the mockups, and agent
-                // threads by their title; the tooltip has the rest.
-                let label = item
-                    .downcast::<ReviewView>()
-                    .and_then(|review| Some(review.read(cx).header()?.tab_label()))
-                    .unwrap_or_else(|| item.tab_content_text(0, cx));
+                let label = item.tab_content_text(0, cx);
                 WindowTab::new(("title-bar-tab", item_id.as_u64()), label)
                     .active(index == active_index)
                     .when_some(widths, |tab, (active, others)| {
@@ -303,9 +317,9 @@ impl MustrTitleBar {
             .collect()
     }
 
+    /// Edit's "+": finds a file to open.
     fn render_new_tab_button(&self, cx: &App) -> impl IntoElement {
         let palette = mustr_ui::palette(cx);
-        let workspace = self.workspace.clone();
         div()
             .id("title-bar-new-tab")
             .flex_none()
@@ -320,17 +334,116 @@ impl MustrTitleBar {
                     .bg(palette.surface_2.hsla())
                     .text_color(palette.text.hsla())
             })
-            .tooltip(Tooltip::text("Open a pull request"))
+            .tooltip(Tooltip::for_action_title(
+                "Open a file",
+                &workspace::ToggleFileFinder::default(),
+            ))
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
             .on_click(move |_, window, cx| {
                 cx.stop_propagation();
-                workspace
-                    .update(cx, |workspace, cx| {
-                        navigation::show_home(workspace, window, cx)
-                    })
-                    .ok();
+                window.dispatch_action(Box::new(workspace::ToggleFileFinder::default()), cx);
             })
             .child("+")
+    }
+
+    /// Back and forward through the views you visited (`areas.rs`).
+    fn render_history_buttons(&self, cx: &App) -> impl IntoElement {
+        let areas = self.areas.read(cx);
+        let (back, forward) = (areas.can_go_back(), areas.can_go_forward());
+        h_flex()
+            .flex_none()
+            .gap(scaled(px(2.)))
+            .child(
+                IconButton::new("title-bar-back", IconName::ArrowLeft)
+                    .icon_size(IconSize::Small)
+                    .icon_color(Color::Muted)
+                    .disabled(!back)
+                    .tooltip(Tooltip::for_action_title("Back", &areas::Back))
+                    .on_click(|_, window, cx| {
+                        cx.stop_propagation();
+                        window.dispatch_action(Box::new(areas::Back), cx);
+                    }),
+            )
+            .child(
+                IconButton::new("title-bar-forward", IconName::ArrowRight)
+                    .icon_size(IconSize::Small)
+                    .icon_color(Color::Muted)
+                    .disabled(!forward)
+                    .tooltip(Tooltip::for_action_title("Forward", &areas::Forward))
+                    .on_click(|_, window, cx| {
+                        cx.stop_propagation();
+                        window.dispatch_action(Box::new(areas::Forward), cx);
+                    }),
+            )
+    }
+
+    /// Outside Edit: the area, and the title of the view on screen.
+    fn render_title(&self, cx: &App) -> AnyElement {
+        let palette = mustr_ui::palette(cx);
+        let areas = self.areas.read(cx);
+        let area = areas.area();
+        let title = areas.shown().and_then(|item| {
+            let title = match ViewKind::of(item) {
+                ViewKind::Inbox
+                | ViewKind::ReviewPage
+                | ViewKind::AgentsHome
+                | ViewKind::Settings
+                | ViewKind::EditHome => return None,
+                // Pull requests by `owner/repo#123` and their title, agent reviews by the
+                // thread's title and the scope.
+                ViewKind::Review => item
+                    .downcast::<ReviewView>()
+                    .and_then(|review| {
+                        let header = review.read(cx).header()?;
+                        Some(match header {
+                            review::ReviewHeader::PullRequest(_) => {
+                                format!("{} · {}", header.tab_label(), header.title())
+                            }
+                            review::ReviewHeader::AgentThread(_) => header.tab_label().to_string(),
+                        })
+                    })
+                    .unwrap_or_else(|| item.tab_content_text(0, cx).to_string()),
+                _ => item.tab_content_text(0, cx).to_string(),
+            };
+            Some((title, item.tab_tooltip_text(cx)))
+        });
+        h_flex()
+            .id("title-bar-title")
+            .min_w_0()
+            .gap(scaled(px(6.)))
+            .text_size(tokens::text_size(tokens::TEXT_SIZE_SMALL))
+            .whitespace_nowrap()
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(if title.is_some() {
+                        palette.text_muted.hsla()
+                    } else {
+                        palette.text.hsla()
+                    })
+                    .child(area.title()),
+            )
+            .when_some(title, |this, (title, tooltip)| {
+                this.child(
+                    div()
+                        .flex_none()
+                        .text_color(palette.text_muted.hsla())
+                        .child("›"),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .text_color(palette.text.hsla())
+                        .child(title),
+                )
+                .when_some(tooltip, |this, tooltip| {
+                    this.tooltip(Tooltip::text(tooltip))
+                })
+            })
+            .into_any_element()
     }
 
     /// A search box that opens the command palette: a fifth of the window, from 160 to 220 at
@@ -446,10 +559,10 @@ impl MustrTitleBar {
                 "Set up agents".into(),
                 match setup {
                     EngineSetup::NotInstalled { .. } => {
-                        "The agents engine isn't installed. Open Home to set it up.".into()
+                        "The agents engine isn't installed. Open the Inbox to set it up.".into()
                     }
                     EngineSetup::NotRunning { .. } => {
-                        "T3 Code isn't running. Open Home to start it.".into()
+                        "T3 Code isn't running. Open the Inbox to start it.".into()
                     }
                     EngineSetup::Incompatible { message, .. } => message.clone(),
                 },
@@ -461,7 +574,7 @@ impl MustrTitleBar {
                 } else {
                     "T3 offline".into()
                 },
-                format!("{error} Open Home to try again.").into(),
+                format!("{error} Open the Inbox to try again.").into(),
             ),
         };
         let workspace = self.workspace.clone();
@@ -495,31 +608,51 @@ impl Render for MustrTitleBar {
         // the same way around its buttons.
         let compact =
             window.viewport_size().width < scaled(COMPACT_BELOW_WIDTH).to_pixels(window.rem_size());
-        let scroll_to = (
-            self.pane.read(cx).active_item_index(),
-            self.tabs_row.width(),
-        );
-        if self.scrolled_to != Some(scroll_to) {
-            self.scrolled_to = Some(scroll_to);
-            self.tabs_scroll.scroll_to_item(scroll_to.0);
-        }
-        // The tabs scroll inside a row that measures the room they share (a scrolling row
-        // doesn't report its children's bounds).
-        let tabs = h_flex()
-            .id("title-bar-tabs")
-            .w_full()
-            .min_w_0()
-            .gap(scaled(px(4.)))
-            .overflow_x_scroll()
-            .track_scroll(&self.tabs_scroll)
-            .children(self.render_tabs(window, cx))
-            .child(self.render_new_tab_button(cx))
-            .into_any_element();
-        let children = [
+        let in_edit = self.areas.read(cx).area() == Area::Edit;
+        let middle = if in_edit {
+            let scroll_to = (self.edit_tabs(cx).1.unwrap_or(0), self.tabs_row.width());
+            if self.scrolled_to != Some(scroll_to) {
+                self.scrolled_to = Some(scroll_to);
+                self.tabs_scroll.scroll_to_item(scroll_to.0);
+            }
+            // The tabs scroll inside a row that measures the room they share (a scrolling row
+            // doesn't report its children's bounds).
+            let tabs = h_flex()
+                .id("title-bar-tabs")
+                .w_full()
+                .min_w_0()
+                .gap(scaled(px(4.)))
+                .overflow_x_scroll()
+                .track_scroll(&self.tabs_scroll)
+                .children(self.render_tabs(window, cx))
+                .child(self.render_new_tab_button(cx))
+                .into_any_element();
             self.tabs_row
                 .render([(None, tabs)], window)
                 .flex_1()
+                .min_w_0()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .into_any_element()
+        } else {
+            // The title moves the window, as the empty bar does.
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .child(self.render_title(cx))
+                .into_any_element()
+        };
+        let children = [
+            h_flex()
+                .flex_1()
+                .min_w_0()
+                .gap(scaled(px(8.)))
+                .child(
+                    div()
+                        .flex_none()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(self.render_history_buttons(cx)),
+                )
+                .child(middle)
                 .into_any_element(),
             h_flex()
                 .flex_none()

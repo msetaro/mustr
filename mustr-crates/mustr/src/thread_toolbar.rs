@@ -1409,6 +1409,10 @@ impl ThreadToolbar {
         let editors = Editors::global(cx).read(cx);
         let available = editors.available().to_vec();
         let preferred = editors.preferred();
+        let here_folder = git
+            .read(cx)
+            .checkout()
+            .and_then(|checkout| crate::edit_area::local_folder(&checkout.cwd, cx));
         let this = cx.weak_entity();
         let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
             let mut pull_request_entries = pull_request_entries;
@@ -1477,6 +1481,16 @@ impl ThreadToolbar {
                         });
                     }
                     OverflowEntry::OpenIn => {
+                        if let Some(path) = here_folder.clone() {
+                            menu = menu.entry("Open in mustr's editor", None, move |window, cx| {
+                                window.dispatch_action(
+                                    Box::new(crate::edit_area::OpenFolderInEdit {
+                                        path: path.clone(),
+                                    }),
+                                    cx,
+                                )
+                            });
+                        }
                         if available.is_empty() {
                             menu = menu.label("T3 found no editors");
                         }

@@ -5,6 +5,7 @@
 //! Only the fields mustr shows are decoded, and every entry is decoded on its own, so one
 //! malformed or newer-shaped entry doesn't hide the rest.
 
+use collections::HashMap;
 use review::{CommentableLines, FileChange, HunkLine, ReviewFileContents, UnavailableFile};
 use serde::Deserialize;
 use serde_json::Value;
@@ -35,6 +36,45 @@ pub struct PullRequestEntry {
     /// ISO 8601, for ordering the inbox.
     #[serde(default)]
     pub updated_at: Option<String>,
+    #[serde(default)]
+    pub project_title: Option<String>,
+    #[serde(default)]
+    pub head_branch: Option<String>,
+    #[serde(default)]
+    pub base_branch: Option<String>,
+    /// The checks' state; T3 leaves it out when the forge didn't say.
+    #[serde(default, deserialize_with = "lenient")]
+    pub checks_state: Option<ChecksState>,
+    #[serde(default, deserialize_with = "lenient")]
+    pub review_decision: Option<ReviewDecision>,
+}
+
+/// A pull request's checks, as T3 lists them (`PullRequestChecksState`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ChecksState {
+    Passing,
+    Failing,
+    Pending,
+}
+
+/// A pull request's reviews, as T3 lists them (`PullRequestReviewDecision`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReviewDecision {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+}
+
+/// Decodes a value a newer T3 may send more kinds of: one mustr doesn't know is `None`.
+fn lenient<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| serde_json::from_value(value).ok()))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -61,6 +101,43 @@ impl PullRequestEntry {
     pub fn has_line_counts(&self) -> bool {
         self.additions > 0 || self.deletions > 0
     }
+
+    /// Whether the signed-in account on the pull request's host opened it.
+    pub fn is_authored_by_viewer(&self, viewers: &HashMap<String, String>) -> bool {
+        let viewer = self
+            .host
+            .as_deref()
+            .and_then(|host| viewers.get(host))
+            .map(|login| login.trim().to_lowercase())
+            .filter(|login| !login.is_empty());
+        let author = self
+            .author
+            .as_ref()
+            .map(|author| author.login.trim().to_lowercase());
+        viewer.is_some() && viewer == author
+    }
+
+    /// Whether the pull request matches a search, on the fields T3's search looks at
+    /// (`matchesPullRequestQuery`): its number, title, repository, branch and author.
+    pub fn matches(&self, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        if query.is_empty() {
+            return true;
+        }
+        format!(
+            "#{} {} {} {} {}",
+            self.number,
+            self.title,
+            self.repository,
+            self.head_branch.as_deref().unwrap_or_default(),
+            self.author
+                .as_ref()
+                .map(|author| author.login.as_str())
+                .unwrap_or_default()
+        )
+        .to_lowercase()
+        .contains(&query)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -68,6 +145,8 @@ pub struct PullRequestList {
     pub entries: Vec<PullRequestEntry>,
     /// Projects T3 couldn't list, as "project: reason".
     pub errors: Vec<String>,
+    /// The signed-in account's login on each host, which says which pull requests are yours.
+    pub viewers: HashMap<String, String>,
 }
 
 pub fn parse_pull_request_list(list: Value) -> PullRequestList {
@@ -83,7 +162,15 @@ pub fn parse_pull_request_list(list: Value) -> PullRequestList {
         .into_iter()
         .map(|error| format!("{}: {}", error.project_title, error.message))
         .collect();
-    PullRequestList { entries, errors }
+    let viewers = list
+        .get("viewers")
+        .and_then(|viewers| serde_json::from_value::<HashMap<String, String>>(viewers.clone()).ok())
+        .unwrap_or_default();
+    PullRequestList {
+        entries,
+        errors,
+        viewers,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
