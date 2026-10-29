@@ -48,6 +48,7 @@ mod pull_request_details;
 mod pull_request_guide;
 mod remote_terminal;
 mod thread_handoff;
+mod worktree_cleanup;
 // WP12, composer and timeline:
 // WP13, thread list and navigation:
 // WP14, agent setup and T3's settings:

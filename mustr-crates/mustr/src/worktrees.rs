@@ -18,12 +18,15 @@
 //! - Opening a worktree adds it to the window's project, so Zed's file finder, project search,
 //!   and language servers cover it.
 //!
+//! - Above the list, T3's automatic cleanup rules, and Delete now (`worktree_cleanup.rs`).
+//!
 //! [`RemoveThreadWorktree`], which archiving a thread sends, offers to remove the thread's
 //! worktree when no other active thread uses it, as T3's app does when it deletes a thread.
 
 use crate::{
     nav_panel,
     t3_connection::{self, T3Connection},
+    worktree_cleanup::WorktreeCleanup,
 };
 use anyhow::{Context as _, Result, ensure};
 use futures::StreamExt as _;
@@ -748,6 +751,8 @@ pub struct WorktreesView {
     removals: HashMap<String, Removal>,
     /// The active threads that had worktrees, to notice when one is archived.
     active_with_worktrees: HashSet<String>,
+    /// T3's automatic cleanup rules, above the list.
+    cleanup: Entity<WorktreeCleanup>,
     _load_archived: Task<()>,
     _load_scratch_root: Task<()>,
     _check_folders: Vec<Task<()>>,
@@ -773,7 +778,14 @@ impl WorktreesView {
     fn new(workspace: WeakEntity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let shells = ThreadShells::global(cx);
         let subscription = cx.observe_in(&shells, window, |this, _, _, cx| this.shell_changed(cx));
+        let page = cx.weak_entity();
+        let cleanup = cx.new(|cx| {
+            WorktreeCleanup::new(cx).on_ran(move |_, cx| {
+                page.update(cx, |page, cx| page.refresh(cx)).ok();
+            })
+        });
         let mut this = Self {
+            cleanup,
             focus_handle: cx.focus_handle(),
             workspace,
             shells,
@@ -1281,6 +1293,7 @@ impl WorktreesView {
                         ),
                     ),
             )
+            .child(self.cleanup.clone())
             .when(!local, |this| {
                 this.child(notice(
                     "T3 runs on another machine, so mustr can't check these folders or open \
