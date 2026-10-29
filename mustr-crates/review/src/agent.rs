@@ -55,6 +55,16 @@ impl ReviewScope {
         }
     }
 
+    /// What the review says when the scope has no changes, as T3's diff panel shows an empty
+    /// diff rather than an error.
+    pub fn empty_label(&self) -> String {
+        match self {
+            ReviewScope::Changes => "No changes on this branch".to_string(),
+            ReviewScope::Uncommitted => "No uncommitted changes".to_string(),
+            ReviewScope::Turn(turn) => format!("Turn {turn} changed no files"),
+        }
+    }
+
     /// A stable name for files and logs: `changes`, `uncommitted`, `turn-3`.
     pub fn key(&self) -> String {
         match self {

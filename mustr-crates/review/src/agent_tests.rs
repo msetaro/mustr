@@ -325,3 +325,41 @@ async fn test_a_local_worktree_shows_its_real_files(cx: &mut TestAppContext) {
         changed
     );
 }
+
+/// A scope without changes opens as an empty review that says so, as T3's diff panel shows an
+/// empty diff, rather than as a failure.
+#[gpui::test]
+async fn test_a_scope_without_changes_says_so(cx: &mut TestAppContext) {
+    let backend = Arc::new(FakeBackend::default());
+    let contents = ReviewContents {
+        header: Some(agent_header(ReviewScope::Uncommitted)),
+        files: Vec::new(),
+        ..agent_contents(&backend)
+    };
+    let (review_view, _, cx) = build_review_view(contents, DiffViewStyle::Unified, cx).await;
+    review_view.read_with(cx, |review_view, _| {
+        assert_eq!(
+            review_view.empty_label().as_deref(),
+            Some("No uncommitted changes")
+        );
+        assert!(review_view.notice().is_none(), "it's not an error");
+    });
+    assert_eq!(
+        ReviewScope::Changes.empty_label(),
+        "No changes on this branch"
+    );
+    assert_eq!(
+        ReviewScope::Turn(3).empty_label(),
+        "Turn 3 changed no files"
+    );
+}
+
+#[gpui::test]
+async fn test_a_scope_with_changes_shows_them(cx: &mut TestAppContext) {
+    let backend = Arc::new(FakeBackend::default());
+    let (review_view, _, cx) =
+        build_review_view(agent_contents(&backend), DiffViewStyle::Unified, cx).await;
+    review_view.read_with(cx, |review_view, _| {
+        assert_eq!(review_view.empty_label(), None);
+    });
+}

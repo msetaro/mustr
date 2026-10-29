@@ -1353,6 +1353,18 @@ impl ReviewView {
     }
 
     /// Why the last comment couldn't be started, or what just happened.
+    /// What the review says in place of the diff when it has no files: for an agent thread, that
+    /// the scope has no changes.
+    pub fn empty_label(&self) -> Option<SharedString> {
+        if !self.file_tree.files().is_empty() {
+            return None;
+        }
+        Some(match &self.header {
+            Some(ReviewHeader::AgentThread(header)) => header.scope.empty_label().into(),
+            _ => "No changed files".into(),
+        })
+    }
+
     pub fn notice(&self) -> Option<&SharedString> {
         self.notice.as_ref()
     }
@@ -2095,9 +2107,21 @@ impl Render for ReviewView {
                 ),
                 None => this,
             })
-            .child(self.toolbar.clone())
-            .children(notice)
-            .child(div().flex_1().min_h_0().child(self.editor.clone()))
+            .map(|this| match self.empty_label() {
+                // Nothing to show or lay out, so no toolbar either.
+                Some(label) => this.children(notice).child(
+                    v_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .items_center()
+                        .justify_center()
+                        .child(Label::new(label).color(Color::Muted)),
+                ),
+                None => this
+                    .child(self.toolbar.clone())
+                    .children(notice)
+                    .child(div().flex_1().min_h_0().child(self.editor.clone())),
+            })
     }
 }
 
