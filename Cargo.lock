@@ -18395,6 +18395,7 @@ dependencies = [
  "picker",
  "pretty_assertions",
  "project",
+ "pulldown-cmark 0.13.4",
  "schemars 1.0.4",
  "search",
  "serde",

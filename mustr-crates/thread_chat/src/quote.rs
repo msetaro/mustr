@@ -193,33 +193,92 @@ fn utf16_head(text: &str, max: usize) -> &str {
     text
 }
 
-/// The quote of `selected`, which starts at byte `start` of a message's `text`, with its
-/// place and the text around it. Whitespace around the selection is left out.
+/// The quote of `selected`, between `before` and `after` in a message's text as it reads, with
+/// its place and the text around it. Whitespace around the selection is left out.
 pub(crate) fn quote_of(
-    text: &str,
-    start: usize,
+    before: &str,
     selected: &str,
+    after: &str,
     ids: (&str, &str, &str),
 ) -> Option<Quote> {
-    let leading = selected.len() - selected.trim_start().len();
     let quoted = selected.trim();
     if quoted.is_empty() || utf16_len(quoted) > MAX_QUOTE_LENGTH {
         return None;
     }
-    let start = start + leading;
-    let end = start + quoted.len();
-    let (before, after) = (text.get(..start)?, text.get(end..)?);
+    let leading = &selected[..selected.len() - selected.trim_start().len()];
+    let trailing = &selected[selected.trim_end().len()..];
+    let before = format!("{before}{leading}");
+    let after = format!("{trailing}{after}");
     let (environment_id, thread_id, message_id) = ids;
     Some(Quote {
         environment_id: environment_id.to_string(),
         thread_id: thread_id.to_string(),
         message_id: message_id.to_string(),
         text: quoted.to_string(),
-        start: utf16_len(before),
-        end: utf16_len(before) + utf16_len(quoted),
-        prefix: utf16_tail(before, CONTEXT_LENGTH).to_string(),
-        suffix: utf16_head(after, CONTEXT_LENGTH).to_string(),
+        start: utf16_len(&before),
+        end: utf16_len(&before) + utf16_len(quoted),
+        prefix: utf16_tail(&before, CONTEXT_LENGTH).to_string(),
+        suffix: utf16_head(&after, CONTEXT_LENGTH).to_string(),
     })
+}
+
+/// The text a range of a message's Markdown reads as, as T3 quotes it: its words and code
+/// without their marks, a line break between blocks.
+pub(crate) fn rendered_text(source: &str, range: Range<usize>) -> String {
+    use pulldown_cmark::{Event, Options, Parser, TagEnd};
+    let mut text = String::new();
+    // A block's end breaks the line before what follows it, not after the last block.
+    let break_line = std::cell::Cell::new(false);
+    let push = |text: &mut String, part: &str| {
+        if break_line.take() && !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(part);
+    };
+    let overlap = |event: &Range<usize>| event.start.max(range.start)..event.end.min(range.end);
+    let inside = |event: &Range<usize>| event.start >= range.start && event.end <= range.end;
+    let options =
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    for (event, event_range) in Parser::new_ext(source, options).into_offset_iter() {
+        let part = overlap(&event_range);
+        match event {
+            Event::Text(words) if part.start < part.end => {
+                // Text is the source itself, unless an escape or an entity changed it.
+                match source.get(event_range.clone()) {
+                    Some(raw) if raw == words.as_ref() => push(&mut text, &source[part]),
+                    _ => push(&mut text, &words),
+                }
+            }
+            Event::Code(code) if part.start < part.end => {
+                // The span's range takes in its backticks; only the code between them counts.
+                let raw = &source[event_range.clone()];
+                match raw.find(code.as_ref()) {
+                    Some(offset) => {
+                        let content =
+                            event_range.start + offset..event_range.start + offset + code.len();
+                        let part = overlap(&content);
+                        if part.start < part.end {
+                            push(&mut text, &source[part]);
+                        }
+                    }
+                    None => push(&mut text, &code),
+                }
+            }
+            Event::SoftBreak if inside(&event_range) => push(&mut text, " "),
+            Event::HardBreak if inside(&event_range) => push(&mut text, "\n"),
+            Event::End(
+                TagEnd::Paragraph
+                | TagEnd::Heading(_)
+                | TagEnd::Item
+                | TagEnd::CodeBlock
+                | TagEnd::TableRow,
+            ) if event_range.end > range.start && event_range.end <= range.end => {
+                break_line.set(true)
+            }
+            _ => {}
+        }
+    }
+    text
 }
 
 /// A quote as a Markdown block quote, for a server whose environment id mustr hasn't read.
@@ -379,17 +438,23 @@ impl ThreadView {
         let ItemKind::AssistantMessage { text, .. } = &item.kind else {
             return;
         };
-        let (start, selected) = match &pressed {
-            Some(selection) => (selection.start, selection.text.as_str()),
-            None => (0, text.as_str()),
+        let range = match &pressed {
+            Some(selection) => selection.start..selection.start + selection.text.len(),
+            None => 0..text.len(),
         };
+        // What the message reads as, without its Markdown.
+        let (before, selected, after) = (
+            rendered_text(text, 0..range.start),
+            rendered_text(text, range.clone()),
+            rendered_text(text, range.end..text.len()),
+        );
         let environment_id = self.server_environment_id(cx);
         let ids = (
             environment_id.as_deref().unwrap_or_default(),
             state.thread_id(),
             item.entry_id.as_str(),
         );
-        let Some(quote) = quote_of(text, start, selected, ids) else {
+        let Some(quote) = quote_of(&before, &selected, &after, ids) else {
             return;
         };
         let (insertion, chip) = if environment_id.is_some() {
@@ -479,13 +544,24 @@ mod tests {
     }
 
     #[test]
+    fn quotes_are_what_the_message_reads_as() {
+        let text = "Use **backoff** in `retry.rs`:\n\n- doubles each\n  time\n- [caps](https://x.dev) at 5\n";
+        assert_eq!(
+            rendered_text(text, 0..text.len()),
+            "Use backoff in retry.rs:\ndoubles each time\ncaps at 5"
+        );
+        // A selection that starts inside the code span keeps only the code's part.
+        let start = text.find("try.rs").unwrap();
+        assert_eq!(rendered_text(text, start..start + 8), "try.rs:");
+        assert_eq!(rendered_text(text, 0..4), "Use ");
+    }
+
+    #[test]
     fn a_quote_keeps_its_place_and_whats_around_it() {
-        let text = "Done. `withRetry` now wraps `post()`, with backoff — 💡 tip.";
-        let start = text.find("`withRetry`").unwrap();
         let quoted = quote_of(
-            text,
-            start - 1,
+            "Done.",
             " `withRetry` now wraps ",
+            "`post()`, with backoff — 💡 tip.",
             ("env-1", "thread-1", "message-i5"),
         )
         .unwrap();
@@ -495,8 +571,8 @@ mod tests {
         assert_eq!(quoted.suffix, " `post()`, with backoff — 💡 tip");
         assert_eq!(utf16_len(&quoted.suffix), CONTEXT_LENGTH);
         // Nothing, or too much, isn't quoted.
-        assert_eq!(quote_of(text, 0, "  ", ("e", "t", "m")), None);
+        assert_eq!(quote_of("", "  ", "", ("e", "t", "m")), None);
         let long = "x".repeat(MAX_QUOTE_LENGTH + 1);
-        assert_eq!(quote_of(&long, 0, &long, ("e", "t", "m")), None);
+        assert_eq!(quote_of("", &long, "", ("e", "t", "m")), None);
     }
 }

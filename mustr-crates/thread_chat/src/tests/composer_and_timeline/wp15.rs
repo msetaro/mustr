@@ -138,9 +138,10 @@ async fn quote_puts_t3s_citation_of_the_response_in_the_composer(cx: &mut TestAp
     cx.run_until_parked();
     cx.simulate_click(quote.center(), gpui::Modifiers::none());
     cx.run_until_parked();
+    // What the response reads as, without its Markdown marks, as T3 quotes it.
     let link = "[Assistant quote](t3-citation://v1/env-1/thread-1/message-i5?\
-                text=Done.+%60withRetry%60+now+wraps+%60post%28%29%60.\
-                &start=0&end=37&prefix=&suffix=)";
+                text=Done.+withRetry+now+wraps+post%28%29.\
+                &start=0&end=33&prefix=&suffix=)";
     assert_eq!(composer_text(&view, cx), format!("Why this way? {link} "));
 
     cx.dispatch_action(SendMessage);
@@ -170,7 +171,7 @@ async fn quote_takes_whats_selected_in_the_response(cx: &mut TestAppContext) {
     assert_eq!(
         composer_text(&view, cx),
         "[Assistant quote](t3-citation://v1/env-1/thread-1/message-i5?\
-         text=%60withRetry%60&start=6&end=17&prefix=Done.+&suffix=+now+wraps+%60post%28%29%60.) "
+         text=withRetry&start=6&end=15&prefix=Done.+&suffix=+now+wraps+post%28%29.) "
     );
 }
 
@@ -184,7 +185,7 @@ async fn without_the_environment_a_quote_is_a_block_quote(cx: &mut TestAppContex
     cx.run_until_parked();
     assert_eq!(
         composer_text(&view, cx),
-        "> Done. `withRetry` now wraps `post()`.\n\n"
+        "> Done. withRetry now wraps post().\n\n"
     );
 }
 
