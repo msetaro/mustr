@@ -1498,25 +1498,19 @@ fn recent_threads(shell: &Shell, limit: usize) -> Vec<ThreadRow> {
     threads
         .into_iter()
         .take(limit)
-        .map(|thread| {
-            let status = match serde_json::to_value(&thread.status) {
-                Ok(serde_json::Value::String(status)) => status,
-                _ => String::new(),
-            };
-            ThreadRow {
-                id: thread.id.clone(),
-                title: if thread.title.trim().is_empty() {
-                    "Untitled thread".to_string()
-                } else {
-                    thread.title.clone()
-                },
-                status: ThreadStatus::from_shell(status, thread.pending_runtime_request.is_some()),
-                branch: thread.branch.clone(),
-                project: shell
-                    .projects
-                    .get(&thread.project_id)
-                    .map(|project| project.title.clone()),
-            }
+        .map(|thread| ThreadRow {
+            id: thread.id.clone(),
+            title: if thread.title.trim().is_empty() {
+                "Untitled thread".to_string()
+            } else {
+                thread.title.clone()
+            },
+            status: ThreadStatus::of(thread),
+            branch: thread.branch.clone(),
+            project: shell
+                .projects
+                .get(&thread.project_id)
+                .map(|project| project.title.clone()),
         })
         .collect()
 }
@@ -1571,6 +1565,8 @@ fn agents_notice(providers: &[types::ServerProvider]) -> Option<String> {
 fn status_color(status: &ThreadStatus) -> Color {
     match status {
         ThreadStatus::NeedsInput => Color::Warning,
+        // Waiting on another thread or on background work is quiet, as in T3.
+        ThreadStatus::Working(status) if status == "waiting" => Color::Muted,
         ThreadStatus::Working(_) => Color::Accent,
         ThreadStatus::Failed => Color::Error,
         ThreadStatus::Settled(_) => Color::Muted,
@@ -1862,7 +1858,7 @@ mod tests {
                 ThreadRow {
                     id: "newest".into(),
                     title: "newest".into(),
-                    status: ThreadStatus::Working("running".into()),
+                    status: ThreadStatus::Working("working".into()),
                     branch: Some("t3/newest".into()),
                     project: Some("mustr".into()),
                 },
@@ -1890,6 +1886,17 @@ mod tests {
             ]
         );
         assert_eq!(threads[1].status.label(), "needs input");
+        // A thread whose last run completed while its agent still waits on background work
+        // reads as waiting, as in the threads sidebar and the thread's header.
+        let mut watching = thread("watching", "completed", "2026-10-27T13:00:00.000Z");
+        watching["pendingBackgroundTasks"] = json!([{
+            "taskId": "task-1", "kind": "background_task",
+            "description": "Watching pull request #80"
+        }]);
+        assert_eq!(
+            recent_threads(&self::shell(vec![watching]), 1)[0].status,
+            ThreadStatus::Working("waiting".into())
+        );
         assert_eq!(
             ThreadStatus::from_shell("rolled_back".into(), false).label(),
             "rolled back"
