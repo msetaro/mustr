@@ -615,9 +615,9 @@ fn toolbar_at(
     (shown, entries)
 }
 
-/// In a narrow window at twice mustr's design size, the toolbar doesn't fit: Link PR, Open in,
-/// and Terminal go into its "…" menu first, while Review changes and Commit stay, and the
-/// branch shrinks.
+/// In a narrow window at twice mustr's design size, the toolbar doesn't fit: Link PR, Terminal,
+/// and Open in go into its "…" menu first, while Review changes and Commit stay, and the branch
+/// shrinks.
 #[gpui::test]
 async fn the_toolbar_moves_what_doesnt_fit_into_its_menu(cx: &mut TestAppContext) {
     let backend = RecordingBackend::with_shell(shell(vec![shell_thread(json!({}))]));
@@ -667,7 +667,7 @@ async fn the_toolbar_moves_what_doesnt_fit_into_its_menu(cx: &mut TestAppContext
 
     // A 14" MacBook's window with the threads beside the thread: Link PR goes into the menu
     // first.
-    let (shown, entries) = toolbar_at(&toolbar, 800., cx);
+    let (shown, entries) = toolbar_at(&toolbar, 850., cx);
     assert_eq!(
         shown,
         [
@@ -681,18 +681,16 @@ async fn the_toolbar_moves_what_doesnt_fit_into_its_menu(cx: &mut TestAppContext
     );
     assert_eq!(entries, [OverflowEntry::LinkPullRequest]);
 
-    // Narrower, Open in goes; Terminal is narrow enough to stay where Open in isn't.
-    let (shown, entries) = toolbar_at(&toolbar, 700., cx);
-    assert!(!shown.contains(&"thread-toolbar-open-in"), "{shown:?}");
-    assert!(shown.contains(&"thread-toolbar-terminal"), "{shown:?}");
+    // Narrower, Terminal goes, then Open in, while Review changes and Commit stay; the menu has
+    // the actions in the toolbar's order.
+    let (shown, entries) = toolbar_at(&toolbar, 750., cx);
+    assert!(!shown.contains(&"thread-toolbar-terminal"), "{shown:?}");
+    assert!(shown.contains(&"thread-toolbar-open-in"), "{shown:?}");
     assert_eq!(
         entries,
-        [OverflowEntry::LinkPullRequest, OverflowEntry::OpenIn]
+        [OverflowEntry::LinkPullRequest, OverflowEntry::Terminal]
     );
-
-    // Narrower still, Terminal goes too, while Review changes and Commit stay; the menu has the
-    // actions in the toolbar's order.
-    let (shown, entries) = toolbar_at(&toolbar, 600., cx);
+    let (shown, entries) = toolbar_at(&toolbar, 650., cx);
     assert_eq!(
         shown,
         [
