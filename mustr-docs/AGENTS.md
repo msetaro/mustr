@@ -17,6 +17,13 @@ Follow these sections of Zed's `.rules`: "Rust coding guidelines", "Timers in te
 
 Ignore the rest of `.rules`, which is for Zed's own repository: the README banner rule, "Pull request hygiene" (Zed's release-notes format), "Crash Investigation" (Zed's Sentry), and "Rules Hygiene".
 
+## Settings are UI, never JSON
+
+The user changes every setting in mustr's Settings page (`mustr-crates/mustr/src/settings_page.rs`: ⌘,, the rail's gear, mustr › Settings…), which also holds T3 Code's settings and the keyboard shortcuts. `settings.json` and `keymap.json` are only where the page keeps them.
+
+- A new setting gets a control in the right section of the page, in the same change (`settings_page/rows.rs` has the rows and controls). Zed's settings are written with `settings::update_settings_file`; mustr's own keys in the settings file with `app_settings::update_mustr_setting`.
+- Never add a way to open either file, and don't tell the user to edit one, in the UI, toasts, errors, or docs: point at the Settings page. Zed actions that open them are hidden or open the page (`hidden_actions.rs`, `window.rs`).
+
 ## Building and testing
 
 - Per crate: `cargo test -p <crate>`, `cargo clippy -p <crate> --all-targets`, and `cargo fmt -p <crate>`. Fix every warning.
@@ -39,7 +46,7 @@ Ignore the rest of `.rules`, which is for Zed's own repository: the README banne
     - There's no pairing: it signs in with the desktop bootstrap token (`t3_runtime::engine`).
     - It's also the fallback when the installed T3 Code can't be used ("Use mustr's own engine").
   - `external`: `--t3-server <url>` (or `MUSTR_T3_SERVER`, or `"t3": {"url"}`) connects to that server, paired by pasting a credential.
-  - **Saved servers** (`mustr-crates/mustr/src/servers.rs`): the title bar's connection chip switches between the installed T3 Code, mustr's own engine, and servers saved by name and URL (one connection at a time). Each server keeps its own token under its URL. The last pick is kept in `<data dir>/config/servers.json` and used at launch unless a flag, an environment variable, or `"t3": {"mode"}` picks the mode, so test runs that pass `--t3-mode` aren't affected by it.
+  - **Saved servers** (`mustr-crates/mustr/src/servers.rs`): the title bar's connection chip switches between the installed T3 Code, mustr's own engine, and servers saved by name and URL (one connection at a time). Each server keeps its own token under its URL. The last pick is kept in `<data dir>/config/servers.json` and used at launch unless a flag, an environment variable, or `"t3": {"mode"}` picks the mode, so test runs that pass `--t3-mode` aren't affected by it. Settings › Connection switches the same way, and removes a `"t3"` pin from the settings so the pick lasts.
 - `mustr-crates/t3_runtime` gets and runs T3 releases: it picks the asset, checks `SHA256SUMS`, installs with T3's installer layout, and manages the engine process, the user's install, and its service.
   - Its `real_engine` test is ignored by default. It downloads the pinned release (about 100 MB) into a temp dir, starts it, and signs in: `cargo test -p t3_runtime --test real_engine -- --ignored --nocapture`.
   - `MUSTR_T3_TEST_VERSIONS_DIR=<dir>` keeps the download between runs. `MUSTR_T3_RELEASE_BASE_URL` points downloads at a mirror.

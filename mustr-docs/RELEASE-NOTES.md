@@ -6,6 +6,23 @@
   big on a laptop. The default `ui_font_size` and `buffer_font_size` are 13 again. If you zoomed in
   0.1.0, mustr keeps your size; ⌘0 goes back to the new default. ⌘= and ⌘- still zoom the whole
   app, about 10% a step.
+- **Settings, all in the app.** ⌘, (or mustr › Settings…, or the gear at the bottom of the rail)
+  opens one Settings page instead of a settings file. Its sections: General (theme, zoom, code
+  size, fonts, what closing the last window does), Editor, Terminal, Agents and threads, Connection,
+  Updates, and Keyboard shortcuts. The search box finds a setting in any section, and changes apply
+  at once.
+- **T3 Code's settings moved into it.** They're the "T3 Code on <your Mac>" part of Agents and
+  threads, next to mustr's own (follow-ups, which notifications to show, sounds, and a new switch
+  for the count on the Dock), with worktree cleanup and your source control accounts. The rail's
+  T3 Code settings button is gone; "mustr: open t3 settings" in the palette opens that part.
+- **Keyboard shortcuts** (Key Bindings…, or Settings › Keyboard shortcuts): every shortcut and
+  every action, searchable. Change a shortcut by pressing the new keys, give an action one, remove
+  one, or put an action's back the way mustr has it. ⌘↩ on a command in the palette opens its
+  shortcut here.
+- **No JSON.** mustr no longer opens `settings.json` or `keymap.json`: it keeps your choices there,
+  but you change them in Settings. If one of them can't be read, Settings says why and can start it
+  over from mustr's defaults, keeping the old file next to it as `.bak`.
+- **A gear** for Settings on the rail, in place of the icon that looked like a sun.
 
 ## 0.1.0
 
@@ -110,5 +127,6 @@ the first launch.
 mustr checks for a newer release 20 seconds after it starts and every 4 hours. It downloads it,
 checks its signature and checksum, and swaps it in while you work; then the status bar offers
 **Restart to update**. mustr › Check for Updates… checks right away, and
-`"updates": {"enabled": false}` in the settings file turns the automatic checks off.
+`"updates": {"enabled": false}` in the settings file turns the automatic checks off (from 0.1.1:
+Settings › Updates › Check automatically).
 `mustr-docs/MACOS.md`, "Install a release", has the details.

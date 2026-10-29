@@ -32,8 +32,8 @@ keeps working. Then the status bar shows **Restart to update**. mustr never rest
 
 - mustr › Check for Updates… (or "mustr: check for updates" in the command palette) checks now,
   and says what it found.
-- `"updates": {"enabled": false}` in the settings file stops the automatic checks; Check for
-  Updates… still works.
+- Settings › Updates › Check automatically turns the automatic checks off; Check for Updates…
+  still works. The Updates section also shows the version and checks for you.
 - The replaced app waits next to the new one as `.mustr.app.previous` (hidden) until mustr next
   starts. To go back by hand before then: quit mustr, then in that folder
   `rm -rf mustr.app && mv .mustr.app.previous mustr.app`.
@@ -88,10 +88,12 @@ A checklist for the first launch of a release, such as on a work laptop.
    Mac inherit; **Trust Only This Worktree** trusts just the one.
 7. **Zoom:** ⌘= and ⌘- make everything bigger or smaller, about 10% a step, and ⌘0 goes back to
    the default size. mustr remembers the size you pick.
-8. **Settings and logs** are in `~/Library/Application Support/mustr/`: `config/settings.json`
-   (⌘, opens it), `logs/mustr.log` (with `logs/mustr.log.old` before it), and
-   `logs/t3-engine.log` for mustr's own engine. T3 Code's own log is where `t3 service status`
-   says.
+8. **Settings** (⌘,, mustr › Settings…, or the gear at the bottom of the rail) has every setting:
+   the theme, zoom and fonts, the editor and terminals, notifications, T3 Code's own settings for
+   new threads, the server mustr connects to, updates, and keyboard shortcuts. Search finds a
+   setting in any section. **Logs** are in `~/Library/Application Support/mustr/logs/`:
+   `mustr.log` (with `mustr.log.old` before it), and `t3-engine.log` for mustr's own engine. T3
+   Code's own log is where `t3 service status` says.
 9. **Reporting a problem:** say what you did and what you saw (a screenshot helps), and send:
    - the version and server line: the `starting mustr` line and the `Connected to T3
      environment …` line from `mustr.log`;
@@ -168,20 +170,26 @@ cargo run -p mustr
   Double-clicking it does what System Settings › Desktop & Dock › "Double-click a window's title
   bar to" says. mustr draws no window buttons of its own on macOS.
 - **Keys.** mustr loads Zed's macOS keymap (`assets/keymaps/default-macos.json`), so shortcuts use
-  ⌘: ⌘⇧P opens the command palette, and ⌘, opens the settings file. In a thread's composer, ↩ or
+  ⌘: ⌘⇧P opens the command palette, and ⌘, opens Settings. In a thread's composer, ↩ or
   ⌘↩ sends, ⇧↩ adds a new line, and ⌘⇧↩ steers the running agent. In a review, `c` comments on
   the selected lines, ⌘↩ adds the comment, and ⎋ cancels it.
 - **Zoom.** ⌘= (or ⌘+) and ⌘- make all of mustr bigger or smaller, about 10% a step, the way a
   browser zooms a page: text, code, and layout together. ⌘0 goes back to mustr's default size,
   `ui_font_size` and `buffer_font_size` 13, the size its designs are drawn at.
-  They work wherever the focus is. A zoom changes `ui_font_size` and `buffer_font_size` in your
-  settings file, by the same factor, so it lasts; ⌘0 removes both. The command palette has them
-  too: "mustr: zoom in", "mustr: zoom out", and "mustr: reset zoom".
+  They work wherever the focus is, and Settings › General › Zoom does the same. A zoom is saved,
+  so it lasts. Code size, beside it, changes code alone. The command palette has them too:
+  "mustr: zoom in", "mustr: zoom out", and "mustr: reset zoom".
+- **Shortcuts.** Settings › Keyboard shortcuts (or mustr › Key Bindings…) lists every shortcut.
+  Click the pencil and press the new keys to change one; the trash can removes one, and the arrow puts
+  an action's back. In the command palette, ⌘↩ on a command opens its shortcut there.
 - **Closing the last window** keeps mustr running, as other Mac apps do. Click the Dock icon to
-  open a window again. To quit instead, set `"on_last_window_closed": "quit_app"` in the settings.
+  open a window again. To quit instead, choose Quit mustr in Settings › General › When the last
+  window closes.
 - **Files.** Everything is in `~/Library/Application Support/mustr/` (`--user-data-dir <dir>`
   moves it):
-  - `config/settings.json` and `config/keymap.json`.
+  - `config/settings.json` and `config/keymap.json`, where the Settings page keeps your settings
+    and shortcuts. mustr never asks you to edit them; if one can't be read, Settings shows why and
+    can start it over (the old one stays next to it, as `.bak`).
   - `db/`, the database.
   - `logs/mustr.log`, and `logs/t3-engine.log` for mustr's own engine.
   - `t3-runtime/` and `t3-home/`, mustr's own engine, if you use it.
