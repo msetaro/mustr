@@ -11,7 +11,9 @@
 //! actions in the review's header ([`PullRequestActions`]): merging, marking ready, and closing
 //! (`pullRequests.runAction`, each asking to confirm first where T3 does), and Work on PR, which
 //! checks the pull request out for a new agent thread (`git.resolvePullRequest`, then
-//! `git.preparePullRequestThread`, then `thread_chat::NewThreadInWorktree`).
+//! `git.preparePullRequestThread`, then `thread_chat::NewThreadInWorktree`). The header lists the
+//! agent threads linked to the pull request too (`pullRequests.linkedThreads`), archived ones
+//! included, each opening its thread, as T3's `pullRequest/PullRequestThreadLinks.tsx` does.
 
 use crate::{
     inbox::{self, decode_each},
@@ -43,12 +45,14 @@ use t3_client::{
         types::{
             GitPreparePullRequestThreadInput, GitPreparePullRequestThreadInputMode,
             GitPreparePullRequestThreadResult, GitPullRequestRefInput, PullRequestAction,
-            PullRequestActionInput, PullRequestMergeMethod,
+            PullRequestActionInput, PullRequestLinkedThreadsResultThreadsItem,
+            PullRequestMergeMethod,
         },
     },
 };
 use thread_chat::{
     Access, NewThreadInWorktree, ThreadBackend, ThreadBackendExt as _, ThreadShells,
+    is_unsupported_rpc,
 };
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use ui::{Color, ContextMenu, Label, LabelCommon as _, LabelSize, prelude::*};
@@ -894,8 +898,33 @@ pub struct PullRequestActions {
     /// The state an action left the pull request in, until the review is opened again.
     state: Option<PullRequestState>,
     is_draft: Option<bool>,
+    /// The agent threads linked to the pull request, once T3 lists them.
+    linked_threads: LinkedThreads,
     menu: MenuSlot,
     _task: Option<Task<()>>,
+    _linked_threads: Task<()>,
+}
+
+/// What `pullRequests.linkedThreads` said.
+#[derive(Clone, Debug, PartialEq)]
+enum LinkedThreads {
+    Loading,
+    Loaded(Vec<PullRequestLinkedThreadsResultThreadsItem>),
+    Failed(SharedString),
+}
+
+/// A linked thread's menu entry: its title, and whether it's archived.
+pub(crate) fn linked_thread_label(thread: &PullRequestLinkedThreadsResultThreadsItem) -> String {
+    let title = thread.title.trim();
+    let title = if title.is_empty() {
+        "Untitled thread"
+    } else {
+        title
+    };
+    match thread.archived_at {
+        Some(_) => format!("{title} (archived)"),
+        None => title.to_string(),
+    }
 }
 
 impl PullRequestActions {
@@ -905,9 +934,12 @@ impl PullRequestActions {
         capabilities: PullRequestCapabilities,
         review: WeakEntity<ReviewView>,
         workspace: WeakEntity<Workspace>,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Self {
+        let linked_threads = Self::load_linked_threads(&reference, cx);
         Self {
+            linked_threads: LinkedThreads::Loading,
+            _linked_threads: linked_threads,
             merge_method: capabilities.merge_methods.first().cloned(),
             reference,
             header,
@@ -920,6 +952,90 @@ impl PullRequestActions {
             is_draft: None,
             menu: MenuSlot::default(),
             _task: None,
+        }
+    }
+
+    fn load_linked_threads(reference: &PullRequestRef, cx: &mut Context<Self>) -> Task<()> {
+        let Some(backend) = thread_chat::backend(cx) else {
+            return Task::ready(());
+        };
+        let call = backend.call::<rpc::PullRequestsLinkedThreads>(reference.clone(), Access::Read);
+        cx.spawn(async move |this, cx| {
+            let linked = match call.await {
+                Ok(result) => LinkedThreads::Loaded(result.threads),
+                // A server without the call shows nothing, as when no thread is linked.
+                Err(error) if is_unsupported_rpc(&error) => LinkedThreads::Loaded(Vec::new()),
+                Err(error) => {
+                    log::warn!("couldn't list the pull request's threads: {error:#}");
+                    LinkedThreads::Failed(format!("Couldn't load linked threads: {error:#}").into())
+                }
+            };
+            this.update(cx, |this, cx| {
+                this.linked_threads = linked;
+                cx.notify();
+            })
+            .ok();
+        })
+    }
+
+    fn deploy_threads_menu(
+        &mut self,
+        event: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let LinkedThreads::Loaded(threads) = self.linked_threads.clone() else {
+            return;
+        };
+        let workspace = self.workspace.clone();
+        let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+            menu = menu.header("Agent threads linked to this pull request");
+            for thread in threads {
+                let workspace = workspace.clone();
+                let label = linked_thread_label(&thread);
+                let title = SharedString::from(thread.title.trim().to_string());
+                menu = menu.entry(label, None, move |window, cx| {
+                    thread_chat::open_thread(
+                        thread.id.clone(),
+                        title.clone(),
+                        workspace.clone(),
+                        window,
+                        cx,
+                    );
+                });
+            }
+            menu
+        });
+        self.menu
+            .deploy(menu_position(event, window), menu, window, cx, |this| {
+                &mut this.menu
+            });
+    }
+
+    fn render_linked_threads(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        match &self.linked_threads {
+            LinkedThreads::Loading => None,
+            LinkedThreads::Loaded(threads) if threads.is_empty() => None,
+            LinkedThreads::Loaded(threads) => Some(
+                TextButton::new("pull-request-threads", "Threads")
+                    .count(threads.len().to_string())
+                    .tooltip(if threads.len() == 1 {
+                        "Linked from 1 agent thread".to_string()
+                    } else {
+                        format!("Linked from {} agent threads", threads.len())
+                    })
+                    .on_click(cx.listener(|this, event, window, cx| {
+                        this.deploy_threads_menu(event, window, cx)
+                    }))
+                    .into_any_element(),
+            ),
+            LinkedThreads::Failed(error) => Some(
+                TextButton::new("pull-request-threads", "Threads")
+                    .count("?")
+                    .tooltip(error.clone())
+                    .disabled(true)
+                    .into_any_element(),
+            ),
         }
     }
 
@@ -1196,6 +1312,7 @@ impl Render for PullRequestActions {
                         .color(Color::Muted),
                 )
             })
+            .children(self.render_linked_threads(cx))
             .when(is_open, |this| {
                 this.child(
                     SplitButton::new("pull-request-work-on", "Work on PR")
@@ -1699,6 +1816,86 @@ mod tests {
                 "worktreePath": worktree,
                 "isOnPullRequestHead": true
             })
+        }
+
+        fn actions_for(
+            backend: Arc<RecordingBackend>,
+            cx: &mut TestAppContext,
+        ) -> (Entity<PullRequestActions>, &mut gpui::VisualTestContext) {
+            init_test(backend, cx);
+            let (actions, cx) = cx.add_window_view(|_, cx| {
+                PullRequestActions::new(
+                    pull_request(),
+                    None,
+                    PullRequestCapabilities::default(),
+                    WeakEntity::new_invalid(),
+                    WeakEntity::new_invalid(),
+                    cx,
+                )
+            });
+            cx.run_until_parked();
+            (actions, cx)
+        }
+
+        #[gpui::test]
+        async fn the_header_lists_the_pull_requests_threads(cx: &mut TestAppContext) {
+            let backend = RecordingBackend::with_shell(shell(Vec::new()));
+            backend.respond(
+                "pullRequests.linkedThreads",
+                Ok(json!({ "threads": [
+                    { "id": "t1", "projectId": "project-1", "title": "Greet the world",
+                      "archivedAt": null },
+                    { "id": "t2", "projectId": "project-1", "title": "  ",
+                      "archivedAt": "2026-10-27T09:00:00.000Z" }
+                ] })),
+            );
+            let (actions, cx) = actions_for(backend.clone(), cx);
+            assert_eq!(
+                backend.calls_to("pullRequests.linkedThreads"),
+                [Call {
+                    tag: "pullRequests.linkedThreads".to_string(),
+                    payload: json!({
+                        "projectId": "project-1", "host": "github.com",
+                        "repository": "acme/hello", "number": 7
+                    }),
+                    access: Access::Read,
+                }]
+            );
+            actions.read_with(cx, |actions, _| {
+                let LinkedThreads::Loaded(threads) = &actions.linked_threads else {
+                    panic!("the threads loaded: {:?}", actions.linked_threads);
+                };
+                let labels = threads.iter().map(linked_thread_label).collect::<Vec<_>>();
+                assert_eq!(labels, ["Greet the world", "Untitled thread (archived)"]);
+            });
+            assert!(actions.update(cx, |actions, cx| {
+                actions.render_linked_threads(cx).is_some()
+            }));
+        }
+
+        #[gpui::test]
+        async fn no_linked_threads_show_nothing(cx: &mut TestAppContext) {
+            let backend = RecordingBackend::with_shell(shell(Vec::new()));
+            backend.respond("pullRequests.linkedThreads", Ok(json!({ "threads": [] })));
+            let (actions, cx) = actions_for(backend.clone(), cx);
+            assert!(actions.update(cx, |actions, cx| {
+                actions.render_linked_threads(cx).is_none()
+            }));
+
+            let backend = RecordingBackend::with_shell(shell(Vec::new()));
+            backend.respond(
+                "pullRequests.linkedThreads",
+                Err("Could not load linked threads."),
+            );
+            let (actions, cx) = actions_for(backend, cx);
+            actions.read_with(cx, |actions, _| {
+                assert_eq!(
+                    actions.linked_threads,
+                    LinkedThreads::Failed(
+                        "Couldn't load linked threads: Could not load linked threads.".into()
+                    )
+                );
+            });
         }
 
         #[gpui::test]
