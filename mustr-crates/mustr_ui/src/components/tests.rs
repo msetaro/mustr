@@ -275,3 +275,75 @@ fn a_pending_tooltip_stays_off_the_menu_its_button_opened(cx: &mut TestAppContex
     init_test(cx);
     assert_eq!(tooltips_after_a_quick_click(true, cx), 0);
 }
+
+/// A toolbar's buttons in a row: labelled, icon-only, and quiet.
+struct ToolbarRow;
+
+impl Render for ToolbarRow {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let icon = || crate::MustrIcon::Terminal.icon().size(ui::IconSize::Small);
+        let noop = |_: &gpui::ClickEvent, _: &mut Window, _: &mut gpui::App| {};
+        ui::h_flex()
+            .p_4()
+            .gap_2()
+            .child(
+                div()
+                    .debug_selector(|| "text".into())
+                    .child(TextButton::new("text", "Review changes").on_click(noop)),
+            )
+            .child(
+                div().debug_selector(|| "split".into()).child(
+                    SplitButton::new("split", "Commit")
+                        .style(ButtonStyle::Primary)
+                        .on_click(noop)
+                        .on_menu_click(noop),
+                ),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "icon".into())
+                    .child(IconOnlyButton::new("icon", icon()).on_click(noop)),
+            )
+            .child(
+                div().debug_selector(|| "icon-split".into()).child(
+                    IconSplitButton::new("icon-split", icon())
+                        .on_click(noop)
+                        .on_menu_click(noop),
+                ),
+            )
+            .child(
+                div().debug_selector(|| "quiet".into()).child(
+                    QuietButton::new("quiet", "main")
+                        .count("3")
+                        .menu_indicator(true)
+                        .on_click(noop),
+                ),
+            )
+    }
+}
+
+/// Icon-only and quiet buttons are exactly as tall as labelled ones, at mustr's design size and
+/// zoomed, so a toolbar of them lines up.
+#[gpui::test]
+fn toolbar_buttons_are_one_height(cx: &mut TestAppContext) {
+    init_test(cx);
+    let (_, cx) = cx.add_window_view(|_, _| ToolbarRow);
+    for rem_size in [13., 26.] {
+        cx.update(|window, _| {
+            window.set_rem_size(px(rem_size));
+            window.refresh();
+        });
+        cx.run_until_parked();
+        let mut height = |selector: &'static str| {
+            cx.debug_bounds(selector)
+                .unwrap_or_else(|| panic!("{selector} should be rendered"))
+                .size
+                .height
+        };
+        let text = height("text");
+        assert!(text > px(rem_size), "{text:?} at {rem_size}");
+        for selector in ["split", "icon", "icon-split", "quiet"] {
+            assert_eq!(height(selector), text, "{selector} at {rem_size}");
+        }
+    }
+}
