@@ -12,17 +12,26 @@ const ICON_DIR: &str = "icons/mustr/";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MustrIcon {
     Agent,
+    /// A pencil, for the rail's Edit.
+    Edit,
     Inbox,
     PullRequest,
     Settings,
 }
 
 impl MustrIcon {
-    const ALL: [Self; 4] = [Self::Agent, Self::Inbox, Self::PullRequest, Self::Settings];
+    const ALL: [Self; 5] = [
+        Self::Agent,
+        Self::Edit,
+        Self::Inbox,
+        Self::PullRequest,
+        Self::Settings,
+    ];
 
     pub fn path(self) -> &'static str {
         match self {
             Self::Agent => "icons/mustr/agent.svg",
+            Self::Edit => "icons/mustr/edit.svg",
             Self::Inbox => "icons/mustr/inbox.svg",
             Self::PullRequest => "icons/mustr/pull_request.svg",
             Self::Settings => "icons/mustr/settings.svg",
@@ -32,6 +41,7 @@ impl MustrIcon {
     fn svg(self) -> &'static str {
         match self {
             Self::Agent => include_str!("../assets/icons/agent.svg"),
+            Self::Edit => include_str!("../assets/icons/edit.svg"),
             Self::Inbox => include_str!("../assets/icons/inbox.svg"),
             Self::PullRequest => include_str!("../assets/icons/pull_request.svg"),
             Self::Settings => include_str!("../assets/icons/settings.svg"),
