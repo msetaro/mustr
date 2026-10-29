@@ -53,5 +53,18 @@
     "mode": "dark",
     "light": "mustr Light",
     "dark": "mustr Dark"
+  },
+  // Reviews show the theme's syntax colors as they are. Zed lightens or darkens
+  // text drawn over a highlight to keep it readable, which recolors the changed
+  // words in a diff (their word highlights), the ones a reviewer reads most.
+  "minimum_contrast_for_highlights": 0,
+  // The languages mustr adds (`mustr_languages`) are highlighted, with no
+  // language servers. Zed attaches Tailwind's, ESLint's and vtsls's servers to
+  // these by name, so they're turned off here.
+  "languages": {
+    "HTML": { "language_servers": [] },
+    "PHP": { "language_servers": [] },
+    "Svelte": { "language_servers": [] },
+    "Vue.js": { "language_servers": [] }
   }
 }

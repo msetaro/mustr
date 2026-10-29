@@ -1,0 +1,61 @@
+name = "Elixir"
+grammar = "elixir"
+path_suffixes = ["ex", "exs", "mix.lock"]
+first_line_pattern = '^#!.*\belixir\b'
+line_comments = ["# "]
+autoclose_before = ";:.,=}])>"
+brackets = [
+    { start = "{", end = "}", close = true, newline = true, not_in = ["sigil_curly"] },
+    { start = "[", end = "]", close = true, newline = true, not_in = ["sigil_square"] },
+    { start = "(", end = ")", close = true, newline = true, not_in = ["sigil_round"] },
+    { start = "<<", end = ">>", close = false, newline = true },
+    { start = "\"\"\"", end = "\n\"\"\"", close = true, newline = true, not_in = [
+        "comment",
+        "string",
+        "quoted_atom",
+        "sigil_quote",
+    ] },
+    { start = "\"", end = "\"", close = true, newline = false, not_in = [
+        "comment",
+        "string",
+        "quoted_atom",
+        "sigil_quote",
+    ] },
+    { start = "'''", end = "\n'''", close = true, newline = true, not_in = [
+        "comment",
+        "string",
+        "quoted_atom",
+        "sigil_quote",
+    ] },
+    { start = "'", end = "'", close = true, newline = false, not_in = [
+        "comment",
+        "string",
+        "quoted_atom",
+        "sigil_quote",
+    ] },
+]
+tab_size = 2
+decrease_indent_pattern = '^\s*(after|catch|else|rescue)$'
+scope_opt_in_language_servers = [
+    "tailwindcss-language-server",
+    "emmet-language-server",
+]
+
+[overrides.heex]
+opt_into_language_servers = [
+    "tailwindcss-language-server",
+    "emmet-language-server",
+]
+
+[overrides.string]
+completion_query_characters = ["-"]
+opt_into_language_servers = ["tailwindcss-language-server"]
+
+[overrides.identifier]
+word_characters = ["!", "?", "@"]
+
+[overrides.char]
+word_characters = ["\\"]
+
+[overrides.capture]
+word_characters = ["&"]

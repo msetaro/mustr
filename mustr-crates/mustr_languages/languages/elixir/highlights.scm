@@ -1,0 +1,447 @@
+; Punctuations
+"%" @punctuation
+
+; Delimiters
+[
+  ","
+  ";"
+] @punctuation.delimiter
+
+; Tuples
+(tuple
+  "{" @punctuation.bracket
+  "}" @punctuation.bracket)
+
+; Maps
+(map
+  "{" @punctuation.bracket
+  "}" @punctuation.bracket)
+
+; String interpolations
+(interpolation
+  "#{" @punctuation.special
+  "}" @punctuation.special)
+
+; Lists
+(list
+  "[" @punctuation.bracket
+  "]" @punctuation.bracket)
+
+; Access calls
+(access_call
+  "[" @punctuation.bracket
+  "]" @punctuation.bracket)
+
+; Blocks
+(block
+  "(" @punctuation.bracket
+  ")" @punctuation.bracket)
+
+; Function argument blocks
+(arguments
+  "(" @punctuation.bracket
+  ")" @punctuation.bracket)
+
+; Capture operator blocks
+(unary_operator
+  operator: "&"
+  "(" @punctuation.bracket
+  ")" @punctuation.bracket)
+
+; Bitstrings
+(bitstring
+  "<<" @punctuation.bracket
+  ">>" @punctuation.bracket)
+
+; Comments
+(comment) @comment
+
+; Escape characters (e.g. `\s`, `\n`)
+(escape_sequence) @string.escape
+
+; Atom literals
+[
+  (atom)
+  (quoted_atom)
+  (keyword)
+  (quoted_keyword)
+] @string.special.symbol
+
+; Boolean literals
+(boolean) @boolean
+
+; Nil literal
+(nil) @constant.builtin
+
+; Number literals
+[
+  (integer)
+  (float)
+] @number
+
+; String literals
+[
+  (string)
+  (charlist)
+] @string
+
+; Char literals (e.g. `?a`, `?{`)
+(char) @constant.char
+
+; Modules
+(alias) @type @module
+
+; Erlang modules
+(call
+  target: (dot
+    left: [
+      (atom)
+      (quoted_atom)
+    ] @type @module))
+
+; Structs
+(struct
+  [
+    (alias)
+    (atom)
+    (quoted_atom)
+  ] @type @module.struct)
+
+; Regular identifiers
+(identifier) @variable
+
+; Unused identifiers
+((identifier) @comment.unused
+  (#match? @comment.unused "^_"))
+
+; Operator identifiers
+(operator_identifier) @operator
+
+; Unary operators (`@/1, `+/1`, `-/1`, `!/1`, `^/1`, `not/1`, `&/1`, `.../1`)
+(unary_operator
+  operator: _ @operator)
+
+; Binary operators (e.g. `+/2`, `++/2`, `<>/2`, `in/2`)
+(binary_operator
+  operator: _ @operator)
+
+; Dot operator (`.`)
+(dot
+  operator: _ @operator)
+
+; Stab clause operator (`->`)
+(stab_clause
+  operator: _ @operator)
+
+; Sigils
+(sigil) @string.special
+
+; Sigil modifiers
+(sigil_modifiers) @label @modifier
+
+; String/charlist sigils
+(sigil
+  (sigil_name) @_sigil_name
+  (#any-of? @_sigil_name "C" "c" "S" "s")) @string
+
+; Wordlist sigils
+(sigil
+  (sigil_name) @_sigil_name
+  (quoted_content)? @string
+  (#any-of? @_sigil_name "W" "w")) @punctuation.bracket
+
+; Wordlist sigils with atom modifier
+(sigil
+  (sigil_name) @_sigil_name
+  (quoted_content) @string.special.symbol
+  (sigil_modifiers) @_sigil_modifier
+  (#eq? @_sigil_modifier "a")
+  (#any-of? @_sigil_name "W" "w"))
+
+; Regex sigils
+(sigil
+  (sigil_name) @_sigil_name
+  (sigil_modifiers)? @keyword.operator.regex
+  (#any-of? @_sigil_name "R" "r")) @string.regex
+
+; Phoenix HEEx template sigil
+(sigil
+  (sigil_name) @_sigil_name
+  (quoted_content) @embedded
+  (#eq? @_sigil_name "H"))
+
+; Hologram HOLO template sigil
+(sigil
+  (sigil_name) @_sigil_name
+  (quoted_content) @embedded
+  (#eq? @_sigil_name "HOLO"))
+
+; Jason sigils
+(sigil
+  (sigil_name) @_sigil_name
+  (quoted_content) @embedded
+  (#any-of? @_sigil_name "J" "j"))
+
+; Function/macro calls (with parentheses)
+(call
+  target: [
+    (identifier) @function
+    (dot
+      right: (identifier) @function)
+  ]
+  (#not-match? @function "^_"))
+
+; Map dot field access
+(call
+  target: (dot
+    right: [
+      (identifier)
+      (string)
+    ] @property) .)
+
+; Remote function/macro calls without parentheses
+(call
+  target: (dot
+    left: [
+      (alias)
+      (atom)
+      (quoted_atom)
+    ]
+    right: [
+      (identifier) @function
+      ((identifier) @comment.unused
+        (#match? @comment.unused "^_"))
+    ]) .)
+
+; Parameter placeholders when capturing anonymous functions
+(unary_operator
+  operator: "&" @variable.parameter
+  operand: (integer) @variable.parameter)
+
+; Capture local functions
+(unary_operator
+  operator: "&"
+  operand: [
+    (identifier) @function
+    (binary_operator
+      left: (identifier) @function
+      operator: "/")
+  ]
+  (#not-match? @function "^_"))
+
+; Capture remote Erlang functions
+(unary_operator
+  operator: "&"
+  operand: [
+    (atom)
+    (quoted_atom)
+  ] @type @module)
+
+; Capture functions from a map field/variable holding a module
+(unary_operator
+  operator: "&"
+  operand: [
+    (call
+      target: (dot
+        right: [
+          (identifier) @function
+          ((identifier) @comment.unused
+            (#match? @comment.unused "^_"))
+        ]))
+    (binary_operator
+      left: (call
+        target: (dot
+          right: [
+            (identifier) @function
+            ((identifier) @comment.unused
+              (#match? @comment.unused "^_"))
+          ]))
+      operator: "/")
+  ])
+
+; Piping into a local function/macro that has no parentheses
+(binary_operator
+  operator: "|>"
+  right: (identifier) @function
+  (#not-match? @function "^_"))
+
+; Piping into a remote Erlang function
+(binary_operator
+  operator: "|>"
+  right: [
+    (atom)
+    (quoted_atom)
+  ] @type @module)
+
+; Piping into a map field/variable holding a module that has no parentheses
+(binary_operator
+  operator: "|>"
+  right: (call
+    target: (dot
+      right: [
+        (identifier) @function
+        ((identifier) @comment.unused
+          (#match? @comment.unused "^_"))
+      ])))
+
+; Function/macro definitions
+(call
+  target: (identifier) @keyword.definition
+  (arguments
+    [
+      (identifier) @function
+      (binary_operator
+        left: (identifier) @function
+        operator: "when")
+      ; Targets the function definition for piping in the Kernel module
+      (binary_operator
+        operator: "|>"
+        right: (identifier) @variable)
+      (binary_operator
+        left: (binary_operator
+          operator: "|>"
+          right: (identifier) @variable))
+      (binary_operator
+        left: (binary_operator
+          left: (binary_operator
+            operator: "|>"
+            right: (identifier) @variable))
+        operator: "when")
+    ])
+  (#not-match? @variable "^_")
+  (#not-match? @function "^_")
+  (#any-of? @keyword.definition
+    "def" "defp" "defdelegate" "defguard" "defguardp" "defmacro" "defmacrop" "defn" "defnp"
+    "deftransform" "deftransformp"))
+
+; Module attributes
+(unary_operator
+  operator: "@" @constant
+  operand: [
+    (identifier) @constant
+    (call
+      target: (identifier) @constant)
+    (boolean) @constant
+    (nil) @constant
+  ])
+
+; Doc attributes
+(unary_operator
+  operator: "@" @comment.doc
+  operand: [
+    (identifier) @_identifier @comment.doc
+    (call
+      target: (identifier) @_identifier @comment.doc)
+  ]
+  (#any-of? @_identifier "deprecated" "moduledoc" "typedoc" "shortdoc" "doc"))
+
+; Typespec attributes
+(unary_operator
+  operator: "@" @type.spec
+  operand: [
+    (identifier) @_identifier @type.spec
+    (call
+      target: (identifier) @_identifier @type.spec)
+  ]
+  (#any-of? @_identifier "type" "typep" "opaque" "spec" "callback" "macrocallback"))
+
+; Doc attribute arguments
+(unary_operator
+  operator: "@"
+  operand: (call
+    target: (identifier) @_identifier @comment.doc
+    (arguments
+      [
+        (string)
+        (boolean)
+        (sigil
+          (sigil_name) @_sigil_name
+          (#any-of? @_sigil_name "S" "s"))
+      ] @comment.doc))
+  (#any-of? @_identifier "deprecated" "moduledoc" "typedoc" "shortdoc" "doc"))
+
+; Typespec attribute arguments
+(unary_operator
+  operator: "@"
+  operand: (call
+    target: (identifier) @type.spec
+    (arguments
+      [
+        (identifier) @function
+        (binary_operator
+          left: (identifier) @function)
+        (binary_operator
+          left: (binary_operator
+            left: (identifier) @function)
+          operator: "when")
+      ]))
+  (#not-match? @function "^_")
+  (#any-of? @type.spec "type" "typep" "opaque" "spec" "callback" "macrocallback"))
+
+; Special identifiers
+((identifier) @constant.builtin
+  (#any-of? @constant.builtin "__MODULE__" "__DIR__" "__ENV__" "__CALLER__" "__STACKTRACE__"))
+
+; Definition keywords
+(call
+  target: (identifier) @keyword.definition
+  (#any-of? @keyword.definition
+    "def" "defp" "defdelegate" "defoverridable" "defguard" "defguardp" "defmacro" "defmacrop"
+    "defstruct" "defexception" "defrecord" "defrecordp" "defmodule" "defprotocol" "defimpl" "defn"
+    "defnp" "deftransform" "deftransformp"))
+
+; Reserved definition keyword
+"fn" @keyword.definition
+
+; Module import keywords
+(call
+  target: (identifier) @keyword.import
+  (#any-of? @keyword.import "alias" "import" "require" "use"))
+
+; Control flow keywords
+(call
+  target: (identifier) @keyword.control.conditional
+  (#any-of? @keyword.control.conditional "case" "cond" "if" "receive" "unless" "with"))
+
+; Reserved control flow keywords
+[
+  "after"
+  "else"
+] @keyword.control.conditional
+
+; List comprehension keyword
+(call
+  target: (identifier) @keyword.control.repeat
+  (#eq? @keyword.control.repeat "for"))
+
+; Exception handling keywords
+(call
+  target: (identifier) @keyword.exception
+  (#any-of? @keyword.exception "raise" "reraise" "throw" "try"))
+
+; Reserved exception handling keywords
+[
+  "catch"
+  "rescue"
+] @keyword.exception
+
+; Metaprogramming keywords
+(call
+  target: (identifier) @keyword
+  (#any-of? @keyword "quote" "super" "unquote" "unquote_splicing"))
+
+; Operator keywords
+[
+  "and"
+  "in"
+  "not"
+  "not in"
+  "or"
+  "when"
+] @keyword.operator
+
+; Do-end block keywords
+[
+  "do"
+  "end"
+] @keyword

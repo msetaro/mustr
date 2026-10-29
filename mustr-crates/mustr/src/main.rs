@@ -565,4 +565,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     worktree_trust::init(cx);
     // The rail's four areas:
     review_sections::init(cx);
+    // Syntax highlighting for the languages Zed gets from extensions:
+    mustr_languages::init(&app_state.languages);
 }
