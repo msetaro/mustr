@@ -6,6 +6,11 @@
 //! rail plus the tree. While a thread is active, or after the rail's Agents button, it shows the
 //! threads instead. Elsewhere it narrows to just the rail.
 //!
+//! The sidebar takes at most a third of the window by default, and a window too narrow for it and
+//! the content next to it (a half-screen window at mustr's default size) shows reviews and threads
+//! with the rail alone. The rail's Agents button shows or hides the threads in a thread, and its
+//! Pull requests button the file tree in a review.
+//!
 //! Other parts of mustr add their own rail buttons with [`register_rail_entry`].
 
 use crate::{home::HomeView, navigation};
@@ -26,8 +31,49 @@ use workspace::{
 };
 use zed_actions::OpenSettingsFile;
 
-/// The tree's or the threads' width, next to the rail, at mustr's design size (`scaled`).
+/// The tree's or the threads' width, next to the rail, at mustr's design size (`scaled`), in a
+/// window wide enough for it.
 const DEFAULT_TREE_WIDTH: Pixels = px(280.);
+
+/// The narrowest the tree or the threads get by default, at mustr's design size.
+const MIN_TREE_WIDTH: Pixels = px(150.);
+
+/// The share of the window the panel takes by default, with a sidebar.
+const SIDEBAR_SHARE: f32 = 1. / 3.;
+
+/// The room the content next to the panel keeps, at mustr's design size. A window too narrow for
+/// the rail, the narrowest sidebar, and this shows reviews and threads without their sidebar.
+const MIN_CONTENT_WIDTH: Pixels = px(360.);
+
+/// The panel's width with a sidebar, by default, in a window `window_width` wide, at `rem_size`:
+/// a third of the window, between the narrowest and the widest sidebar.
+fn default_width(window_width: Pixels, rem_size: Pixels) -> Pixels {
+    let scaled = |length: Pixels| tokens::scaled(length).to_pixels(rem_size);
+    let rail = scaled(tokens::RAIL_WIDTH);
+    let sidebar = (window_width * SIDEBAR_SHARE - rail)
+        .min(scaled(DEFAULT_TREE_WIDTH))
+        .max(scaled(MIN_TREE_WIDTH));
+    rail + sidebar
+}
+
+/// The widest the panel gets with a sidebar in a window `window_width` wide: what leaves the
+/// content [`MIN_CONTENT_WIDTH`], but never less than the narrowest sidebar.
+fn max_width(window_width: Pixels, rem_size: Pixels) -> Pixels {
+    let scaled = |length: Pixels| tokens::scaled(length).to_pixels(rem_size);
+    (window_width - scaled(MIN_CONTENT_WIDTH)).max(scaled(tokens::RAIL_WIDTH + MIN_TREE_WIDTH))
+}
+
+/// A rem at the user's `ui_font_size`, which a window uses only from its first frame on.
+fn rem_size(cx: &App) -> Pixels {
+    ThemeSettings::get_global(cx).ui_font_size(cx)
+}
+
+/// Whether a window `window_width` wide has room for a sidebar and the content next to it.
+fn has_room_for_sidebar(window_width: Pixels, rem_size: Pixels) -> bool {
+    window_width
+        >= tokens::scaled(tokens::RAIL_WIDTH + MIN_TREE_WIDTH + MIN_CONTENT_WIDTH)
+            .to_pixels(rem_size)
+}
 
 /// A rail button added with [`register_rail_entry`].
 struct RailEntry {
@@ -91,11 +137,21 @@ pub struct NavPanel {
     /// Whether the threads show while neither a review nor a thread is active (the rail's Agents
     /// button toggles it).
     threads_open: bool,
+    /// Whether the window has room for a sidebar next to a review or a thread, which then show
+    /// theirs unless the user hid it.
+    roomy: bool,
+    /// Whether the user showed or hid the threads next to a thread (the Agents button) and the
+    /// tree next to a review (the Pull requests button), until the window's room changes.
+    thread_sidebar: Option<bool>,
+    review_sidebar: Option<bool>,
     /// What the panel was last sized for.
     sized_for: Option<Sidebar>,
     /// The panel's width with each sidebar, restored when that sidebar shows again.
     file_tree_width: Option<Pixels>,
     threads_width: Option<Pixels>,
+    /// The width the panel last chose for itself, which isn't remembered as the user's: a
+    /// sidebar sized for a narrow window gets its default again in a wider one.
+    chosen_width: Option<Pixels>,
     /// The `ui_font_size` the panel was sized at. Zooming scales its widths by as much as the
     /// font size changes, as it does the rail.
     sized_at_font_size: Pixels,
@@ -127,9 +183,12 @@ impl NavPanel {
                 }
             },
         );
-        let zoom = cx.observe_global_in::<SettingsStore>(window, |this, _, cx| {
-            this.ui_font_size_changed(cx)
+        let zoom = cx.observe_global_in::<SettingsStore>(window, |this, window, cx| {
+            this.ui_font_size_changed(cx);
+            this.window_resized(window, cx);
         });
+        let resize =
+            cx.observe_window_bounds(window, |this, window, cx| this.window_resized(window, cx));
         Self {
             focus_handle: cx.focus_handle(),
             workspace: workspace.downgrade(),
@@ -138,11 +197,15 @@ impl NavPanel {
             destination: Destination::Other,
             active_rail_entry: None,
             threads_open: false,
+            roomy: has_room_for_sidebar(window.viewport_size().width, rem_size(cx)),
+            thread_sidebar: None,
+            review_sidebar: None,
             sized_for: None,
             file_tree_width: None,
             threads_width: None,
+            chosen_width: None,
             sized_at_font_size: ThemeSettings::get_global(cx).ui_font_size(cx),
-            _subscriptions: vec![subscription, reveal, zoom],
+            _subscriptions: vec![subscription, reveal, zoom, resize],
         }
     }
 
@@ -179,10 +242,57 @@ impl NavPanel {
 
     fn sidebar(&self) -> Sidebar {
         match self.destination {
-            Destination::Review => Sidebar::FileTree,
-            Destination::Thread => Sidebar::Threads,
+            Destination::Review if self.review_sidebar.unwrap_or(self.roomy) => Sidebar::FileTree,
+            Destination::Thread if self.thread_sidebar.unwrap_or(self.roomy) => Sidebar::Threads,
+            Destination::Review | Destination::Thread => Sidebar::None,
             _ if self.threads_open => Sidebar::Threads,
             _ => Sidebar::None,
+        }
+    }
+
+    /// Hides the sidebars of reviews and threads in a window too narrow for them, and shows them
+    /// again when it's wide enough. A sidebar wider than the window has room for narrows.
+    fn window_resized(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (window_width, rem_size) = (window.viewport_size().width, rem_size(cx));
+        let roomy = has_room_for_sidebar(window_width, rem_size);
+        let Some(left_dock) = self
+            .workspace
+            .read_with(cx, |workspace, _| workspace.left_dock().clone())
+            .ok()
+        else {
+            return;
+        };
+        if roomy != self.roomy {
+            self.roomy = roomy;
+            self.thread_sidebar = None;
+            self.review_sidebar = None;
+            cx.notify();
+            self.update_size(&left_dock, window, cx);
+        }
+        if self.sidebar() == Sidebar::None {
+            return;
+        }
+        // A width the panel chose follows the window; one the user chose only narrows.
+        let panel = cx.entity();
+        let max_width = max_width(window_width, rem_size);
+        let Some(width) = left_dock
+            .read(cx)
+            .stored_panel_size_state(&panel)
+            .and_then(|size_state| size_state.size)
+        else {
+            return;
+        };
+        let chosen = Some(width) == self.chosen_width;
+        let new_width = if chosen {
+            self.default_size(window, cx).min(max_width)
+        } else {
+            width.min(max_width)
+        };
+        if new_width != width {
+            if chosen {
+                self.chosen_width = Some(new_width);
+            }
+            cx.defer(move |cx| Self::set_width(&panel, &left_dock, new_width, cx));
         }
     }
 
@@ -200,22 +310,27 @@ impl NavPanel {
         let current_width = left_dock
             .read(cx)
             .stored_panel_size_state(&panel)
-            .and_then(|size_state| size_state.size);
+            .and_then(|size_state| size_state.size)
+            .filter(|width| Some(*width) != self.chosen_width);
         match self.sized_for {
             Some(Sidebar::FileTree) => self.file_tree_width = current_width,
             Some(Sidebar::Threads) => self.threads_width = current_width,
             Some(Sidebar::None) | None => {}
         }
+        let max_width = max_width(window.viewport_size().width, rem_size(cx));
         let width = match sidebar {
             Sidebar::FileTree => self
                 .file_tree_width
-                .unwrap_or_else(|| self.default_size(window, cx)),
+                .unwrap_or_else(|| self.default_size(window, cx))
+                .min(max_width),
             Sidebar::Threads => self
                 .threads_width
-                .unwrap_or_else(|| self.default_size(window, cx)),
+                .unwrap_or_else(|| self.default_size(window, cx))
+                .min(max_width),
             Sidebar::None => tokens::scaled_pixels(tokens::RAIL_WIDTH, cx),
         };
         self.sized_for = Some(sidebar);
+        self.chosen_width = Some(width);
         Self::set_width(&panel, left_dock, width, cx);
     }
 
@@ -247,6 +362,7 @@ impl NavPanel {
         self.sized_at_font_size = font_size;
         self.file_tree_width = self.file_tree_width.map(|width| width * factor);
         self.threads_width = self.threads_width.map(|width| width * factor);
+        self.chosen_width = self.chosen_width.map(|width| width * factor);
         let Some(sidebar) = self.sized_for else {
             return;
         };
@@ -274,10 +390,12 @@ impl NavPanel {
 
     /// The rail's Agents button: shows or hides the threads next to the rail.
     fn toggle_threads(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let shown = self.sidebar() == Sidebar::Threads;
         if self.destination == Destination::Thread {
-            return;
+            self.thread_sidebar = Some(!shown);
+        } else {
+            self.threads_open = !self.threads_open;
         }
-        self.threads_open = !self.threads_open;
         cx.notify();
         let Some(left_dock) = self
             .workspace
@@ -348,7 +466,11 @@ impl NavPanel {
             .child(
                 RailButton::new("rail-pull-requests", MustrIcon::PullRequest.icon())
                     .active(self.destination == Destination::Review)
-                    .tooltip("Pull requests: the last one you reviewed")
+                    .tooltip(match (self.destination, self.sidebar()) {
+                        (Destination::Review, Sidebar::FileTree) => "Hide the files",
+                        (Destination::Review, _) => "Show the files",
+                        _ => "Pull requests: the last one you reviewed",
+                    })
                     .on_click(on_click(Self::show_latest_review)),
             )
             .child(
@@ -398,8 +520,20 @@ impl NavPanel {
     }
 
     /// Activates the review the file tree shows (the last one that was active), or goes home to
-    /// pick one.
+    /// pick one. In that review already, shows or hides its file tree.
     fn show_latest_review(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.destination == Destination::Review {
+            self.review_sidebar = Some(self.sidebar() != Sidebar::FileTree);
+            cx.notify();
+            if let Some(left_dock) = self
+                .workspace
+                .read_with(cx, |workspace, _| workspace.left_dock().clone())
+                .ok()
+            {
+                self.update_size(&left_dock, window, cx);
+            }
+            return;
+        }
         let review = self.file_tree.read(cx).review();
         self.with_workspace(window, cx, |workspace, window, cx| match review {
             Some(review) => {
@@ -445,8 +579,8 @@ impl Panel for NavPanel {
 
     fn set_position(&mut self, _: DockPosition, _: &mut Window, _: &mut Context<Self>) {}
 
-    fn default_size(&self, _: &Window, cx: &App) -> Pixels {
-        tokens::scaled_pixels(tokens::RAIL_WIDTH + DEFAULT_TREE_WIDTH, cx)
+    fn default_size(&self, window: &Window, cx: &App) -> Pixels {
+        default_width(window.viewport_size().width, rem_size(cx))
     }
 
     fn starts_open(&self, _: &Window, _: &App) -> bool {
@@ -693,6 +827,8 @@ mod tests {
     #[gpui::test]
     async fn the_panel_scales_with_the_ui_font_size(cx: &mut TestAppContext) {
         let (workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;
+        // Wide enough for the widest sidebar at either size.
+        cx.simulate_resize(gpui::size(px(1920.), px(1080.)));
         set_ui_font_size(13., cx);
         let left_dock = workspace.read_with(cx, |workspace, _| workspace.left_dock().clone());
         nav_panel.update_in(cx, |nav_panel, window, cx| {
@@ -729,6 +865,131 @@ mod tests {
             nav_panel.toggle_threads(window, cx)
         });
         assert_eq!(panel_width(&workspace, &nav_panel, cx), px(500.));
+    }
+
+    fn open_thread(
+        workspace: &Entity<Workspace>,
+        nav_panel: &Entity<NavPanel>,
+        cx: &mut VisualTestContext,
+    ) {
+        let weak_workspace = workspace.downgrade();
+        nav_panel.update_in(cx, |_, window, cx| {
+            thread_chat::open_thread(
+                "thread-1".into(),
+                "Retry".into(),
+                weak_workspace,
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+    }
+
+    fn sidebar(nav_panel: &Entity<NavPanel>, cx: &mut VisualTestContext) -> Sidebar {
+        nav_panel.read_with(cx, |nav_panel, _| nav_panel.sidebar())
+    }
+
+    /// On a MacBook's screen at mustr's default size (26), the sidebar takes a third of the
+    /// window; at the design size (13), the window has room for its full width.
+    #[gpui::test]
+    async fn the_sidebar_takes_a_third_of_a_laptops_window(cx: &mut TestAppContext) {
+        let (workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;
+        set_ui_font_size(26., cx);
+        cx.simulate_resize(gpui::size(px(1512.), px(982.)));
+        cx.run_until_parked();
+        open_thread(&workspace, &nav_panel, cx);
+        assert_eq!(sidebar(&nav_panel, cx), Sidebar::Threads);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(504.));
+
+        // In a narrower window, never below the narrowest sidebar (150 at 13).
+        set_ui_font_size(13., cx);
+        cx.simulate_resize(gpui::size(px(1470.), px(956.)));
+        cx.run_until_parked();
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            // As at startup: no width yet.
+            nav_panel.threads_width = None;
+            nav_panel.sized_for = None;
+            nav_panel.update_size(&workspace.read(cx).left_dock().clone(), window, cx);
+        });
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(318.));
+    }
+
+    /// A half-screen window at 26 has no room for the threads next to a thread, so the thread
+    /// shows with the rail alone, and the Agents button shows the threads, as narrow as they get.
+    /// A wider window brings them back by themselves.
+    #[gpui::test]
+    async fn narrow_windows_show_threads_without_the_sidebar(cx: &mut TestAppContext) {
+        let (workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;
+        set_ui_font_size(26., cx);
+        cx.simulate_resize(gpui::size(px(756.), px(982.)));
+        cx.run_until_parked();
+        open_thread(&workspace, &nav_panel, cx);
+        assert_eq!(sidebar(&nav_panel, cx), Sidebar::None);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(76.));
+
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            nav_panel.toggle_threads(window, cx)
+        });
+        assert_eq!(sidebar(&nav_panel, cx), Sidebar::Threads);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(376.));
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            nav_panel.toggle_threads(window, cx)
+        });
+        assert_eq!(sidebar(&nav_panel, cx), Sidebar::None);
+
+        cx.simulate_resize(gpui::size(px(1512.), px(982.)));
+        cx.run_until_parked();
+        assert_eq!(sidebar(&nav_panel, cx), Sidebar::Threads);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(504.));
+
+        // In a wide window, the Agents button hides them too.
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            nav_panel.toggle_threads(window, cx)
+        });
+        assert_eq!(sidebar(&nav_panel, cx), Sidebar::None);
+    }
+
+    /// A sidebar the window no longer has room for narrows, so the content keeps its room.
+    #[gpui::test]
+    async fn a_narrower_window_narrows_the_sidebar(cx: &mut TestAppContext) {
+        let (workspace, nav_panel, cx) = workspace_with_nav_panel(cx).await;
+        set_ui_font_size(26., cx);
+        cx.simulate_resize(gpui::size(px(1512.), px(982.)));
+        cx.run_until_parked();
+        nav_panel.update_in(cx, |nav_panel, window, cx| {
+            nav_panel.toggle_threads(window, cx)
+        });
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(504.));
+
+        // Home's threads stay, as narrow as they get.
+        cx.simulate_resize(gpui::size(px(1000.), px(982.)));
+        cx.run_until_parked();
+        assert_eq!(sidebar(&nav_panel, cx), Sidebar::Threads);
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(376.));
+
+        // A wider window widens them again.
+        cx.simulate_resize(gpui::size(px(1512.), px(982.)));
+        cx.run_until_parked();
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(504.));
+
+        // A width the user dragged only narrows.
+        let left_dock = workspace.read_with(cx, |workspace, _| workspace.left_dock().clone());
+        left_dock.update(cx, |dock, cx| {
+            dock.set_panel_size_state(
+                &nav_panel,
+                PanelSizeState {
+                    size: Some(px(600.)),
+                    flex: None,
+                },
+                cx,
+            )
+        });
+        cx.simulate_resize(gpui::size(px(1200.), px(982.)));
+        cx.run_until_parked();
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(480.));
+        cx.simulate_resize(gpui::size(px(1512.), px(982.)));
+        cx.run_until_parked();
+        assert_eq!(panel_width(&workspace, &nav_panel, cx), px(480.));
     }
 
     #[gpui::test]
