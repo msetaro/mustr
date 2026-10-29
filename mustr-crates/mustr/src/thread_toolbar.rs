@@ -27,6 +27,7 @@ use crate::{
         BranchPickerDelegate, ControlsParts, ControlsPlacement, Editors, GitProgressRow, MenuSlot,
         ThreadGit, ThreadGitControls, editor_label, menu_position,
     },
+    thread_handoff::MergeBack,
 };
 use anyhow::{Context as _, Result, anyhow};
 use editor::Editor;
@@ -64,8 +65,8 @@ use thread_chat::{
     ThreadShells, ThreadView,
 };
 use ui::{
-    Color, ContextMenu, Icon, IconButton, IconName, IconSize, Label, LabelCommon as _, LabelSize,
-    Tooltip, prelude::*,
+    Color, ContextMenu, ContextMenuEntry, Icon, IconButton, IconName, IconSize, Label,
+    LabelCommon as _, LabelSize, Tooltip, prelude::*,
 };
 use workspace::{
     ItemHandle, ModalView, Toast, ToolbarItemEvent, ToolbarItemLocation, ToolbarItemView,
@@ -927,6 +928,8 @@ pub struct ThreadToolbar {
     overflow: OverflowRow,
     /// The items that didn't fit when it was last drawn, which its "…" menu offers.
     hidden: Vec<ToolbarItem>,
+    /// While a merge back is being sent.
+    merging: bool,
     _view: Option<Subscription>,
     _activation: Subscription,
 }
@@ -951,6 +954,7 @@ impl ThreadToolbar {
             location: ToolbarItemLocation::Hidden,
             overflow: OverflowRow::new(),
             hidden: Vec::new(),
+            merging: false,
             _view: None,
             _activation: activation,
         }
@@ -1052,6 +1056,52 @@ impl ThreadToolbar {
         }
         self.location = ToolbarItemLocation::PrimaryLeft;
         self.location
+    }
+
+    /// What merging the thread back would do, when it's a fork (`thread_handoff.rs`).
+    fn merge_back(&self, thread: &ToolbarThread, cx: &mut App) -> Option<MergeBack> {
+        let shells = ThreadShells::global(cx);
+        let view = self.view.as_ref().and_then(WeakEntity::upgrade);
+        let state = view.as_ref().and_then(|view| view.read(cx).thread_state());
+        MergeBack::of_thread(&thread.thread_id, state, shells.read(cx))
+    }
+
+    fn run_merge_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(merge) = self
+            .thread
+            .as_ref()
+            .and_then(|thread| self.merge_back(thread, cx))
+        else {
+            return;
+        };
+        if self.merging || merge.run_id.is_none() {
+            return;
+        }
+        self.merging = true;
+        cx.notify();
+        let task = merge.run(self.workspace.clone(), window, cx);
+        cx.spawn(async move |this, cx| {
+            task.await;
+            this.update(cx, |this, cx| {
+                this.merging = false;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn render_merge_back(&self, merge: &MergeBack, cx: &mut Context<Self>) -> AnyElement {
+        let label = if self.merging {
+            "Merging back…".into()
+        } else {
+            merge.label()
+        };
+        TextButton::new("thread-merge-back", label)
+            .disabled(self.merging || merge.run_id.is_none())
+            .tooltip(merge.tooltip())
+            .on_click(cx.listener(|this, _, window, cx| this.run_merge_back(window, cx)))
+            .into_any_element()
     }
 
     fn open_branch_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1181,7 +1231,8 @@ impl ThreadToolbar {
         };
         let thread_id = thread.thread_id.clone();
         let git = thread.git.clone();
-        let entries = self.overflow_entries(cx);
+        let merge = self.merge_back(thread, cx);
+        let entries = self.overflow_entries(merge.as_ref(), cx);
         let pull_request_entries = entries
             .contains(&OverflowEntry::PullRequest)
             .then(|| self.pull_request_entries(cx))
@@ -1208,6 +1259,17 @@ impl ThreadToolbar {
                                     cx,
                                 )
                             },
+                        );
+                    }
+                    OverflowEntry::MergeBack(enabled) => {
+                        let this = this.clone();
+                        menu = menu.item(
+                            ContextMenuEntry::new("Merge back")
+                                .disabled(!enabled)
+                                .handler(move |window, cx| {
+                                    this.update(cx, |this, cx| this.run_merge_back(window, cx))
+                                        .ok();
+                                }),
                         );
                     }
                     OverflowEntry::Terminal => {
@@ -1263,7 +1325,7 @@ impl ThreadToolbar {
     }
 
     /// What the "…" menu offers for the items that didn't fit when the toolbar was last drawn.
-    fn overflow_entries(&self, cx: &App) -> Vec<OverflowEntry> {
+    fn overflow_entries(&self, merge: Option<&MergeBack>, cx: &App) -> Vec<OverflowEntry> {
         let Some(thread) = &self.thread else {
             return Vec::new();
         };
@@ -1283,6 +1345,9 @@ impl ThreadToolbar {
                 ),
                 ToolbarItem::ReviewChanges => actions.push(OverflowEntry::ReviewChanges),
                 ToolbarItem::Terminal => actions.push(OverflowEntry::Terminal),
+                ToolbarItem::MergeBack => actions.push(OverflowEntry::MergeBack(
+                    !self.merging && merge.is_some_and(|merge| merge.run_id.is_some()),
+                )),
                 ToolbarItem::OpenIn => actions.push(OverflowEntry::OpenIn),
                 ToolbarItem::LinkPullRequest => actions.push(OverflowEntry::LinkPullRequest),
                 ToolbarItem::PullRequest => actions.push(OverflowEntry::PullRequest),
@@ -1441,7 +1506,12 @@ impl ThreadToolbar {
     /// priorities: Commit ▾ and the branch always show (the branch shrinks), then Review
     /// changes, the pull request, the checks, and the git status; Open in, Terminal, and Link PR
     /// go into the "…" menu first.
-    fn items(&self, thread: &ToolbarThread, cx: &App) -> Vec<(ToolbarItem, OverflowItem)> {
+    fn items(
+        &self,
+        thread: &ToolbarThread,
+        merge: Option<&MergeBack>,
+        cx: &App,
+    ) -> Vec<(ToolbarItem, OverflowItem)> {
         let status = thread.pull_request.read(cx);
         let listed = status.project_id.is_some();
         let has_pull_request = listed && status.pull_request().is_some();
@@ -1459,6 +1529,9 @@ impl ThreadToolbar {
             items.push(ToolbarItem::LinkPullRequest);
         }
         items.push(ToolbarItem::ReviewChanges);
+        if merge.is_some() {
+            items.push(ToolbarItem::MergeBack);
+        }
         items.push(ToolbarItem::Terminal);
         if git.checkout().is_some() {
             items.push(ToolbarItem::OpenIn);
@@ -1496,6 +1569,7 @@ enum ToolbarItem {
     Checks,
     LinkPullRequest,
     ReviewChanges,
+    MergeBack,
     Terminal,
     OpenIn,
     GitAction,
@@ -1510,6 +1584,7 @@ impl ToolbarItem {
             Self::Checks => "thread-toolbar-checks",
             Self::LinkPullRequest => "thread-toolbar-link-pull-request",
             Self::ReviewChanges => "thread-toolbar-review-changes",
+            Self::MergeBack => "thread-toolbar-merge-back",
             Self::Terminal => "thread-toolbar-terminal",
             Self::OpenIn => "thread-toolbar-open-in",
             Self::GitAction => "thread-toolbar-git-action",
@@ -1520,7 +1595,7 @@ impl ToolbarItem {
     fn is_action(self) -> bool {
         matches!(
             self,
-            Self::ReviewChanges | Self::Terminal | Self::OpenIn | Self::GitAction
+            Self::ReviewChanges | Self::MergeBack | Self::Terminal | Self::OpenIn | Self::GitAction
         )
     }
 
@@ -1528,6 +1603,7 @@ impl ToolbarItem {
         match self {
             Self::Branch | Self::GitAction => overflow::ALWAYS,
             Self::ReviewChanges => 90,
+            Self::MergeBack => 70,
             Self::PullRequest => 60,
             Self::Checks => 50,
             Self::GitSummary => 40,
@@ -1544,6 +1620,8 @@ enum OverflowEntry {
     /// A state, such as the git status or the checks, as plain text.
     Text(SharedString),
     ReviewChanges,
+    /// Merge back, and whether it can run now.
+    MergeBack(bool),
     Terminal,
     /// Open in each of T3's editors.
     OpenIn,
@@ -1644,7 +1722,8 @@ impl Render for ThreadToolbar {
         else {
             return div().into_any_element();
         };
-        let items = self.items(thread, cx);
+        let merge = self.merge_back(thread, cx);
+        let items = self.items(thread, merge.as_ref(), cx);
         let rem_size = window.rem_size();
         let gap = scaled(ITEM_GAP);
         let visible = self.overflow.visible(
@@ -1696,6 +1775,10 @@ impl Render for ThreadToolbar {
                         })
                         .into_any_element()
                 }
+                ToolbarItem::MergeBack => match &merge {
+                    Some(merge) => self.render_merge_back(merge, cx),
+                    None => div().into_any_element(),
+                },
                 ToolbarItem::Terminal => {
                     let thread_id = thread_id.clone();
                     TextButton::new("thread-terminal", "Terminal")
