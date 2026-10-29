@@ -497,3 +497,80 @@ async fn servers_without_inline_context_get_the_attachments_alone(cx: &mut TestA
     assert_eq!(command.get("context"), None);
     assert_eq!(command["attachments"].as_array().map(Vec::len), Some(2));
 }
+
+// The prompt stash.
+
+#[gpui::test]
+async fn mod_s_stashes_the_prompt_and_brings_it_back(cx: &mut TestAppContext) {
+    let inner = FakeBackend::with_thread(finished_thread(), 10);
+    inner.raw_responses.lock().push(minted("attachment-1"));
+    let config = server_config(
+        "0.1.3",
+        json!({ "attachmentUploads": true, "fileAttachments": { "maxUploadBytes": 1048576 } }),
+    );
+    let (view, cx) = open_view(with_config(&inner, config), Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(900.)));
+    load_config(&view, cx);
+    let bindings = crate::key_bindings();
+    let stash = bindings
+        .iter()
+        .find(|binding| binding.action().name() == "thread_chat::StashPrompt")
+        .expect("mod-s is bound");
+    assert_eq!(
+        stash.keystrokes()[0].unparse(),
+        if cfg!(target_os = "macos") {
+            "cmd-s"
+        } else {
+            "ctrl-s"
+        }
+    );
+
+    type_message(&view, "Draft the migration", cx);
+    attach_notes(&view, cx);
+    cx.dispatch_action(crate::StashPrompt);
+    cx.run_until_parked();
+    assert_eq!(composer_text(&view, cx), "");
+    assert!(view.read_with(cx, |view, _| view.composer_files().is_empty()));
+    assert!(cx.debug_bounds("thread-stash").is_some());
+
+    // The only stashed prompt comes back, file and all, and goes as it would have.
+    cx.dispatch_action(crate::StashPrompt);
+    cx.run_until_parked();
+    assert_eq!(composer_text(&view, cx), "Draft the migration");
+    assert!(cx.debug_bounds("thread-stash").is_none());
+    cx.dispatch_action(SendMessage);
+    cx.run_until_parked();
+    let command = sent(&inner).remove(0);
+    assert_eq!(command["text"], "Draft the migration");
+    assert_eq!(command["attachments"][0]["id"], "attachment-1");
+}
+
+#[gpui::test]
+async fn with_several_stashed_mod_s_shows_the_stash(cx: &mut TestAppContext) {
+    let backend = FakeBackend::with_thread(finished_thread(), 10);
+    let (view, cx) = open_view(backend, Some(THREAD), cx);
+    cx.simulate_resize(gpui::size(gpui::px(1000.), gpui::px(900.)));
+    for draft in ["First idea", "Second idea"] {
+        type_message(&view, draft, cx);
+        cx.dispatch_action(crate::StashPrompt);
+        cx.run_until_parked();
+    }
+    cx.dispatch_action(crate::StashPrompt);
+    cx.run_until_parked();
+    // Newest first.
+    assert!(cx.debug_bounds("thread-stash-list").is_some());
+    let older = cx
+        .debug_bounds("thread-stashed-1")
+        .expect("both are listed");
+    cx.simulate_click(older.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(composer_text(&view, cx), "First idea");
+    assert!(cx.debug_bounds("thread-stash-list").is_none());
+    // Something typed stays, with the stashed prompt after it.
+    type_message(&view, "Also", cx);
+    view.update_in(cx, |view, window, cx| {
+        let id = crate::stash::PromptStash::get(cx).entries[0].id.clone();
+        view.restore_stashed(&id, window, cx)
+    });
+    assert_eq!(composer_text(&view, cx), "Also\n\nSecond idea");
+}

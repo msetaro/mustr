@@ -825,6 +825,21 @@ impl Images {
             .collect()
     }
 
+    /// Puts back attachments that were up, as the prompt stash does (`stash.rs`), with keys
+    /// of their own.
+    pub(crate) fn restore(&mut self, images: Vec<ComposerImage>, files: Vec<ComposerFile>) {
+        for mut image in images {
+            self.next_key += 1;
+            image.key = self.next_key;
+            self.composer.push(image);
+        }
+        for mut file in files {
+            self.next_key += 1;
+            file.key = self.next_key;
+            self.files.push(file);
+        }
+    }
+
     /// Forgets the attachments a message took, without deleting them from T3.
     pub(crate) fn clear_sent(&mut self, keys: &[u64]) {
         self.composer.retain(|image| !keys.contains(&image.key));

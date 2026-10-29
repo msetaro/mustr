@@ -114,6 +114,8 @@ pub struct ComposerState {
     pub(crate) quote: crate::quote::QuoteState,
     /// The composer's answers to the agent's questions (`answers.rs`).
     pub(crate) answering: crate::answers::AnswerState,
+    /// Whether the prompt stash's list shows (`stash.rs`).
+    pub(crate) stash: crate::stash::StashState,
     _save_draft: Option<gpui::Task<()>>,
 }
 
@@ -2445,6 +2447,7 @@ impl ThreadView {
                                 ),
                         )
                     })
+                    .children(self.render_stash(cx))
                     .children(self.render_composer_menu(cx))
                     .child(
                         v_flex()
@@ -2455,6 +2458,7 @@ impl ThreadView {
                             .on_action(cx.listener(Self::on_steer))
                             .on_action(cx.listener(Self::on_stop))
                             .on_action(cx.listener(Self::on_paste_as_text))
+                            .on_action(cx.listener(Self::on_stash_prompt))
                             .capture_action(cx.listener(Self::on_paste))
                             .capture_action(cx.listener(Self::on_move_up))
                             .capture_action(cx.listener(Self::on_move_down))

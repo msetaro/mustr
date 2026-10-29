@@ -1278,7 +1278,7 @@ impl ComposerMenu {
         self.listing = None;
     }
 
-    fn remember_record(&mut self, record: Value) {
+    pub(crate) fn remember_record(&mut self, record: Value) {
         let Some(context_id) = record["contextId"].as_str().map(str::to_string) else {
             return;
         };

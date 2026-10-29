@@ -71,6 +71,8 @@ mod answers;
 mod file_links;
 pub use find_bar::open_thread_with_find;
 mod quote;
+mod stash;
+pub use stash::StashPrompt;
 
 #[cfg(test)]
 mod tests;
@@ -193,6 +195,8 @@ pub fn key_bindings() -> Vec<gpui::KeyBinding> {
         KeyBinding::new("secondary-z", UndoThreadAction, Some("ThreadView")),
         KeyBinding::new("secondary-z", UndoThreadAction, Some("ThreadsSidebar")),
         // WP14, agent setup and T3's settings:
+        // WP15, timeline and composer: T3's `mod+s` stashes the prompt, or brings it back.
+        KeyBinding::new("secondary-s", StashPrompt, composer),
     ]
 }
 
