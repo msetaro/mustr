@@ -5,8 +5,8 @@
 //!
 //! - **The servers:** this computer's T3 Code (the installed engine), mustr's own engine, and the
 //!   servers the user saved by name and URL, kept in `servers.json` in mustr's config directory.
-//! - **Switching:** the title bar's connection chip opens a menu of them; picking one connects to
-//!   it (`T3Connection::switch_to`) and remembers it for the next launch, unless a flag, an
+//! - **Switching:** Settings › Connection lists them; picking one connects to it
+//!   (`T3Connection::switch_to`) and remembers it for the next launch, unless a flag, an
 //!   environment variable, or `"t3": {"mode"}` in the settings picks the engine.
 //! - **Credentials:** each server keeps its own token, stored under its URL (the keychain, or
 //!   `MUSTR_CREDENTIALS_FILE`). A saved server is paired by pasting a credential on Home, as
@@ -31,7 +31,7 @@ use http_client::Url;
 use mustr_ui::{ButtonStyle, TextButton, palette, tokens, tokens::scaled};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use ui::{Color, ContextMenu, IconPosition, Label, LabelCommon as _, LabelSize, prelude::*};
+use ui::{Color, Label, LabelCommon as _, LabelSize, prelude::*};
 use util::ResultExt as _;
 use workspace::{ModalView, Workspace};
 
@@ -290,7 +290,7 @@ pub fn remove_server(url: &str, cx: &mut App) {
     }
 }
 
-/// The name the chip and Home give the server in use: its saved name, or `None` for the
+/// The name Home and Settings give the server in use: its saved name, or `None` for the
 /// built-in engines and unsaved URLs.
 pub fn saved_name(cx: &App) -> Option<String> {
     let ServerTarget::Url { url } = T3Connection::try_global(cx)?.read(cx).target() else {
@@ -319,68 +319,6 @@ pub fn open_dialog(workspace: &mut Workspace, window: &mut Window, cx: &mut Cont
     workspace.toggle_modal(window, cx, |window, cx| {
         ServersDialog::new(handle, window, cx)
     });
-}
-
-/// The connection chip's menu: the servers, with the one in use checked, then managing them and
-/// the connection's details on Home.
-pub fn server_menu(
-    workspace: WeakEntity<Workspace>,
-    window: &mut Window,
-    cx: &mut App,
-) -> Entity<ContextMenu> {
-    let current = T3Connection::global(cx).read(cx).target();
-    let saved = SavedServers::global(cx).read(cx).list.servers.clone();
-    let current_saved = saved.iter().any(|server| {
-        current
-            == ServerTarget::Url {
-                url: server.url.clone(),
-            }
-    });
-    ContextMenu::build(window, cx, move |mut menu, _, _| {
-        menu = menu.header("Servers");
-        let entry = |menu: ContextMenu, label: String, target: ServerTarget| {
-            let checked = current == target;
-            menu.toggleable_entry(label, checked, IconPosition::End, None, move |_, cx| {
-                if !checked {
-                    switch_server(target.clone(), cx);
-                }
-            })
-        };
-        menu = entry(
-            menu,
-            "This computer's T3 Code".into(),
-            ServerTarget::Installed,
-        );
-        menu = entry(menu, "mustr's own engine".into(), ServerTarget::Embedded);
-        for server in saved {
-            menu = entry(
-                menu,
-                format!("{} · {}", server.name, default_name(&server.url)),
-                ServerTarget::Url { url: server.url },
-            );
-        }
-        // An unsaved server from `--t3-server` or the settings.
-        if let ServerTarget::Url { url } = &current
-            && !current_saved
-        {
-            menu =
-                menu.toggleable_entry(default_name(url), true, IconPosition::End, None, |_, _| {});
-        }
-        let manage = workspace.clone();
-        let home = workspace.clone();
-        menu.separator()
-            .entry("Add or remove servers…", None, move |window, cx| {
-                manage
-                    .update(cx, |workspace, cx| open_dialog(workspace, window, cx))
-                    .ok();
-            })
-            .entry("Connection details", None, move |window, cx| {
-                home.update(cx, |workspace, cx| {
-                    navigation::show_home(workspace, window, cx)
-                })
-                .ok();
-            })
-    })
 }
 
 // The dialog.

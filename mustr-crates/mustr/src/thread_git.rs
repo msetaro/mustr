@@ -17,6 +17,7 @@
 //! [`ThreadGitControls`] draws its Open in ▾ and Commit ▾ buttons; [`GitProgressRow`] the steps of
 //! a running action; and [`BranchPickerDelegate`] and [`GitActionDialog`] are their modals.
 
+use crate::editor_icons;
 use anyhow::{Context as _, Result, anyhow};
 use editor::Editor;
 use futures::{FutureExt as _, StreamExt as _, future::BoxFuture};
@@ -27,8 +28,8 @@ use gpui::{
     div, px, rems,
 };
 use mustr_ui::{
-    ButtonStyle, Chip, OverflowItem, OverflowRow, SplitButton, TextButton, overflow, palette,
-    tokens, tokens::scaled,
+    AppIcon, AppIconSource, ButtonStyle, IconSplitButton, OverflowItem, OverflowRow, QuietButton,
+    SplitButton, TextButton, overflow, palette, tokens, tokens::scaled,
 };
 use picker::{Picker, PickerDelegate};
 use serde_json::json;
@@ -811,7 +812,7 @@ pub fn result_pull_request(result: &GitRunStackedActionResult) -> Option<(String
 
 /// T3's editors in the order its Open in picker lists them (`EDITORS` in T3's
 /// `packages/contracts/src/editor.ts`), with their names.
-const EDITOR_ORDER: &[(&str, &str)] = &[
+pub(crate) const EDITOR_ORDER: &[(&str, &str)] = &[
     ("cursor", "Cursor"),
     ("trae", "Trae"),
     ("kiro", "Kiro"),
@@ -865,6 +866,50 @@ pub fn sorted_editors(available: &[EditorId]) -> Vec<EditorId> {
     });
     editors.dedup();
     editors
+}
+
+/// T3's editors, each with where its icon comes from, and whether it's the one Open in uses.
+pub fn editor_choices(
+    editors: &Entity<Editors>,
+    cx: &mut App,
+) -> Vec<(EditorId, Vec<AppIconSource>, bool)> {
+    let editors = editors.read(cx);
+    let preferred = editors.preferred();
+    let available = editors.available().to_vec();
+    available
+        .into_iter()
+        .map(|editor| {
+            let sources = editor_icons::editor_icon_sources(&editor, cx);
+            let checked = preferred.as_ref() == Some(&editor);
+            (editor, sources, checked)
+        })
+        .collect()
+}
+
+/// A menu's Open in entries: each editor's icon and name (`Open in <name>` when `long`, where
+/// the menu has other actions too), the one Open in uses checked.
+pub fn open_in_entries(
+    mut menu: ContextMenu,
+    editors: Vec<(EditorId, Vec<AppIconSource>, bool)>,
+    long: bool,
+    git: &Entity<ThreadGit>,
+) -> ContextMenu {
+    if editors.is_empty() {
+        return menu.label("T3 found no editors");
+    }
+    for (editor, sources, checked) in editors {
+        let git = git.clone();
+        let label = if long {
+            format!("Open in {}", editor_label(&editor))
+        } else {
+            editor_label(&editor)
+        };
+        menu = editor_icons::editor_entry(menu, sources, label, checked, move |_, cx| {
+            let editor = editor.clone();
+            git.update(cx, |git, cx| git.open_in_editor(Some(editor), cx))
+        });
+    }
+    menu
 }
 
 pub fn open_in_editor_input(cwd: &str, editor: EditorId) -> LaunchEditorInput {
@@ -1914,28 +1959,12 @@ impl ThreadGitControls {
         let git = self.git.clone();
         let editors = self
             .open_in_hidden
-            .then(|| {
-                let editors = self.editors.read(cx);
-                (editors.available().to_vec(), editors.preferred())
-            })
-            .filter(|(available, _)| !available.is_empty());
+            .then(|| editor_choices(&self.editors, cx))
+            .filter(|editors| !editors.is_empty());
         let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
             // Open in, when there was no room for it next to the button.
-            if let Some((available, preferred)) = editors {
-                for editor in available {
-                    let git = git.clone();
-                    let checked = preferred.as_ref() == Some(&editor);
-                    menu = menu.toggleable_entry(
-                        format!("Open in {}", editor_label(&editor)),
-                        checked,
-                        IconPosition::Start,
-                        None,
-                        move |_, cx| {
-                            let editor = editor.clone();
-                            git.update(cx, |git, cx| git.open_in_editor(Some(editor), cx))
-                        },
-                    );
-                }
+            if let Some(editors) = editors {
+                menu = open_in_entries(menu, editors, true, &git);
                 menu = menu.separator();
             }
             if actions.is_empty() {
@@ -1983,45 +2012,16 @@ impl ThreadGitControls {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let editors = self.editors.read(cx);
-        let available = editors.available().to_vec();
-        let preferred = editors.preferred();
+        let editors = editor_choices(&self.editors, cx);
         let git = self.git.clone();
         // mustr's own editor, when the checkout is on this machine (`edit_area.rs`).
         let here = git
             .read(cx)
             .checkout()
             .and_then(|checkout| crate::edit_area::local_folder(&checkout.cwd, cx));
-        let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
-            if let Some(path) = here {
-                menu = menu
-                    .entry("Open in mustr's editor", None, move |window, cx| {
-                        window.dispatch_action(
-                            Box::new(crate::edit_area::OpenFolderInEdit { path: path.clone() }),
-                            cx,
-                        )
-                    })
-                    .separator();
-            }
-            if available.is_empty() {
-                return menu.label("T3 found no editors");
-            }
-            for editor in available {
-                let git = git.clone();
-                let label = editor_label(&editor);
-                let checked = preferred.as_ref() == Some(&editor);
-                menu = menu.toggleable_entry(
-                    label,
-                    checked,
-                    IconPosition::Start,
-                    None,
-                    move |_, cx| {
-                        let editor = editor.clone();
-                        git.update(cx, |git, cx| git.open_in_editor(Some(editor), cx))
-                    },
-                );
-            }
-            menu
+        let menu = ContextMenu::build(window, cx, move |menu, _, _| {
+            let menu = crate::edit_area::open_in_mustr_entry(menu, here);
+            open_in_entries(menu, editors, false, &git)
         });
         self.menu
             .deploy(menu_position(event, window), menu, window, cx, |this| {
@@ -2043,9 +2043,17 @@ impl ThreadGitControls {
         };
         let git = self.git.clone();
         Some(
-            Chip::new("thread-git-notice", label)
-                .dot(color)
-                .tooltip(tooltip)
+            QuietButton::new("thread-git-notice", label)
+                .muted(true)
+                .start(
+                    div()
+                        .flex_none()
+                        .size(scaled(px(6.)))
+                        .rounded_full()
+                        .bg(color),
+                )
+                .truncate(true)
+                .tooltip(Tooltip::text(tooltip))
                 .on_click(move |_, _, cx| git.update(cx, |git, cx| git.dismiss(cx)))
                 .into_any_element(),
         )
@@ -2067,11 +2075,17 @@ impl Render for ThreadGitControls {
                 })
             })
             .or_else(|| git.busy_label().map(ToString::to_string));
-        let editors = self.editors.read(cx);
-        let preferred = editors.preferred();
-        let open_label = match &preferred {
-            Some(editor) => format!("Open in {}", editor_label(editor)),
-            None => "Open in".to_string(),
+        let preferred = self.editors.read(cx).preferred();
+        let open_icon = AppIcon::new(
+            match &preferred {
+                Some(editor) => editor_icons::editor_icon_sources(editor, cx),
+                None => vec![AppIconSource::generic()],
+            },
+            editor_icons::BUTTON_ICON_SIZE,
+        );
+        let open_tooltip: SharedString = match &preferred {
+            Some(editor) => format!("Open in {}", editor_label(editor)).into(),
+            None => "T3 found no editors".into(),
         };
         let main_disabled = quick.kind == QuickKind::Unavailable || blocked.is_some();
         let main_tooltip =
@@ -2092,16 +2106,15 @@ impl Render for ThreadGitControls {
 
         let parts = self.parts;
         let open_in = (has_checkout && parts != ControlsParts::GitAction).then(|| {
-            SplitButton::new("thread-open-in", open_label)
+            IconSplitButton::new("thread-open-in", open_icon)
                 .disabled(preferred.is_none())
-                .tooltip(
-                    preferred
-                        .as_ref()
-                        .map_or("T3 found no editors".to_string(), |_| {
-                            "Open the thread's checkout in an editor".to_string()
-                        }),
-                )
-                .menu_tooltip("Choose an editor")
+                .tooltip(move |window, cx| {
+                    Tooltip::for_action_title(
+                        open_tooltip.clone(),
+                        &crate::thread_toolbar::OpenThreadInEditor,
+                    )(window, cx)
+                })
+                .menu_tooltip(Tooltip::text("Choose an editor"))
                 .menu_open(menu_open)
                 .on_click(move |_, _, cx| git.update(cx, |git, cx| git.open_in_editor(None, cx)))
                 .on_menu_click(move |event, window, cx| {
@@ -2655,6 +2668,34 @@ impl PickerDelegate for BranchPickerDelegate {
 
     fn placeholder_text(&self, _: &mut Window, _: &mut App) -> Arc<str> {
         "Switch to a branch, or name a new one…".into()
+    }
+
+    /// The checkout's state, which the toolbar's branch shows only as a dot and a count.
+    fn render_header(&self, _: &mut Window, cx: &mut Context<Picker<Self>>) -> Option<AnyElement> {
+        let git = self.git.read(cx);
+        let status = git.status()?;
+        let branch = status.branch().unwrap_or("No branch");
+        let cwd = git.checkout().map(|checkout| checkout.cwd.clone());
+        Some(
+            v_flex()
+                .px_3()
+                .pt_2()
+                .pb_1()
+                .child(
+                    Label::new(format!("{branch} · {}", status.summary()))
+                        .size(LabelSize::Small)
+                        .color(Color::Muted),
+                )
+                .when_some(cwd, |this, cwd| {
+                    this.child(
+                        Label::new(cwd)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted)
+                            .truncate(),
+                    )
+                })
+                .into_any_element(),
+        )
     }
 
     fn no_matches_text(&self, _: &mut Window, _: &mut App) -> Option<SharedString> {

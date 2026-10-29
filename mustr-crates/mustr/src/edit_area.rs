@@ -235,6 +235,17 @@ pub fn local_folder(path: &str, cx: &App) -> Option<PathBuf> {
     (crate::worktrees::worktrees_are_local(cx) && path.is_dir()).then_some(path)
 }
 
+/// Open in's first entry, Open in mustr's editor, for a checkout on this machine (`here`).
+pub fn open_in_mustr_entry(menu: ContextMenu, here: Option<PathBuf>) -> ContextMenu {
+    let Some(path) = here else {
+        return menu;
+    };
+    menu.entry("Open in mustr's editor", None, move |window, cx| {
+        window.dispatch_action(Box::new(OpenFolderInEdit { path: path.clone() }), cx)
+    })
+    .separator()
+}
+
 /// A folder the picker offers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FolderChoice {

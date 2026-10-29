@@ -45,11 +45,11 @@ mod macos;
 mod notifications;
 // WP11, terminals, worktrees and the PR flow:
 mod local_servers;
+mod merge_back;
 mod project_scripts;
 mod pull_request_details;
 mod pull_request_guide;
 mod remote_terminal;
-mod thread_handoff;
 mod worktree_cleanup;
 // WP12, composer and timeline:
 // WP13, thread list and navigation:
@@ -78,6 +78,8 @@ mod areas;
 mod edit_area;
 mod review_page;
 mod review_sections;
+// Toolbar icons: the programs' icons in Open in.
+mod editor_icons;
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
@@ -257,7 +259,7 @@ fn main() {
         t3_engine::T3Mode::default()
     });
     let t3_server_url = t3_connection::resolve_server_url(args.t3_server, settings_text.as_deref());
-    // WP18: the server picked last in the title bar's menu, unless something above picks one.
+    // WP18: the server picked last (Settings › Connection), unless something above picks one.
     let (t3_mode, t3_server_url) = servers::remembered_target(
         args.t3_mode.as_deref(),
         server_url_given,

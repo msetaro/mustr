@@ -164,6 +164,9 @@ pub const CONTROL_RADIUS: Pixels = px(6.);
 /// Key caps.
 pub const KBD_RADIUS: Pixels = px(4.);
 pub const BORDER_WIDTH: Pixels = px(1.);
+/// How far rows in lists and menus sit inside their container's edge, so their rounded hover and
+/// selected fills stay clear of its rounded corners (see [`crate::corners`]).
+pub const LIST_INSET: Pixels = px(4.);
 
 /// The width of the icon rail.
 pub const RAIL_WIDTH: Pixels = px(38.);
