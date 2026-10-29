@@ -116,24 +116,37 @@ pub fn init(cx: &mut App) {
         center_pane.update(cx, |pane, _| pane.set_should_display_welcome_page(false));
         add_toolbar_items(workspace, &center_pane, window, cx);
         let workspace_handle = cx.entity();
+        // The rail's areas, and Edit's folder, before the panel that shows them.
+        let areas = crate::areas::ensure(workspace, window, cx);
+        crate::edit_area::register(workspace, cx);
+        let edit_folder = crate::edit_area::EditFolder::ensure(workspace, cx);
 
         // Zed adds its panels in `initialize_panels` (crates/zed/src/zed.rs); mustr's are
         // created synchronously, so dock restoration can finish right away.
-        let nav_panel = cx.new(|cx| NavPanel::new(&workspace_handle, window, cx));
+        let nav_panel =
+            cx.new(|cx| NavPanel::new(&workspace_handle, areas, edit_folder, window, cx));
+        NavPanel::register(workspace, &nav_panel);
         workspace.add_panel(nav_panel.clone(), window, cx);
         // Work packages add their dock panels here, created synchronously like the nav panel,
         // each package under its own label (`mustr-docs/PARITY.md` §3).
         // WP6, terminals and worktrees:
         crate::terminal_panel::add_panel(workspace, &workspace_handle, window, cx);
         workspace.finish_dock_restoration(cx);
-        // The window's first item may already be open.
-        let active_item = workspace.active_item(cx);
         let left_dock = workspace.left_dock().clone();
         nav_panel.update(cx, |nav_panel, cx| {
-            nav_panel.active_item_changed(active_item.as_deref(), &left_dock, window, cx)
+            nav_panel.added_to_dock(&left_dock, window, cx)
         });
-        workspace.register_action(|workspace, _: &ToggleFileTree, window, cx| {
-            workspace.toggle_panel_focus::<NavPanel>(window, cx);
+        // The review's toggle shows or hides its files.
+        let weak_nav_panel = nav_panel.downgrade();
+        workspace.register_action(move |_, _: &ToggleFileTree, window, cx| {
+            let nav_panel = weak_nav_panel.clone();
+            window.defer(cx, move |window, cx| {
+                nav_panel
+                    .update(cx, |nav_panel, cx| {
+                        nav_panel.toggle_review_files(window, cx)
+                    })
+                    .ok();
+            });
         });
         workspace.register_action(|workspace, action: &OpenThreadChat, window, cx| {
             let title = if action.title.is_empty() {
@@ -165,6 +178,8 @@ pub fn init(cx: &mut App) {
 pub struct StartupThreads {
     pub open_thread: Option<String>,
     pub new_thread: bool,
+    /// A folder to open in Edit.
+    pub edit_folder: Option<std::path::PathBuf>,
 }
 
 impl Global for StartupThreads {}
@@ -196,6 +211,9 @@ pub fn open_home_window(app_state: Arc<AppState>, cx: &mut App) {
             if startup_threads.new_thread {
                 thread_chat::ThreadView::open_new(workspace, window, cx);
             }
+            if let Some(folder) = startup_threads.edit_folder {
+                crate::edit_area::open_folder(folder, workspace, window, cx);
+            }
         },
     );
     cx.spawn(async move |cx| {
@@ -207,6 +225,8 @@ pub fn open_home_window(app_state: Arc<AppState>, cx: &mut App) {
         }
         // Zed has restored the window's docks.
         cx.update(crate::terminal_panel::finish_launch);
+        // The areas learn what the window opened while it was being made.
+        cx.update(crate::areas::Areas::sync_all);
     })
     .detach();
 }

@@ -104,13 +104,13 @@ pub struct AgentWork {
     pub files_changed: Option<usize>,
 }
 
-/// What the shell snapshot gives the home view.
-struct ThreadLists {
-    all: Vec<AgentThread>,
-    work: Vec<AgentWork>,
+/// What the shell snapshot gives the home view (and the Review page's Code list).
+pub(crate) struct ThreadLists {
+    pub(crate) all: Vec<AgentThread>,
+    pub(crate) work: Vec<AgentWork>,
 }
 
-/// mustr's home: the T3 connection, the inbox (pull requests waiting on the reviewer and agent
+/// The Inbox, mustr's home: the T3 connection, the inbox (pull requests waiting on the reviewer and agent
 /// threads with changes ready to review), and recent agent threads.
 pub struct HomeView {
     focus_handle: FocusHandle,
@@ -1276,7 +1276,7 @@ impl HomeView {
 /// The threads of T3's shell snapshot: the recent ones, and those with work to review. A
 /// candidate whose worktree is on this machine is kept only if git finds changes in it; one
 /// whose worktree is gone from a T3 on this machine has nothing left to diff.
-async fn load_threads(session: &T3Session) -> anyhow::Result<ThreadLists> {
+pub(crate) async fn load_threads(session: &T3Session) -> anyhow::Result<ThreadLists> {
     let snapshot = session.shell_snapshot().await?;
     let all = agent_threads(&snapshot);
     let reviewed = ReviewedMarks::new(&agent_reviews_dir()).load();
@@ -1697,7 +1697,7 @@ impl Item for HomeView {
     type Event = ItemEvent;
 
     fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
-        "Home".into()
+        "Inbox".into()
     }
 
     fn show_toolbar(&self) -> bool {

@@ -13,7 +13,7 @@ mod editor;
 #[cfg(test)]
 mod tests;
 
-use crate::{nav_panel::register_rail_entry, t3_connection::T3Connection};
+use crate::t3_connection::T3Connection;
 use draft::{
     Draft, delivery_label, mask_webhook_address, next_run_label, relative, schedule_label,
 };
@@ -66,16 +66,8 @@ gpui::actions!(
     ]
 );
 
-/// Adds the page's rail entry and action. Call once at startup, before windows open.
+/// Adds the page's action (Agents' sidebar links to the page). Call once at startup, before windows open.
 pub fn init(cx: &mut App) {
-    register_rail_entry(
-        "schedules",
-        Icon::new(IconName::Clock),
-        "Scheduled tasks",
-        OpenScheduledTasks,
-        |item| item.downcast::<SchedulesView>().is_some(),
-        cx,
-    );
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace.register_action(|workspace, _: &OpenScheduledTasks, window, cx| {
             show(workspace, window, cx)

@@ -1522,6 +1522,10 @@ impl ThreadToolbar {
             .contains(&OverflowEntry::OpenIn)
             .then(|| editor_choices(&Editors::global(cx), cx))
             .unwrap_or_default();
+        let here_folder = git
+            .read(cx)
+            .checkout()
+            .and_then(|checkout| crate::edit_area::local_folder(&checkout.cwd, cx));
         let this = cx.weak_entity();
         let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
             let mut pull_request_entries = pull_request_entries;
@@ -1584,6 +1588,7 @@ impl ThreadToolbar {
                         );
                     }
                     OverflowEntry::OpenIn => {
+                        menu = crate::edit_area::open_in_mustr_entry(menu, here_folder.clone());
                         menu =
                             open_in_entries(menu, editors.take().unwrap_or_default(), true, &git);
                     }

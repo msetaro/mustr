@@ -2014,7 +2014,13 @@ impl ThreadGitControls {
     ) {
         let editors = editor_choices(&self.editors, cx);
         let git = self.git.clone();
+        // mustr's own editor, when the checkout is on this machine (`edit_area.rs`).
+        let here = git
+            .read(cx)
+            .checkout()
+            .and_then(|checkout| crate::edit_area::local_folder(&checkout.cwd, cx));
         let menu = ContextMenu::build(window, cx, move |menu, _, _| {
+            let menu = crate::edit_area::open_in_mustr_entry(menu, here);
             open_in_entries(menu, editors, false, &git)
         });
         self.menu

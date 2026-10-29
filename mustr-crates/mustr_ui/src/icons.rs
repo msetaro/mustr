@@ -14,6 +14,8 @@ pub enum MustrIcon {
     Agent,
     /// A program, for one mustr has no icon of (Open in's fallback).
     App,
+    /// A pencil, for the rail's Edit.
+    Edit,
     Inbox,
     PullRequest,
     Settings,
@@ -21,9 +23,10 @@ pub enum MustrIcon {
 }
 
 impl MustrIcon {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Agent,
         Self::App,
+        Self::Edit,
         Self::Inbox,
         Self::PullRequest,
         Self::Settings,
@@ -34,6 +37,7 @@ impl MustrIcon {
         match self {
             Self::Agent => "icons/mustr/agent.svg",
             Self::App => "icons/mustr/app.svg",
+            Self::Edit => "icons/mustr/edit.svg",
             Self::Inbox => "icons/mustr/inbox.svg",
             Self::PullRequest => "icons/mustr/pull_request.svg",
             Self::Settings => "icons/mustr/settings.svg",
@@ -45,6 +49,7 @@ impl MustrIcon {
         match self {
             Self::Agent => include_str!("../assets/icons/agent.svg"),
             Self::App => include_str!("../assets/icons/app.svg"),
+            Self::Edit => include_str!("../assets/icons/edit.svg"),
             Self::Inbox => include_str!("../assets/icons/inbox.svg"),
             Self::PullRequest => include_str!("../assets/icons/pull_request.svg"),
             Self::Settings => include_str!("../assets/icons/settings.svg"),

@@ -193,6 +193,8 @@ pub(crate) fn load_default_keymap(cx: &mut App) {
     mustr_bindings.extend(crate::pull_request_guide::key_bindings());
     // WP18, settings, usage, accounts and servers: T3's `mod+u`.
     mustr_bindings.extend(crate::usage_page::key_bindings());
+    // The rail's four areas, and back and forward.
+    mustr_bindings.extend(crate::areas::key_bindings());
     // The app's own settings, key bindings and quit, on Zed's keys for them.
     mustr_bindings.extend(crate::window::key_bindings());
     // Zoom, which must come after Zed's keymaps (`zoom::key_bindings`):

@@ -35,10 +35,10 @@ fn status_line(cx: &App) -> String {
         }
         ConnectionStatus::Connecting(step) => format!("Connecting: {step}"),
         ConnectionStatus::NeedsPairing(_) => {
-            "This server needs pairing. Home shows how.".to_string()
+            "This server needs pairing. The Inbox shows how.".to_string()
         }
         ConnectionStatus::NeedsSetup(_) => {
-            "T3 Code needs setting up first. Home shows how.".to_string()
+            "T3 Code needs setting up first. The Inbox shows how.".to_string()
         }
         ConnectionStatus::Failed(error) => format!("Couldn't connect: {error}"),
     }

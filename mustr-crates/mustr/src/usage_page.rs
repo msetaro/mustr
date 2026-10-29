@@ -15,7 +15,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::{nav_panel::register_rail_entry, t3_connection::T3Connection};
+use crate::t3_connection::T3Connection;
 use anyhow::Result;
 use chrono::{DateTime, Datelike as _, Duration as ChronoDuration, NaiveDate, Timelike as _, Utc};
 use gpui::{
@@ -60,16 +60,8 @@ gpui::actions!(
     ]
 );
 
-/// Adds the page's rail entry, action and `mod+u`. Call once at startup, before windows open.
+/// Adds the page's action and `mod+u` (Agents' sidebar links to the page). Call once at startup, before windows open.
 pub fn init(cx: &mut App) {
-    register_rail_entry(
-        "usage",
-        Icon::new(IconName::SignalHigh),
-        "Usage",
-        OpenUsage,
-        |item| item.downcast::<UsageView>().is_some(),
-        cx,
-    );
     cx.observe_new(|workspace: &mut Workspace, _, _| {
         workspace
             .register_action(|workspace, _: &OpenUsage, window, cx| show(workspace, window, cx));

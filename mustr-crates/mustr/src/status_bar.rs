@@ -235,7 +235,7 @@ impl SyncStatus {
             let home = workspace.clone();
             menu.entry(
                 if state.on_home {
-                    "Fix it on Home"
+                    "Fix it in the Inbox"
                 } else {
                     "Connection details"
                 },

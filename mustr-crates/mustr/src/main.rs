@@ -73,6 +73,11 @@ mod updates;
 mod worktree_trust;
 // Settings in the UI: one Settings page, with T3's settings.
 mod settings_page;
+// The rail's four areas: Inbox, Edit, Review and Agents, one view at a time outside Edit.
+mod areas;
+mod edit_area;
+mod review_page;
+mod review_sections;
 // Toolbar icons: the programs' icons in Open in.
 mod editor_icons;
 
@@ -145,6 +150,11 @@ struct Args {
     #[arg(long, hide = true)]
     new_thread: bool,
 
+    /// Opens this folder in Edit at startup (for smoke tests and screenshots: Open Folder…
+    /// asks the desktop's folder picker).
+    #[arg(long, hide = true, value_name = "FOLDER")]
+    edit: Option<PathBuf>,
+
     /// Relays a Git or SSH password prompt over a Unix socket, so git doesn't
     /// need netcat.
     #[cfg(not(target_os = "windows"))]
@@ -205,6 +215,7 @@ fn main() {
     let startup_threads = window::StartupThreads {
         open_thread: args.open_thread.clone(),
         new_thread: args.new_thread,
+        edit_folder: args.edit.clone(),
     };
     let data_dir = match data_dir::init(args.user_data_dir) {
         Ok(data_dir) => data_dir,
@@ -552,4 +563,6 @@ fn init_ui(app_state: &Arc<AppState>, cx: &mut App) {
     updates::init(cx);
     // Worktree trust: T3's worktrees inherit their project's trust.
     worktree_trust::init(cx);
+    // The rail's four areas:
+    review_sections::init(cx);
 }
