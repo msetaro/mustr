@@ -351,20 +351,23 @@ From the integrated smoke test on 2026-10-29 (mustr's engine, and the user's T3 
 - **Zoom:** Zed's own command palette is 34 rems wide, so at 26 it's wider than a half-screen
   window and clipped at both sides (Zed's file). Setting `ui_font_size` alone in the settings file
   leaves code and terminals at `buffer_font_size`; the zoom keys change both.
-- **Tooltips over menus:** a button's tooltip can cover the top of the menu it opened (Run ▾, the
-  connection chip) until the pointer moves. GPUI shows a tooltip that was pending when the click
-  came.
 - **Restricted Mode in reviews:** Zed's worktree trust keeps language servers off in T3's
-  worktrees until they're trusted, and the review header's tooltip calls the dialog "Zed's trust
-  options". A default for mustr (trust T3's worktrees, or say it in mustr's words) is open.
-- **The terminal panel at launch:** when mustr quit with a thread's terminals open, the panel comes
-  back open over the first page with its "Open a thread" note. Once, right after such a launch,
-  the first `mod+j` on a thread didn't show the panel (the second did); it didn't happen again.
-- **Empty scopes in an agent review:** choosing a scope with no changes (Uncommitted on a clean
-  worktree) keeps the current scope and says "Couldn't load Uncommitted: … has no changes in
-  Uncommitted", where T3 shows an empty diff.
-- **Startup log lines:** views restored at launch log one "… mustr isn't connected to T3" warning
-  each before the connection is up, then load once it is.
+  worktrees until they're trusted (the review header's warning button opens the dialog). Whether
+  mustr should trust T3's worktrees by default is open.
+- **Zed's name:** what's left is in Zed's crates and rarely seen, and mustr can't change it
+  without patching them: the Node.js download error for language servers ("restart Zed to
+  retry", which goes to the log), the trust dialog's `.zed/settings.json` (where project settings
+  live, kept on purpose), `${appName}` in a window title format the user writes, and the theme
+  picker's View Theme Docs, which opens Zed's docs. mustr says Zed on purpose where it means Zed:
+  Open in Zed (the editor), the About panel's credits, and "uses Zed's format" in the settings
+  and key binding files.
+
+Fixed before v0.1.0: tooltips that covered the menu their button opened, Zed's name in the
+Restricted Mode tooltip, the command palette's "zed: …" entries and the empty pane's Welcome to
+Zed page, the terminal panel coming back over home after a restart (it now comes back only with
+its thread), empty scopes of an agent review shown as a failure to load, and the "isn't
+connected to T3" warnings logged at launch. The report that the first `mod+j` after such a
+launch didn't show the panel didn't reproduce.
 
 ### Not planned (Skip rows)
 
