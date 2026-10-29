@@ -57,8 +57,8 @@ pub use mentions::set_local_folders;
 mod tests;
 
 pub use actions::{
-    NewThreadInWorktree, OpenInEditor, OpenThreadTerminal, RemoveThreadWorktree,
-    ReviewThreadChanges,
+    AddComposerContext, ComposerContext, NewThreadInWorktree, OpenInEditor, OpenThreadTerminal,
+    RemoveThreadWorktree, ReviewThreadChanges,
 };
 pub use backend::{
     Access, AttachmentUpload, GlobalThreadBackend, ReadOnlyBackend, ThreadBackend,

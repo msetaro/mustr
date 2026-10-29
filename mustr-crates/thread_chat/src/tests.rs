@@ -1578,6 +1578,116 @@ fn cross_package_actions_build_by_name(cx: &mut TestAppContext) {
     });
 }
 
+/// T3's own samples of the records (`contracts/src/composerContext.test.ts`, T3 0.1.3).
+fn t3_terminal_record() -> Value {
+    json!({
+        "version": 1, "contextId": "ctx_1", "kind": "terminal",
+        "label": "Terminal 1 lines 509-514", "terminalId": "term-1", "terminalLabel": "Terminal 1",
+        "lineStart": 509, "lineEnd": 514, "text": "error: boom\n  at main.ts:1"
+    })
+}
+
+fn t3_review_comment_record() -> Value {
+    json!({
+        "version": 1, "contextId": "ctx_1", "kind": "review-comment",
+        "label": "ChatComposer.tsx L4118", "sectionId": "diff-1", "sectionTitle": "Changes",
+        "filePath": "apps/web/src/ChatComposer.tsx", "startIndex": 4118, "endIndex": 4118,
+        "rangeLabel": "L4118", "text": "Why is this here?", "diff": "+ const x = 1;",
+        "fenceLanguage": "diff",
+        "pullRequest": {
+            "number": 42, "title": "Improve context chips",
+            "url": "https://github.com/pingdotgg/t3code/pull/42",
+            "headBranch": "feat/context-chips", "baseBranch": "main", "state": "open",
+            "isDraft": false
+        }
+    })
+}
+
+#[gpui::test]
+fn composer_context_is_t3s_record(cx: &mut TestAppContext) {
+    use crate::actions::{
+        AddComposerContext, ComposerContext, PullRequestContext, PullRequestContextState,
+        ReviewCommentContext, TerminalContext,
+    };
+    let terminal = ComposerContext::Terminal(TerminalContext {
+        context_id: "ctx_1".into(),
+        label: "Terminal 1 lines 509-514".into(),
+        terminal_id: "term-1".into(),
+        terminal_label: "Terminal 1".into(),
+        line_start: 509,
+        line_end: 514,
+        text: "error: boom\n  at main.ts:1".into(),
+    });
+    let review_comment = ComposerContext::ReviewComment(ReviewCommentContext {
+        context_id: "ctx_1".into(),
+        label: "ChatComposer.tsx L4118".into(),
+        section_id: "diff-1".into(),
+        section_title: "Changes".into(),
+        file_path: "apps/web/src/ChatComposer.tsx".into(),
+        start_index: 4118,
+        end_index: 4118,
+        range_label: "L4118".into(),
+        text: "Why is this here?".into(),
+        diff: "+ const x = 1;".into(),
+        fence_language: Some("diff".into()),
+        pull_request: Some(PullRequestContext {
+            number: 42,
+            title: "Improve context chips".into(),
+            url: "https://github.com/pingdotgg/t3code/pull/42".into(),
+            head_branch: "feat/context-chips".into(),
+            base_branch: "main".into(),
+            state: PullRequestContextState::Open,
+            is_draft: false,
+        }),
+    });
+    assert_eq!(terminal.to_record().unwrap(), t3_terminal_record());
+    assert_eq!(
+        review_comment.to_record().unwrap(),
+        t3_review_comment_record()
+    );
+
+    // A comment on the branch rather than a pull request leaves those fields out.
+    let ComposerContext::ReviewComment(mut on_branch) = review_comment.clone() else {
+        unreachable!()
+    };
+    on_branch.fence_language = None;
+    on_branch.pull_request = None;
+    let mut expected = t3_review_comment_record();
+    let fields = expected.as_object_mut().unwrap();
+    fields.remove("fenceLanguage");
+    fields.remove("pullRequest");
+    assert_eq!(
+        ComposerContext::ReviewComment(on_branch)
+            .to_record()
+            .unwrap(),
+        expected
+    );
+
+    // Other packages dispatch it by name too, with T3's record as the context.
+    cx.update(|cx| {
+        for (record, context) in [
+            (t3_terminal_record(), terminal),
+            (t3_review_comment_record(), review_comment),
+        ] {
+            let mut fields = record;
+            fields.as_object_mut().unwrap().remove("version");
+            let action = cx
+                .build_action(
+                    "thread_chat::AddComposerContext",
+                    Some(json!({ "thread_id": THREAD, "context": fields })),
+                )
+                .unwrap();
+            assert_eq!(
+                action.as_any().downcast_ref::<AddComposerContext>(),
+                Some(&AddComposerContext {
+                    thread_id: THREAD.into(),
+                    context,
+                })
+            );
+        }
+    });
+}
+
 // The composer's images, plans, and Resume, and the timeline's images.
 mod composer_and_timeline;
 
